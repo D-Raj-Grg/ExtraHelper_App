@@ -47,10 +47,24 @@ creation stays web-only.
       issues found**, `dart format` clean, `flutter test` **2 passing** (`test/env_test.dart`).
 - [x] **Verify iOS** — built for simulator, installed and launched on iPhone 17 Pro (iOS 26):
       renders, Supabase client initialises, dark theme applied. Screenshot-verified.
-- [~] **Verify Android** — emulator (Medium Phone API 36, `emulator-5554`) up; debug APK build in
-      progress. First attempt died on **ENOSPC** (unrelated: the volume was full — a leftover
-      DrawThings sandbox container at 6.5 GB plus my abandoned 1.3 GB Flutter download).
-- [ ] Commit + push to `origin main`.
+- [x] **Verify Android** — debug APK (84 MB, arm64) built, installed and launched on a Medium Phone
+      API 36 emulator (`arm64-v8a`, Android 16): renders, Supabase client initialises, light theme.
+      Screenshot-verified, no crash in logcat.
+- [x] Commit + push to `origin main`.
+
+**Android build notes** (this took three attempts; none of it was the app code):
+- The Flutter template's wrapper wants **`gradle-8.14-all.zip` (224 MB)**, and this network stalls
+  silently on large transfers. Fetched it out-of-band with a resuming, stall-aborting transfer
+  (`curl -C - --speed-time 20 --speed-limit 2000`), verified with `unzip -t`, and placed it at
+  `~/.gradle/wrapper/dists/gradle-8.14-all/<hash>/gradle-8.14-all.zip`. Once unpacked, the actual
+  build takes **33 s**.
+- **Build one ABI.** The default builds `android-arm`, `android-arm64` and `android-x64`, and the
+  tree hit **1.7 GB**. `--target-platform android-arm64` is all an Apple-silicon emulator or a
+  modern phone needs. `build/app/intermediates` alone is ~970 MB and is safe to delete after.
+- A killed build leaves a **stale Gradle lock** (`android/.gradle/8.14/fileHashes`) that fails the
+  next run with "Cannot lock file hash cache". Fix: kill the daemons, `rm -rf android/.gradle`.
+- Both failures during this milestone were **ENOSPC**, not code. A cold three-ABI Gradle build plus
+  a booting emulator wants several GB, and this volume runs at ~99%.
 
 **Three findings worth keeping** (all cost time to establish):
 
