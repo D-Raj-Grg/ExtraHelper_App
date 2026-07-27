@@ -42,6 +42,8 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   drift_dev: ^2.34.0
   build_runner: ^2.15.1
+  flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.7
 
 flutter:
   uses-material-design: true
@@ -53,3 +55,38 @@ flutter:
     - family: Figtree
       fonts:
         - asset: assets/fonts/Figtree.ttf
+
+# --- Branding ---------------------------------------------------------------
+# The mark is the web app's own fork-and-knife (`extrahelper/public/icon.svg`),
+# re-rendered rather than re-drawn, so the two clients are recognisably one
+# product. Regenerate after changing anything in `assets/branding/`:
+#
+#   dart run flutter_launcher_icons
+#   dart run flutter_native_splash:create
+#
+flutter_launcher_icons:
+  android: true
+  ios: true
+  # Full-bleed square, no baked corners: iOS masks its own, and a rounded PNG
+  # would show its corners again inside the mask.
+  image_path: "assets/branding/icon_ios.png"
+  # The App Store rejects an icon with an alpha channel.
+  remove_alpha_ios: true
+  # Android's launcher masks the icon to whatever shape the phone uses, so the
+  # glyph sits inside the 66% safe zone on its own background layer.
+  adaptive_icon_background: "#0A0A0A"
+  adaptive_icon_foreground: "assets/branding/icon_android_foreground.png"
+
+flutter_native_splash:
+  # Light and dark both first-class (CLAUDE.md). The mark is purple on white
+  # and white on the app's tinted near-black — never a white mark on white.
+  color: "#FFFFFF"
+  image: "assets/branding/splash_light.png"
+  color_dark: "#0C090C"
+  image_dark: "assets/branding/splash_dark.png"
+  android_12:
+    # Android 12+ clips the splash icon to a 768px circle on a 1152px canvas.
+    image: "assets/branding/splash_android12_light.png"
+    icon_background_color: "#FFFFFF"
+    image_dark: "assets/branding/splash_android12_dark.png"
+    icon_background_color_dark: "#0C090C"

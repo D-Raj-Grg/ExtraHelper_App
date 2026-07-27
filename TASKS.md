@@ -386,6 +386,29 @@ launch. `permissionsProvider` answers with an empty set while the tenant is stil
 empty set reads as "loaded, and you may do nothing". Now the shell waits for the tenant too — a
 surface must never appear and then vanish.
 
+## Milestone H — App icon & splash ✅ (2026-07-27)
+
+- [x] **The mark is the web app's own**, re-rendered rather than re-drawn: `extrahelper/public/icon.svg`
+      (fork + knife) headless-Chrome-rendered from `assets/branding/*.svg` at the sizes each platform
+      wants. The two clients now look like one product on a home screen, not two.
+- [x] **iOS icon** — full-bleed 1024 square, no baked corners (iOS masks its own; a rounded PNG
+      shows its corners *inside* the mask) and **no alpha channel**, which the App Store rejects.
+- [x] **Android adaptive icon** — `#0A0A0A` background layer + glyph foreground inside the 66% safe
+      zone, so a circular launcher mask doesn't clip the fork's tines. 5 densities + the v26 xml.
+- [x] **Splash, light and dark both first-class** — purple `#8200DB` mark on white, white mark on the
+      app's tinted near-black `#0C090C`. Never a white mark on white.
+- [x] **Android 12+ splash** respects the platform's 768px circle on a 1152px canvas. First pass
+      rendered the mark at 328px — technically correct, visually an afterthought — so it was scaled
+      to 572px, filling the circle without risking the clip.
+- [x] **App name fixed**: the launcher read `extrahelper` on Android and `Extrahelper` on iOS. Both
+      now read **ExtraHelper**.
+- [x] Regeneration is one command each, documented in `pubspec.yaml` beside the config:
+      `dart run flutter_launcher_icons` and `dart run flutter_native_splash:create`.
+- [x] **Verified on both platforms**: Android launcher shows the black adaptive circle with the white
+      mark under "ExtraHelper"; light and dark splashes both confirmed by screenshot; iOS springboard
+      shows the rounded black icon, and the dark splash renders. `flutter analyze` clean, 82 tests
+      passing.
+
 ## Backlog / Later phases
 
 - [ ] **Offline on a physical iPhone, in airplane mode.** The one verification `CLAUDE.md` asks for
@@ -401,7 +424,6 @@ surface must never appear and then vanish.
 - [ ] Owner dashboard — KPI tiles + revenue chart, read-only. Closes the `mobile (Flutter)` TODO on
       `../extrahelper/TASKS.md` line 77.
 - [ ] Inventory — stock counts and adjustments in the store room; barcode/QR scan via camera.
-- [ ] App icon + splash, both platforms.
 - [ ] Store release — signing, TestFlight + Play internal testing track, then production. Closes the
       blocked `../extrahelper/TASKS.md` line 107.
 - [ ] Deep links (order links, QR) — needs universal links + app links and the associated-domain
