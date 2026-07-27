@@ -126,6 +126,16 @@ class ReplayEngine {
         );
       case OutboxKind.fire:
         await _transport.fire(entry.orderRef);
+      case OutboxKind.menu86:
+        await _transport.setItem86(
+          itemId: entry.payload['item_id'] as String,
+          is86: entry.payload['is_86'] as bool,
+        );
+      case OutboxKind.tableState:
+        await _transport.setTableState(
+          tableId: entry.payload['table_id'] as String,
+          state: entry.payload['state'] as String,
+        );
     }
   }
 }

@@ -87,7 +87,66 @@ abstract class _CachedList<T> extends AsyncNotifier<List<T>> {
   }
 }
 
+/// The menu, cached and kept live.
+///
+/// A dish going sold out has to reach every other waiter's phone — that is the
+/// whole point of an 86, and a board that learns about it on the next pull is
+/// a board that keeps taking orders for a dish the kitchen hasn't got.
 class MenuNotifier extends _CachedList<PosMenuItem> {
+  RealtimeChannel? _channel;
+
+  @override
+  Future<List<PosMenuItem>> build() async {
+    final tenant = ref.watch(activeTenantProvider);
+    if (tenant != null) {
+      _subscribe(tenant.tenantId);
+      ref.onDispose(() {
+        final channel = _channel;
+        _channel = null;
+        if (channel != null) unawaited(channel.unsubscribe());
+      });
+    }
+    return super.build();
+  }
+
+  void _subscribe(String tenantId) {
+    final client = ref.read(supabaseProvider);
+    // Same rule as the board: without the JWT, RLS drops every event.
+    final token = client.auth.currentSession?.accessToken;
+    if (token != null) client.realtime.setAuth(token);
+
+    _channel = client
+        .channel('pos_menu_$tenantId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'menu_items',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'tenant_id',
+            value: tenantId,
+          ),
+          callback: (payload) {
+            final row = payload.newRecord;
+            if (row.isEmpty) return;
+            final id = row['id'] as String?;
+            final is86 = row['is_86'] as bool?;
+            if (id == null || is86 == null) return;
+
+            unawaited(
+              ref.read(posCacheProvider).setCachedItem86(tenantId, id, is86),
+            );
+            final current = state.valueOrNull;
+            if (current == null) return;
+            state = AsyncData([
+              for (final item in current)
+                if (item.id == id) item.copyWith(is86: is86) else item,
+            ]);
+          },
+        )
+        .subscribe();
+  }
+
   @override
   Future<List<PosMenuItem>> readCache(PosCache cache, String tenantId) =>
       cache.menu(tenantId);

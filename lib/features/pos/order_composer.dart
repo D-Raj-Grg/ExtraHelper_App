@@ -15,6 +15,7 @@ import '../../data/sync/sync_providers.dart';
 import '../tenant/tenant_providers.dart';
 import 'cart_controller.dart';
 import 'item_options_sheet.dart';
+import 'manager_ops.dart';
 import 'models.dart';
 import 'pos_providers.dart';
 import 'void_reason_dialog.dart';
@@ -215,6 +216,7 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
     final tenant = ref.watch(activeTenantProvider);
     final currency = tenant?.currency ?? 'USD';
     final menu = ref.watch(menuProvider);
+    final can86 = ref.watch(hasPermissionProvider('menu.edit'));
     final categories = ref.watch(categoriesProvider).valueOrNull ?? const [];
 
     final destination = _isAmend
@@ -328,6 +330,15 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
                       optionCount: item.optionCount,
                       qtyInOrder: _qtyInCart(item),
                       onTap: () => _addDish(item, currency),
+                      // Long-press is the manager's way in — discoverable to
+                      // whoever needs it, invisible to everyone else.
+                      onLongPress: can86
+                          ? () => showItem86Sheet(
+                              context: context,
+                              ref: ref,
+                              item: item,
+                            )
+                          : null,
                     );
                   },
                 );
@@ -736,10 +747,18 @@ Color tableStateColor(BuildContext context, String state) {
 
 /// A table card for the board.
 class TableCard extends StatelessWidget {
-  const TableCard({super.key, required this.table, required this.onTap});
+  const TableCard({
+    super.key,
+    required this.table,
+    required this.onTap,
+    this.onLongPress,
+  });
 
   final PosTable table;
   final VoidCallback onTap;
+
+  /// Manager ops (set the table's state). Null when the user can't.
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -759,6 +778,7 @@ class TableCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(Tokens.radiusLg),
           child: InkWell(
             onTap: onTap,
+            onLongPress: onLongPress,
             borderRadius: BorderRadius.circular(Tokens.radiusLg),
             child: Container(
               padding: const EdgeInsets.all(10),

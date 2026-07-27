@@ -40,6 +40,16 @@ class _RecordingTransport implements OutboxTransport {
 
   @override
   Future<void> fire(String orderId) async => calls.add('fire:$orderId');
+
+  @override
+  Future<void> setItem86({required String itemId, required bool is86}) async =>
+      calls.add('setItem86:$itemId:$is86');
+
+  @override
+  Future<void> setTableState({
+    required String tableId,
+    required String state,
+  }) async => calls.add('setTableState:$tableId:$state');
 }
 
 PosMenuItem _item(
@@ -431,6 +441,31 @@ void main() {
         0,
       );
       expect(await store.all(), hasLength(1));
+    });
+  });
+
+  group('stock cache', () {
+    test('an 86 from Realtime survives a cold start', () async {
+      final cache = PosCache(db);
+      await cache.adoptTenant('t1');
+      await cache.saveMenu('t1', [_item('i1'), _item('i2')]);
+
+      await cache.setCachedItem86('t1', 'i1', true);
+
+      final menu = await cache.menu('t1');
+      expect(menu.firstWhere((i) => i.id == 'i1').is86, isTrue);
+      expect(menu.firstWhere((i) => i.id == 'i2').is86, isFalse);
+    });
+
+    test('one tenant stock flag cannot touch another', () async {
+      final cache = PosCache(db);
+      await cache.saveMenu('t1', [_item('i1')]);
+      await cache.saveMenu('t2', [_item('i1')]);
+
+      await cache.setCachedItem86('t1', 'i1', true);
+
+      expect((await cache.menu('t1')).single.is86, isTrue);
+      expect((await cache.menu('t2')).single.is86, isFalse);
     });
   });
 }

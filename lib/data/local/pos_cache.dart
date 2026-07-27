@@ -332,6 +332,18 @@ class PosCache {
         .toList();
   }
 
+  /// Merge a stock change into the cached menu, so a dish that went sold out
+  /// while the app was open is still sold out after a cold start.
+  Future<void> setCachedItem86(
+    String tenantId,
+    String itemId,
+    bool is86,
+  ) async {
+    await (_db.update(_db.cachedMenuItems)
+          ..where((t) => t.tenantId.equals(tenantId) & t.id.equals(itemId)))
+        .write(CachedMenuItemsCompanion(is86: Value(is86)));
+  }
+
   /// Merge one Realtime row change into the cached board, so the next cold
   /// start doesn't show a state the waiter already watched change.
   Future<void> upsertTable(String tenantId, PosTable table) => _db

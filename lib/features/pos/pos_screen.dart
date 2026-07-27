@@ -8,6 +8,7 @@ import '../../core/theme/tokens.dart';
 import '../../data/supabase/pos_repository.dart';
 import '../../data/sync/sync_providers.dart';
 import '../tenant/tenant_providers.dart';
+import 'manager_ops.dart';
 import 'models.dart';
 import 'order_composer.dart';
 import 'pos_providers.dart';
@@ -171,6 +172,12 @@ class _TablesTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final tables = ref.watch(tablesProvider);
+    // Setting a table's state is ordinary floor work, not an owner's privilege:
+    // `set_table_state` allows anyone who takes orders. Mirror that here rather
+    // than hiding it behind `tables.edit`, which only owners and managers hold.
+    final canSetState =
+        ref.watch(hasPermissionProvider('tables.edit')) ||
+        ref.watch(hasPermissionProvider('order.create'));
     final floors = ref.watch(floorsProvider).valueOrNull ?? const [];
 
     return RefreshIndicator(
@@ -235,6 +242,13 @@ class _TablesTab extends ConsumerWidget {
                     return TableCard(
                       table: table,
                       onTap: () => onOpen?.call(table),
+                      onLongPress: canSetState
+                          ? () => showTableStateSheet(
+                              context: context,
+                              ref: ref,
+                              table: table,
+                            )
+                          : null,
                     );
                   },
                 ),

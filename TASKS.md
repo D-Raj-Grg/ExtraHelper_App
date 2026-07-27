@@ -321,46 +321,70 @@ Disk Image is not mounted"*: the device needs to be unlocked and trusted. Signin
 sqlite3 3.x uses Dart build hooks, and `dart compile exe` refuses to AOT-compile a build script in
 that graph. Use **`dart run build_runner build --force-jit`**.
 
-## Milestone G — Manager ops
+## Milestone G — Manager ops ✅ (2026-07-27)
 
-The floor's next real need after taking an order: the things a manager does mid-service. Chosen
-over the owner dashboard because every rule below **already exists server-side** — this is mostly UI
-over RPCs the web already calls, so it ships without inventing a single new business rule.
+The floor's next real need after taking an order. Everything below sits on rules that live in
+Postgres and are shared with the web — no business rule was invented on the client.
 
-Permission keys involved, all already in the catalog: `menu.edit` (86), `tables.edit` (table state),
-`order.void`, `order.discount`. Gate every surface on `hasPermissionProvider`, never on a role
-string — and remember the server enforces the same keys inside the RPCs, so the gate is an
-affordance, not the boundary.
+- [x] **Two shared RPCs, and a real security hole closed.** `set_item_86` and `set_table_state`
+      (migration `20260727120000_manager_ops.sql`, `security definer`, `search_path = public`,
+      `revoke from public, anon` + `grant to authenticated` naming the full signature; verified
+      live: one function object each, ACL `authenticated` only). RLS on `menu_items` and
+      `restaurant_tables` is **tenant-scoped only**, and the role checks lived inside TypeScript
+      server actions — so any member of the restaurant could 86 a dish or restate a table through
+      the API directly. The guard was in the client, which is not a guard. Both RPCs also write an
+      `audit_logs` row, which the column updates never did.
+- [x] **Role sets mirror the old web behaviour exactly**, so nothing regressed: 86 = owner, manager,
+      **kitchen** (the kitchen is who knows the dish ran out, which is why it is not gated on
+      `menu.edit` — owner/manager only); table state = owner, manager, receptionist, waiter,
+      cashier. A cleaner long-term fix for the first is a dedicated `menu.86` key in the shared
+      catalog; that is a catalog decision, not a mobile one.
+- [x] **`set_table_state` refuses to free a table that still has a live order.** That was possible
+      before and it hid an order from the board while the kitchen was still cooking it.
+- [x] Web refactored onto both RPCs (`app/(app)/menu/actions.ts`, `app/(app)/tables/actions.ts`),
+      types added to `database.types.ts`. `tsc` + `eslint` clean.
+- [x] **86 toggle** — long-press a dish in the composer, behind `menu.edit`. Confirm sheet names the
+      real consequence ("It disappears from every waiter's phone and the web POS"), never "are you
+      sure?".
+- [x] **Realtime `menu_items`** on the same authed socket as the board, with a write-through to the
+      Drift cache, so a dish that sold out while the app was open is still sold out after a cold
+      start.
+- [x] **Table state** — long-press a table. Offered to anyone who can take orders, mirroring the
+      RPC, rather than hidden behind `tables.edit` which only owners and managers hold.
+- [x] **Manager log** — voids, discounts, stock and table changes with who and why, read from
+      `audit_logs` (whose RLS is already owner/manager only, so a waiter reaching the screen would
+      see an empty list rather than someone else's data). A void's audit row carries only the
+      reason, so the dish name is looked up and merged in — "Void —" is a log entry nobody can act
+      on. `full_name` is usually unset, so the username stands in.
+- [x] **Offline stance, decided:** 86 and table state go **through the outbox** (new kinds `menu86`
+      and `tableState`). They are things other staff need to see, and both are last-write-wins on a
+      single row, so replay is safe. Voids stay queued as they already were. See `PLANNING.md` §2.
+- [x] Tests: `outbox_test` (queued 86 and table state replay; a refused op keeps its reason; one
+      refused manager op does not orphan an unrelated one), `local_cache_test` (an 86 from Realtime
+      survives a cold start; one tenant's stock flag cannot touch another), `audit_log_test` (every
+      row names a thing and a person; a discount describes itself; an unknown action degrades to a
+      dash rather than crashing). **82 tests, all passing.**
+- [x] **Verified on the Android emulator against the live project**, end to end: long-press a table →
+      choose Free on a table with a live order → the server refuses with *"table A1 still has an
+      open order"*, shown verbatim, and the app-bar badge counts one failed write with its reason →
+      choose Cleaning instead → the board updates. Long-press a dish → "Mark sold out" → the tile
+      shows a **Sold out** badge and the dish is unorderable. Database confirms `is_86 = true` and an
+      `item_86` audit row; the manager log lists both actions with the actor and the time.
+- [x] **Verified across platforms**: with the iOS simulator running and untouched, putting the dish
+      back on from Android flipped iOS's cached `is86` to false — the Realtime subscription and the
+      cache write-through both work on iOS. iOS also picked up the table state change. Test rows
+      cleaned up afterwards and A1 restored.
 
-- [ ] **86 toggle** — mark a dish sold out and back. `menu_items.is_86` is a plain column under RLS
-      + `menu.edit`, not an RPC. Long-press a `MenuTile` in the composer, or a dedicated Menu screen;
-      decide which during brainstorming. **Realtime**: an 86 must reach every other waiter's phone,
-      so subscribe `menu_items` on the same authed socket the board already uses, and write through
-      to the Drift cache like `upsertTable` does.
-- [ ] **Table state control** — free / occupied / reserved / bill_requested / cleaning, from the
-      board. Direct update under `tables.edit`, then `refresh_table_state(_table, _tenant)` so the
-      derived state matches what the orders say. Confirm before any state that abandons an open
-      order, and name the consequence.
-- [ ] **Void approval** — `void_order_item(_order_item_id, _reason)` already demands a reason and
-      audits it; the waiter path exists. What's missing is the *manager* view: which lines were
-      voided today, by whom, and why, read from `audit_logs`.
-- [ ] **Discounts** — `apply_item_discount(_order_item_id, _type, _value, _reason)` and
-      `apply_bill_discount(_bill_id, _type, _value, _reason)`, both `discount_type` enum
-      (percent/amount). Behind `order.discount`. **Never compute a discounted total in Dart** — read
-      it back from the server, or the till and the kitchen ticket disagree.
-- [ ] **Offline stance — decide before building.** These are *manager* actions taken at a moment of
-      judgement, not orders queued mid-rush. Proposal: 86 and table state go through the outbox
-      (they are safe to replay and matter to other staff); voids and discounts require a connection
-      and say so, because approving money movement against a stale view is worse than waiting. Write
-      the decision into `PLANNING.md` §2 either way.
-- [ ] **Verify — unit tests** for any new outbox kinds, and **on both platforms**: an 86 set on the
-      emulator appears on the simulator without a refresh (that is the Realtime + cache path), a
-      discount's total matches the server to the cent, and a void without permission is refused by
-      the server even if the UI is coaxed into offering it.
+**Discounts are deliberately not here.** `apply_item_discount` requires the item to be on a
+**bill** (`orders.bill_id`), and bills are created at checkout — which is web-only in v1
+(`PLANNING.md` §7 excludes tableside payment). A discount button on this app would fail with "item
+is not on a bill yet" every time. It belongs to a payments milestone, and that answers the Open
+Question about tableside payment for this milestone's purposes.
 
-**Open first (from Open Questions):** does a waiter ever take payment tableside? If yes, bill
-discounts belong to a payments milestone, not this one, and this milestone shrinks to 86 + table
-state + the void log.
+**A bug found during device verification:** the shell flashed **"No ordering access"** at every
+launch. `permissionsProvider` answers with an empty set while the tenant is still resolving, and an
+empty set reads as "loaded, and you may do nothing". Now the shell waits for the tenant too — a
+surface must never appear and then vanish.
 
 ## Backlog / Later phases
 

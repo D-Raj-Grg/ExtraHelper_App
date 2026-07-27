@@ -156,6 +156,39 @@ class OrderQueue {
     return _drainAndReport(entry.id, orderRef);
   }
 
+  /// Mark a dish sold out, or put it back.
+  ///
+  /// Queued like an order: a waiter who 86s the last plate of momo while the
+  /// wifi is down still needs that to reach the kitchen and the other phones.
+  /// Replay is safe because this is last-write-wins on one row.
+  Future<QueueOutcome> setItem86({
+    required String itemId,
+    required bool is86,
+  }) async {
+    final entry = await _store.enqueue(
+      tenantId: _tenantId,
+      kind: OutboxKind.menu86,
+      orderRef: 'menu_item:$itemId',
+      idempotencyKey: _uuid.v4(),
+      payload: {'item_id': itemId, 'is_86': is86},
+    );
+    return _drainAndReport(entry.id, entry.orderRef);
+  }
+
+  Future<QueueOutcome> setTableState({
+    required String tableId,
+    required String state,
+  }) async {
+    final entry = await _store.enqueue(
+      tenantId: _tenantId,
+      kind: OutboxKind.tableState,
+      orderRef: 'table:$tableId',
+      idempotencyKey: _uuid.v4(),
+      payload: {'table_id': tableId, 'state': state},
+    );
+    return _drainAndReport(entry.id, entry.orderRef);
+  }
+
   /// Has the server finished with this row, one way or the other? A settled
   /// row is either on the server or given up on — in both cases the composer
   /// must stop drawing its own optimistic copy of the line.

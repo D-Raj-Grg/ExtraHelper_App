@@ -154,6 +154,8 @@ class _DeadRow extends StatelessWidget {
     OutboxKind.amendAdd => 'Added dish',
     OutboxKind.amendVoid => 'Voided line',
     OutboxKind.fire => 'Send to kitchen',
+    OutboxKind.menu86 => 'Stock change',
+    OutboxKind.tableState => 'Table state',
   };
 
   @override

@@ -7,7 +7,11 @@ import 'dart:convert';
 /// offline session is normally *N* adds followed by one fire — folding it into
 /// another entry's payload would either fire too early or lose the fire when
 /// there was nothing new to add.
-enum OutboxKind { order, amendAdd, amendVoid, fire }
+/// `menu86` and `tableState` are manager ops rather than order writes, and they
+/// queue for the same reason orders do: they are things other staff need to see
+/// (a sold-out dish, a table freed) and they are safe to replay, because both
+/// are last-write-wins on a single row rather than an append.
+enum OutboxKind { order, amendAdd, amendVoid, fire, menu86, tableState }
 
 /// `inflight` is a **persisted** state, not a memory flag (rule 4). A process
 /// killed mid-call leaves the row `inflight`; the next run re-attempts it under

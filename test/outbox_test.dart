@@ -63,6 +63,21 @@ class FakeTransport implements OutboxTransport {
     calls.add('fire:$orderId');
     _maybeThrow();
   }
+
+  @override
+  Future<void> setItem86({required String itemId, required bool is86}) async {
+    calls.add('setItem86:$itemId:$is86');
+    _maybeThrow();
+  }
+
+  @override
+  Future<void> setTableState({
+    required String tableId,
+    required String state,
+  }) async {
+    calls.add('setTableState:$tableId:$state');
+    _maybeThrow();
+  }
 }
 
 CartLine _line(String itemId, {int qty = 1}) => CartLine(
@@ -399,6 +414,92 @@ void main() {
       final second = h.engine.run();
       expect(await second, 0);
       await first;
+    });
+  });
+
+  group('manager ops', () {
+    test(
+      'an 86 queued offline reaches the server when coverage returns',
+      () async {
+        var online = false;
+        final store = MemoryOutboxStore();
+        final transport = FakeTransport();
+        final engine = ReplayEngine(
+          store: store,
+          transport: transport,
+          isOnline: () async => online,
+        );
+        final queue = OrderQueue(
+          store: store,
+          engine: engine,
+          tenantId: 'tenant-1',
+        );
+
+        final outcome = await queue.setItem86(itemId: 'item-1', is86: true);
+        expect(outcome.synced, isFalse);
+        expect(transport.calls, isEmpty);
+
+        online = true;
+        await engine.run();
+
+        expect(transport.calls, ['setItem86:item-1:true']);
+        expect(await queue.pendingCount(), 0);
+      },
+    );
+
+    test('a table state change queues and replays', () async {
+      var online = false;
+      final store = MemoryOutboxStore();
+      final transport = FakeTransport();
+      final engine = ReplayEngine(
+        store: store,
+        transport: transport,
+        isOnline: () async => online,
+      );
+      final queue = OrderQueue(
+        store: store,
+        engine: engine,
+        tenantId: 'tenant-1',
+      );
+
+      await queue.setTableState(tableId: 'table-1', state: 'cleaning');
+      online = true;
+      await engine.run();
+
+      expect(transport.calls, ['setTableState:table-1:cleaning']);
+    });
+
+    test('manager ops do not orphan each other when one is refused', () async {
+      // A rejected 86 must not poison an unrelated table change: only a dead
+      // *create* orphans what follows, and these share no order.
+      final h = _harness();
+      h.transport.failures.add(
+        const TransportRejected('not authorized to change stock'),
+      );
+
+      final refused = await h.queue.setItem86(itemId: 'item-1', is86: true);
+      final ok = await h.queue.setTableState(
+        tableId: 'table-1',
+        state: 'cleaning',
+      );
+
+      expect(refused.isRejected, isTrue);
+      expect(refused.error, 'not authorized to change stock');
+      expect(ok.synced, isTrue);
+      expect(ok.isRejected, isFalse);
+    });
+
+    test('a refused op keeps its reason for the waiter to read', () async {
+      final h = _harness();
+      h.transport.failures.add(
+        const TransportRejected('table A1 still has an open order'),
+      );
+
+      await h.queue.setTableState(tableId: 'table-1', state: 'free');
+
+      final dead = await h.queue.deadEntries();
+      expect(dead.single.kind, OutboxKind.tableState);
+      expect(dead.single.lastError, 'table A1 still has an open order');
     });
   });
 }

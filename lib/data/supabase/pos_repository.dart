@@ -328,6 +328,125 @@ class PosRepository {
     }
   }
 
+  // --- Manager ops ---------------------------------------------------------
+
+  /// Mark a dish sold out, or put it back.
+  ///
+  /// Goes through `set_item_86`, not a column update: RLS on `menu_items` is
+  /// tenant-scoped only, so a direct update would let any member of the
+  /// restaurant 86 a dish. The RPC holds the role rule and writes the audit row.
+  Future<void> setItem86({required String itemId, required bool is86}) async {
+    try {
+      await _client.rpc(
+        'set_item_86',
+        params: {'_item_id': itemId, '_is_86': is86},
+      );
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    } catch (_) {
+      throw const PosTransientFailure(
+        "Couldn't reach the server. The menu wasn't changed.",
+      );
+    }
+  }
+
+  /// Set a table's state. The RPC refuses to free a table that still has a
+  /// live order, so the board can't hide an order the kitchen is cooking.
+  Future<void> setTableState({
+    required String tableId,
+    required String state,
+  }) async {
+    try {
+      await _client.rpc(
+        'set_table_state',
+        params: {'_table_id': tableId, '_state': state},
+      );
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    } catch (_) {
+      throw const PosTransientFailure(
+        "Couldn't reach the server. The table wasn't changed.",
+      );
+    }
+  }
+
+  /// The manager's log: what was voided, discounted, 86'd or re-stated, by whom.
+  ///
+  /// `audit_logs` RLS already restricts SELECT to owners and managers, so this
+  /// cannot leak to a waiter even if the app asked. The actor's name needs a
+  /// second query — the FK points at `auth.users`, which PostgREST cannot embed
+  /// through to `profiles`.
+  Future<List<PosAuditEntry>> auditLog({
+    Set<String> actions = const {
+      'void',
+      'discount',
+      'item_86',
+      'item_unset_86',
+      'table_state',
+    },
+    int limit = 100,
+  }) async {
+    final rows = await _client
+        .from('audit_logs')
+        .select('id, action, created_at, metadata, actor_id')
+        .eq('tenant_id', _tenantId)
+        .inFilter('action', actions.toList())
+        .order('created_at', ascending: false)
+        .limit(limit);
+
+    final actorIds = rows
+        .map((r) => r['actor_id'] as String?)
+        .nonNulls
+        .toSet()
+        .toList();
+
+    var actors = <String, Map<String, dynamic>>{};
+    if (actorIds.isNotEmpty) {
+      final profiles = await _client
+          .from('profiles')
+          .select('id, full_name, username')
+          .inFilter('id', actorIds);
+      actors = {for (final p in profiles) p['id'] as String: p};
+    }
+
+    // A void's audit row carries the reason but not the dish. Look the lines up
+    // in one query — "Void —" is a log entry nobody can act on.
+    final lineIds = rows
+        .where((r) => r['entity_type'] == 'order_item')
+        .map((r) => r['entity_id'] as String?)
+        .nonNulls
+        .toSet()
+        .toList();
+
+    var lineNames = <String, String>{};
+    if (lineIds.isNotEmpty) {
+      final lines = await _client
+          .from('order_items')
+          .select('id, name_snapshot')
+          .eq('tenant_id', _tenantId)
+          .inFilter('id', lineIds);
+      lineNames = {
+        for (final l in lines)
+          if (l['name_snapshot'] != null)
+            l['id'] as String: l['name_snapshot'] as String,
+      };
+    }
+
+    return rows.map((r) {
+      final meta = r['metadata'];
+      final name = lineNames[r['entity_id']];
+      return PosAuditEntry.fromRow({
+        ...r,
+        if (name != null)
+          'metadata': {
+            ...(meta is Map<String, dynamic> ? meta : const {}),
+            'name_snapshot': name,
+          },
+        'actor': actors[r['actor_id']],
+      });
+    }).toList();
+  }
+
   /// Turn the RPCs' SQL prose into something a waiter can act on. Anything
   /// unmapped passes through — an opaque message beats a swallowed one.
   static String _friendly(String message) {

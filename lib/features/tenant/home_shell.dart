@@ -7,6 +7,7 @@ import '../../core/format/money.dart';
 import '../../core/theme/tokens.dart';
 import '../../data/supabase/auth_repository.dart';
 import '../../data/supabase/supabase_providers.dart';
+import '../pos/manager_ops.dart';
 import '../pos/pos_screen.dart';
 import 'sync_status_bar.dart';
 import 'tenant_providers.dart';
@@ -24,7 +25,15 @@ class HomeShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final canSeeTables = ref.watch(hasPermissionProvider('tables.view'));
     final canOrder = ref.watch(hasPermissionProvider('order.create'));
+    // `audit_logs` RLS is owner/manager only; `order.void` is held by exactly
+    // those two, so it is the honest key to hang this on.
+    final canReview = ref.watch(hasPermissionProvider('order.void'));
+    // A tenant that hasn't resolved yet makes `permissionsProvider` answer with
+    // an empty set — which reads as "loaded, and you may do nothing", so the
+    // shell flashed "No ordering access" at every launch before settling. Wait
+    // for the tenant too: a surface must never appear and then vanish.
     final permissionsLoaded =
+        ref.watch(activeTenantProvider) != null &&
         ref.watch(permissionsProvider).valueOrNull != null;
 
     return Scaffold(
@@ -32,6 +41,16 @@ class HomeShell extends ConsumerWidget {
         title: const TenantSwitcher(),
         actions: [
           const SyncStatusAction(),
+          if (canReview)
+            IconButton(
+              tooltip: 'Manager log',
+              icon: const Icon(Icons.fact_check_outlined),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const ManagerLogScreen(),
+                ),
+              ),
+            ),
           IconButton(
             tooltip: 'Account',
             icon: const Icon(Icons.person_outline),

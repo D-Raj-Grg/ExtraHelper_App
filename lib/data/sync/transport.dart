@@ -45,4 +45,8 @@ abstract class OutboxTransport {
   Future<void> voidLine({required String orderItemId, required String reason});
 
   Future<void> fire(String orderId);
+
+  Future<void> setItem86({required String itemId, required bool is86});
+
+  Future<void> setTableState({required String tableId, required String state});
 }

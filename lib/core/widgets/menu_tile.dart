@@ -24,6 +24,7 @@ class MenuTile extends StatelessWidget {
     required this.maxPriceCents,
     required this.currency,
     required this.onTap,
+    this.onLongPress,
     this.imageUrl,
     this.isVeg,
     this.qtyInOrder = 0,
@@ -37,6 +38,10 @@ class MenuTile extends StatelessWidget {
   final int maxPriceCents;
   final String currency;
   final VoidCallback onTap;
+
+  /// Manager ops (86 a dish). Stays available when the tile is sold out —
+  /// putting it *back* is the whole point.
+  final VoidCallback? onLongPress;
   final String? imageUrl;
   final bool? isVeg;
 
@@ -85,6 +90,7 @@ class MenuTile extends StatelessWidget {
             borderRadius: BorderRadius.circular(Tokens.radiusLg),
             child: InkWell(
               onTap: off ? null : onTap,
+              onLongPress: onLongPress,
               borderRadius: BorderRadius.circular(Tokens.radiusLg),
               child: Container(
                 decoration: BoxDecoration(

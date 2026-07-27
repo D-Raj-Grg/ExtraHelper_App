@@ -121,6 +121,12 @@ RPC, and an offline session is normally *N* adds then one fire; folding it into 
 payload would either fire too early or lose the fire when nothing new was added. On an order that
 has not synced yet, `fire` flips the pending create's `fire` flag so both land together.
 
+**Manager ops queue too** (Milestone G, 2026-07-27). `menu86` and `tableState` are outbox kinds for
+the same reason orders are: an 86 is something *other* staff need to see, and a table freed is too.
+Both are last-write-wins on a single row, so replay is safe. Voids stay queued as before. Discounts
+are not on mobile at all — `apply_item_discount` requires a bill, and bills come from checkout,
+which is web-only in v1.
+
 **Offline-created orders have no server id yet.** The composer holds a local `draft_id`; amends
 against a not-yet-synced order are merged into that pending create's payload rather than enqueued
 as separate ops. This matches how create mode already batches locally on the web, and avoids

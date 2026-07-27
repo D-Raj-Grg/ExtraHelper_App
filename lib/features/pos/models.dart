@@ -67,6 +67,20 @@ class PosMenuItem {
   /// any modifier that isn't, so the picker must only ever offer these.
   final List<PosModifier> modifiers;
 
+  /// Only the stock flag moves at runtime — a Realtime 86 must not rebuild the
+  /// dish's price or options from a partial row.
+  PosMenuItem copyWith({bool? is86}) => PosMenuItem(
+    id: id,
+    name: name,
+    basePriceCents: basePriceCents,
+    categoryId: categoryId,
+    is86: is86 ?? this.is86,
+    imageUrl: imageUrl,
+    isVeg: isVeg,
+    variants: variants,
+    modifiers: modifiers,
+  );
+
   int get optionCount => variants.length + modifiers.length;
 
   /// What this dish can actually cost.
@@ -308,4 +322,73 @@ class CartLine {
       'modifier_ids': modifiers.map((m) => m.id).toList(),
     if (notes != null && notes!.trim().isNotEmpty) 'notes': notes!.trim(),
   };
+}
+
+/// One line of the manager's log: who did a thing, to what, and why.
+///
+/// Read straight from `audit_logs`, whose RLS already restricts SELECT to
+/// owners and managers — so this list cannot leak to a waiter even if the app
+/// asked for it.
+class PosAuditEntry {
+  const PosAuditEntry({
+    required this.id,
+    required this.action,
+    required this.createdAt,
+    required this.metadata,
+    this.actorName,
+  });
+
+  final String id;
+
+  /// `void`, `discount`, `item_86`, `table_state`, ...
+  final String action;
+
+  final DateTime createdAt;
+  final Map<String, dynamic> metadata;
+
+  /// Null when the actor has no profile row — the log outlives the person.
+  final String? actorName;
+
+  /// The reason someone typed, when the action demanded one.
+  String? get reason {
+    final r = metadata['reason'];
+    return (r is String && r.trim().isNotEmpty) ? r.trim() : null;
+  }
+
+  /// What the action was done to, in words a manager recognises.
+  ///
+  /// A void's audit row carries only the reason, so the dish name is looked up
+  /// and merged in by the repository — "Void —" tells a manager nothing.
+  String get subject {
+    for (final key in ['name', 'label', 'name_snapshot']) {
+      final v = metadata[key];
+      if (v is String && v.isNotEmpty) return v;
+    }
+    // A discount describes itself by its size when there's nothing else.
+    final type = metadata['type'];
+    final value = metadata['value'];
+    if (type == 'percent' && value is num) return '${_trim(value)}% off';
+    if (type == 'flat' && value is num) return '${_trim(value)} off';
+    return '—';
+  }
+
+  static String _trim(num v) =>
+      v == v.roundToDouble() ? v.toInt().toString() : v.toString();
+
+  static PosAuditEntry fromRow(Map<String, dynamic> r) {
+    final meta = r['metadata'];
+    final actor = r['actor'] as Map<String, dynamic>?;
+    return PosAuditEntry(
+      id: r['id'] as String,
+      action: (r['action'] as String?) ?? '',
+      createdAt:
+          DateTime.tryParse((r['created_at'] as String?) ?? '')?.toLocal() ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      metadata: meta is Map<String, dynamic> ? meta : const {},
+      // `full_name` is often unset; the username is what the person actually
+      // has. Either beats "someone".
+      actorName:
+          (actor?['full_name'] as String?) ?? (actor?['username'] as String?),
+    );
+  }
 }

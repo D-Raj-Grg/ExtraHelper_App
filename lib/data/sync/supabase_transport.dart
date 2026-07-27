@@ -71,4 +71,29 @@ class SupabaseTransport implements OutboxTransport {
       throw TransportRejected(e.message);
     }
   }
+
+  @override
+  Future<void> setItem86({required String itemId, required bool is86}) async {
+    try {
+      await _repo.setItem86(itemId: itemId, is86: is86);
+    } on PosTransientFailure catch (e) {
+      throw TransportTransient(e.message);
+    } on PosFailure catch (e) {
+      throw TransportRejected(e.message);
+    }
+  }
+
+  @override
+  Future<void> setTableState({
+    required String tableId,
+    required String state,
+  }) async {
+    try {
+      await _repo.setTableState(tableId: tableId, state: state);
+    } on PosTransientFailure catch (e) {
+      throw TransportTransient(e.message);
+    } on PosFailure catch (e) {
+      throw TransportRejected(e.message);
+    }
+  }
 }

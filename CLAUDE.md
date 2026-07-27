@@ -106,6 +106,10 @@ Mobile-specific ones, plus the shared ones that will bite again:
   the field's `dispose()` then hits a dead controller. The element never finishes deactivating and
   the app dies on `'_dependents.isEmpty': is not true`. Put the field in a `StatefulWidget` and
   dispose in its `State`.
+- **A role check inside a server action is not a guard.** RLS on `menu_items` and
+  `restaurant_tables` is tenant-scoped only, so `requireRole(...)` in a TypeScript action stopped
+  nobody from doing the same update through the API. Anything a role should gate belongs in a
+  `security definer` RPC that both clients call — which is also where the audit row gets written.
 - **Never key a list row by its content.** A signature key that changes on every keystroke rebuilds
   the row and loses the caret mid-word. Key on a stable id; use the signature only to decide merges.
 - **`create or replace function` cannot change a function's arity** — it silently creates an
