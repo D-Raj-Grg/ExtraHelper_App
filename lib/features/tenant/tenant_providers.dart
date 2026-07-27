@@ -1,0 +1,103 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../data/supabase/supabase_providers.dart';
+import '../../data/supabase/tenant_repository.dart';
+
+/// Which restaurant the user is working in right now.
+///
+/// The web keeps this in a cookie; here it's a preference key. Either way the
+/// stored id is **validated against live memberships** before it's used — a
+/// stale id from a membership that was revoked must never select a tenant.
+const _activeTenantKey = 'active_tenant_id';
+
+final _prefsProvider = FutureProvider<SharedPreferences>(
+  (ref) => SharedPreferences.getInstance(),
+);
+
+/// Restaurants the user can work in. Refetched whenever auth changes, so a
+/// sign-out can't leave another user's memberships in the cache.
+final membershipsProvider = FutureProvider<List<Membership>>((ref) async {
+  ref.watch(authStateProvider);
+  final user = ref.watch(currentUserProvider);
+  if (user == null) return const [];
+  return ref.watch(tenantRepositoryProvider).activeMemberships();
+});
+
+/// Memberships awaiting owner approval — the difference between "ask for a
+/// code" and "wait for approval".
+final pendingMembershipsProvider = FutureProvider<List<PendingMembership>>((
+  ref,
+) async {
+  ref.watch(authStateProvider);
+  final user = ref.watch(currentUserProvider);
+  if (user == null) return const [];
+  return ref.watch(tenantRepositoryProvider).pendingMemberships();
+});
+
+/// The user's explicit tenant choice, if any. Null means "not chosen" — which
+/// resolves to the first membership, not to "no tenant".
+class ActiveTenantSelection extends Notifier<String?> {
+  @override
+  String? build() {
+    // Load the stored choice once prefs resolve; until then the first
+    // membership is used, which is the same answer for the single-tenant case.
+    ref.listen(_prefsProvider, (_, next) {
+      final prefs = next.valueOrNull;
+      if (prefs != null && state == null) {
+        state = prefs.getString(_activeTenantKey);
+      }
+    }, fireImmediately: true);
+    return null;
+  }
+
+  Future<void> select(String tenantId) async {
+    state = tenantId;
+    final prefs = await ref.read(_prefsProvider.future);
+    await prefs.setString(_activeTenantKey, tenantId);
+  }
+
+  Future<void> clear() async {
+    state = null;
+    final prefs = await ref.read(_prefsProvider.future);
+    await prefs.remove(_activeTenantKey);
+  }
+}
+
+final activeTenantSelectionProvider =
+    NotifierProvider<ActiveTenantSelection, String?>(ActiveTenantSelection.new);
+
+/// The active restaurant, or null when the user belongs to none.
+///
+/// A stored selection that no longer matches a live membership falls back to
+/// the first one rather than selecting nothing — being dropped from a
+/// restaurant should not look like being signed out.
+final activeTenantProvider = Provider<Membership?>((ref) {
+  final memberships = ref.watch(membershipsProvider).valueOrNull ?? const [];
+  if (memberships.isEmpty) return null;
+
+  final chosen = ref.watch(activeTenantSelectionProvider);
+  if (chosen == null) return memberships.first;
+
+  for (final m in memberships) {
+    if (m.tenantId == chosen) return m;
+  }
+  return memberships.first;
+});
+
+/// Granular permissions for the active tenant, straight from the server.
+final permissionsProvider = FutureProvider<Set<String>>((ref) async {
+  final tenant = ref.watch(activeTenantProvider);
+  if (tenant == null) return const {};
+  return ref.watch(tenantRepositoryProvider).permissions(tenant.tenantId);
+});
+
+/// Whether the user holds a permission key in the active tenant.
+///
+/// Defaults to **false while loading** — a screen must not flash an action the
+/// user then loses. The server enforces the same keys inside the sensitive
+/// RPCs, so this is a UI affordance, not the security boundary.
+final hasPermissionProvider = Provider.family<bool, String>((ref, key) {
+  final perms = ref.watch(permissionsProvider).valueOrNull;
+  return perms?.contains(key) ?? false;
+});

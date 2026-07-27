@@ -79,40 +79,73 @@ creation stays web-only.
 3. **`Supabase.initialize(anonKey:)` is deprecated** in 2.16.0 → use `publishableKey:`. Caught by
    `flutter analyze`, exactly the class of drift `AGENTS.md` exists to catch.
 
-## Milestone B — Design system port
+## Milestone B — Design system port ✅ (2026-07-27)
 
-- [ ] `core/theme/` — light + dark ColorScheme from the web palette (tinted neutrals, never pure
-      black/white), Figtree bundled as an asset (no network fetch at launch).
-- [ ] Semantic colour as a named theme extension — emerald/amber/destructive/blue/orange per
-      `CLAUDE.md`. No raw `Colors.*` at call sites.
-- [ ] `core/money.dart` — currency formatting from `tenant_settings` (never hardcoded), plus a
-      `moneyRange()` equivalent, tabular figures helper.
-- [ ] `core/labels.dart` — enum → human label maps (`table_state`, `order_status`, `order_type`).
-      Staff never see `bill_requested`.
-- [ ] Tap-target defaults ≥44px (Material's are smaller — set them explicitly).
-- [ ] Port `VegMark` — **circle vs triangle**, colour only reinforces. Nullable `is_veg`: unmarked
-      renders nothing (the web column is nullable on purpose — `not null default false` would have
-      labelled every existing dish non-vegetarian).
-- [ ] Port `ChoiceChip`, `MenuTile` (photo-first, designed monogram placeholder, count badge),
-      `TableGlyph`.
-- [ ] **Verify:** greyscale screenshot of every state that uses colour is still unambiguous; text
-      scaled to the OS maximum doesn't clip; light and dark both checked.
+- [x] `core/theme/tokens.dart` — light + dark palette **converted** from the web's oklch tokens in
+      `app/globals.css` (an oklch→sRGB conversion, not an eyeballed match), so both clients render
+      one palette. Tinted neutrals, never pure black. Re-convert if the web palette changes.
+- [x] Semantic colour as a `ThemeExtension` (`SemanticColors`) — good/warning/danger/info/attention
+      + neutral, read as `context.semantic.good`. Call sites cannot reach a raw `Colors.green`,
+      which is the rule the web enforces with tokens-only Tailwind classes.
+- [x] `core/format/money.dart` — `money()` + `moneyRange()`, locale pinned `en_US` to match the web,
+      currency always from `tenant_settings`. `tabularFigures` + a `.tabular` TextStyle extension.
+- [x] `core/format/labels.dart` — table state / order status / order type / bill status / role.
+      Fallback humanizes an unknown enum rather than leaking snake_case.
+- [x] Tap targets ≥44px — `Tokens.tapTarget` applied to every button theme and to `AppChoiceChip`.
+- [x] `VegMark` — circle vs triangle, null renders nothing.
+- [x] `AppChoiceChip`, `MenuTile`, `TableGlyph`, `DishThumb` + `monogram()` ported. `MenuTile` carries
+      the web's price-**range** fix, so a variant dish never advertises an unbuyable base price.
+- [x] Figtree bundled (`assets/fonts/Figtree.ttf`, variable font — weights via `FontVariation`, not
+      four statics). Bundled, never fetched: a staff app must render its own type on dead wifi.
+- [x] **Verify: greyscale screenshot passed.** Veg circle vs triangle distinguishable, every table
+      state carries its word, selected chip carries a check, occupied seats read solid, count badge
+      and monograms legible. Colour carries nothing on its own. Light (Android) and dark (iOS) both
+      confirmed. Built `features/dev/design_gallery.dart` (debug-only route) specifically to make
+      this checkable — reaching these states on real screens costs minutes of setup each.
+- [x] Tests: `money_test`, `labels_test`, `monogram_test`.
 
-## Milestone C — Auth, tenant context, permissions (shell)
+## Milestone C — Auth, tenant context, permissions (shell) ✅ (2026-07-27)
 
-- [ ] `supabase_flutter` init + session persistence + auth state stream.
-- [ ] Login screen (email + password, same as web). Map terse auth errors to plain language.
-- [ ] Logout, and handle a session that expires or is revoked while the app is backgrounded.
-- [ ] Tenant context — read `user_tenants` memberships; **pending memberships grant no access**.
-- [ ] Tenant switcher, shown only when the user belongs to more than one restaurant.
-- [ ] Join-by-code screen → `redeem_join_code` (creates a pending membership; an owner approves on
-      the web `/team` page). Restaurant creation stays web-only.
-- [ ] Permission gate — `get_my_permissions` → Riverpod provider → hides nav items and buttons the
-      role can't use. Never gate on a role string held in the app.
-- [ ] "No access yet" state for a user with no approved membership — teach the next step.
-- [ ] Navigation skeleton (`go_router`) + app shell.
-- [ ] **Verify:** login → tenant resolved → permissions loaded, on both platforms; a tenant-B user
-      sees zero tenant-A rows; switching tenant re-scopes every screen.
+- [x] `supabase_flutter` init + session persistence + auth state stream (`supabase_providers.dart`).
+      The stream is seeded from the current session — waiting for the first `onAuthStateChange`
+      event would flash the login screen at a signed-in user on every cold start.
+- [x] Login screen — email + password, `AuthRepository` never leaks `AuthException`;
+      `friendlyAuthError` mirrors the web's mapping so a failure reads the same on both clients.
+- [x] Sign out, and a session that expires or is revoked while backgrounded — the router listens to
+      the auth stream, so it resolves wherever the app happens to be.
+- [x] Tenant context — `user_tenants` filtered to **`status = 'active'`**; a pending membership is a
+      request, not access. A stored tenant choice that no longer matches a live membership falls
+      back to the first rather than selecting nothing (being dropped from a restaurant must not look
+      like being signed out).
+- [x] Tenant switcher — hidden when the user belongs to one restaurant. Choice persisted via
+      `shared_preferences` (the web uses a cookie), validated against live memberships before use.
+- [x] Join-by-code → `redeem_join_code`, with the RPC's `22023` mapped to plain language. The screen
+      teaches the next step and distinguishes *waiting for approval* from *no access*.
+- [x] Permission gate — `get_my_permissions` → `permissionsProvider` / `hasPermissionProvider`.
+      **Defaults to false while loading** so a screen never flashes an action the user then loses.
+- [x] Navigation (`go_router`) — **one** redirect decides where anyone lands; screens never navigate
+      on sign-in/out. Holds position while memberships load rather than bouncing a user to /join for
+      the second it takes to answer. Design gallery routed debug-only.
+- [x] **Verify — full chain driven on a real Android emulator (arm64, Android 16)**: sign in as
+      `clixacom@gmail.com` → tenant **"The Sekuwa Station" (Owner)** → currency **NPR** rendering
+      `NPR 1,234.56` through `money()` → timezone **Asia/Kathmandu** → **9 permission keys** from
+      `get_my_permissions`. Tenant switcher listed both memberships with the active one checked and
+      switched cleanly. **Session survived a cold restart** (force-stop → relaunch → straight to
+      home, no login flash). Sign out returned to login. A wrong password produced
+      "That email or password is wrong." with icon **and** colour — proving the Supabase round-trip
+      and the error mapping end to end.
+- [~] **iOS**: builds, launches, Supabase client initialises, theme renders, and the router
+      correctly redirects an unauthenticated user to /login — all screenshot-verified. The
+      *signed-in* chain was **not** driven on iOS: macOS blocks synthetic keystrokes into the
+      Simulator without Accessibility permission for the terminal, so the credentials can't be
+      typed. Nothing iOS-specific is untested by design — the chain is pure Dart over
+      `supabase_flutter` + `shared_preferences`, both already proven to load on the device. To close
+      it: grant Terminal Accessibility (System Settings → Privacy & Security → Accessibility), or
+      sign in by hand once in the Simulator.
+- [ ] Cross-tenant isolation check (a tenant-B user sees zero tenant-A rows) — deferred to
+      Milestone E, when there are actual rows to read. RLS covers it server-side today.
+- [x] Tests: `auth_error_test`, `membership_test` (incl. `tenant_settings` arriving as either an
+      object or a single-element list — get that wrong and a Nepali restaurant silently renders USD).
 
 ## Milestone D — Shared amend RPC (touches the web app)
 

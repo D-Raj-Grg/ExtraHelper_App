@@ -33,6 +33,8 @@ dependencies:
   path: ^1.9.1
   connectivity_plus: ^7.3.1
   uuid: ^4.6.0
+  intl: ^0.20.3
+  shared_preferences: ^2.5.5
 
 dev_dependencies:
   flutter_test:
@@ -44,5 +46,10 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-  # assets: and fonts: land in Milestone B (design-system port — Figtree is
-  # bundled, not fetched at launch).
+  # Figtree is BUNDLED, not fetched at launch — a staff app must render its own
+  # type on dead wifi. This is the variable font (wght axis), so weights come
+  # from FontVariation in the theme rather than from shipping four statics.
+  fonts:
+    - family: Figtree
+      fonts:
+        - asset: assets/fonts/Figtree.ttf
