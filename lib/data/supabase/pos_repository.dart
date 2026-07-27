@@ -16,6 +16,16 @@ class PosFailure implements Exception {
   String toString() => message;
 }
 
+/// The write never got an answer — socket, timeout, airplane mode.
+///
+/// Separate from a plain [PosFailure] because the outbox must treat the two
+/// differently (`PLANNING.md` §2, rule 3): a server *reject* is final, a
+/// transient failure is still owed. Conflating them is how a real order gets
+/// silently dropped.
+class PosTransientFailure extends PosFailure {
+  const PosTransientFailure(super.message);
+}
+
 /// Reads and writes for the POS.
 ///
 /// Trusted logic stays in SQL and is called by RPC — `place_staff_order` to
@@ -164,19 +174,38 @@ class PosRepository {
     String? tableId,
     int? guests,
     String? idempotencyKey,
-  }) async {
+  }) {
     if (lines.isEmpty) throw const PosFailure('Add something first.');
-    final key = idempotencyKey ?? _uuid.v4();
+    return placeOrderJson(
+      items: lines.map((l) => l.toRpcJson()).toList(),
+      orderType: orderType,
+      tableId: tableId,
+      guests: guests,
+      idempotencyKey: idempotencyKey ?? _uuid.v4(),
+    );
+  }
 
+  /// The same call, taking the JSON the outbox persisted.
+  ///
+  /// A queued order must survive a restart, and a [CartLine] holds a live
+  /// [PosMenuItem]; only the RPC shape is storable. Both entry points share
+  /// this body so a replayed order can't be priced differently from a live one.
+  Future<String> placeOrderJson({
+    required List<Map<String, dynamic>> items,
+    required String orderType,
+    String? tableId,
+    int? guests,
+    required String idempotencyKey,
+  }) async {
     try {
       final id = await _client.rpc(
         'place_staff_order',
         params: {
           '_tenant': _tenantId,
-          '_idempotency_key': key,
+          '_idempotency_key': idempotencyKey,
           '_table_id': tableId,
           '_order_type': orderType,
-          '_items': lines.map((l) => l.toRpcJson()).toList(),
+          '_items': items,
           '_guests': ?guests,
         },
       );
@@ -184,7 +213,7 @@ class PosRepository {
     } on PostgrestException catch (e) {
       throw PosFailure(_friendly(e.message));
     } catch (_) {
-      throw const PosFailure(
+      throw const PosTransientFailure(
         "Couldn't reach the server. The order was not placed.",
       );
     }
@@ -192,29 +221,34 @@ class PosRepository {
 
   /// Add a line to an existing order — the shared RPC, same one the web uses,
   /// so pricing can't drift between the two clients.
-  Future<String> addItem({
+  Future<String> addItem({required String orderId, required CartLine line}) =>
+      addItemJson(orderId: orderId, item: line.toRpcJson());
+
+  /// The same call, taking the JSON the outbox persisted. Keys match
+  /// [CartLine.toRpcJson] exactly, so a queued amend replays as itself.
+  Future<String> addItemJson({
     required String orderId,
-    required CartLine line,
+    required Map<String, dynamic> item,
   }) async {
     try {
       final id = await _client.rpc(
         'amend_order_add_item',
         params: {
           '_order_id': orderId,
-          '_item_id': line.item.id,
-          '_qty': line.qty,
-          if (line.variant != null) '_variant_id': line.variant!.id,
-          if (line.modifiers.isNotEmpty)
-            '_modifier_ids': line.modifiers.map((m) => m.id).toList(),
-          if (line.notes != null && line.notes!.trim().isNotEmpty)
-            '_notes': line.notes!.trim(),
+          '_item_id': item['item_id'],
+          '_qty': item['qty'],
+          '_variant_id': ?item['variant_id'],
+          '_modifier_ids': ?item['modifier_ids'],
+          '_notes': ?item['notes'],
         },
       );
       return id as String;
     } on PostgrestException catch (e) {
       throw PosFailure(_friendly(e.message));
     } catch (_) {
-      throw const PosFailure("Couldn't reach the server. Nothing was added.");
+      throw const PosTransientFailure(
+        "Couldn't reach the server. Nothing was added.",
+      );
     }
   }
 
@@ -229,7 +263,7 @@ class PosRepository {
           .eq('tenant_id', _tenantId)
           .eq('status', 'draft');
     } catch (_) {
-      throw const PosFailure("Couldn't remove that line.");
+      throw const PosTransientFailure("Couldn't remove that line.");
     }
   }
 
@@ -262,7 +296,7 @@ class PosRepository {
           .eq('tenant_id', _tenantId)
           .eq('status', 'draft');
     } catch (_) {
-      throw const PosFailure("Couldn't change the quantity.");
+      throw const PosTransientFailure("Couldn't change the quantity.");
     }
   }
 
@@ -274,7 +308,7 @@ class PosRepository {
     } on PostgrestException catch (e) {
       throw PosFailure(_friendly(e.message));
     } catch (_) {
-      throw const PosFailure(
+      throw const PosTransientFailure(
         "Couldn't reach the kitchen. Check the order before re-firing.",
       );
     }

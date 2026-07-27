@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -9,11 +11,13 @@ import '../../core/widgets/choice_chip.dart';
 import '../../core/widgets/menu_tile.dart';
 import '../../core/widgets/table_glyph.dart';
 import '../../data/supabase/pos_repository.dart';
+import '../../data/sync/sync_providers.dart';
 import '../tenant/tenant_providers.dart';
 import 'cart_controller.dart';
 import 'item_options_sheet.dart';
 import 'models.dart';
 import 'pos_providers.dart';
+import 'void_reason_dialog.dart';
 
 /// The order composer — **one surface for create and amend**.
 ///
@@ -46,10 +50,15 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
   void initState() {
     super.initState();
     final repo = ref.read(posRepoProvider)!;
+    final queue = ref.read(orderQueueProvider)!;
     _cart = _isAmend
-        ? AmendCart(repository: repo, order: widget.existingOrder!)
-        : CreateCart(
+        ? AmendCart(
+            queue: queue,
             repository: repo,
+            order: widget.existingOrder!,
+          )
+        : CreateCart(
+            queue: queue,
             orderType: widget.seedTable == null ? 'pickup' : 'dine_in',
             tableId: widget.seedTable?.id,
           );
@@ -107,12 +116,24 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
     }
   }
 
+  /// Pull server truth back into the cart after an amend.
+  ///
+  /// Offline this simply fails, and that is fine: the queued line is already
+  /// drawn from the outbox, so the waiter sees their dish either way. Never let
+  /// a failed *read* undo a durable *write*.
   Future<void> _refreshAmend() async {
     final cart = _cart;
     if (cart is! AmendCart) return;
-    final fresh = await ref.read(posRepoProvider)!.order(cart.order.id);
-    if (fresh != null) cart.update(fresh);
-    ref.invalidate(activeOrdersProvider);
+    await cart.reconcilePending();
+    try {
+      final fresh = await ref.read(posRepoProvider)!.order(cart.order.id);
+      if (fresh != null) cart.update(fresh);
+    } on Object {
+      return;
+    } finally {
+      ref.invalidate(activeOrdersProvider);
+      ref.invalidate(outboxStatusProvider);
+    }
   }
 
   Future<void> _removeLine(CartDisplayLine line) async {
@@ -133,50 +154,14 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
   /// A fired line is on a kitchen ticket. The server demands a reason and
   /// audits it — this dialog exists so the waiter supplies one, and it names
   /// the real consequence rather than asking "are you sure?".
-  Future<String?> _askVoidReason(CartDisplayLine line) async {
-    final controller = TextEditingController();
-    final reason = await showDialog<String>(
+  Future<String?> _askVoidReason(CartDisplayLine line) {
+    return showVoidReasonDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Void this line?'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '${line.qty} × ${line.title} is already with the kitchen. '
-              'Voiding it removes it from the bill and records who did it and why.',
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                labelText: 'Reason',
-                hintText: 'e.g. guest changed their mind',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Keep it'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final text = controller.text.trim();
-              if (text.isEmpty) return;
-              Navigator.of(context).pop(text);
-            },
-            child: const Text('Void line'),
-          ),
-        ],
-      ),
+      title: 'Void this line?',
+      body:
+          '${line.qty} × ${line.title} is already with the kitchen. '
+          'Voiding it removes it from the bill and records who did it and why.',
     );
-    controller.dispose();
-    return reason;
   }
 
   Future<void> _setQty(CartDisplayLine line, int qty) async {
@@ -196,13 +181,27 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
   Future<void> _commitAndFire({required bool fire}) async {
     setState(() => _busy = true);
     try {
-      final orderId = await _cart.commit();
-      if (fire) await ref.read(posRepoProvider)!.fireOrder(orderId);
+      final result = await _cart.commit(fire: fire);
       ref.invalidate(activeOrdersProvider);
-      await ref.read(tablesProvider.notifier).refresh();
+      ref.invalidate(outboxStatusProvider);
+      // NOT awaited: the write is already durable, and with no coverage this
+      // read sits on a long HTTP timeout. Making a saved order wait on a
+      // refresh is how a queue that works looks broken.
+      unawaited(ref.read(tablesProvider.notifier).refresh());
       if (!mounted) return;
       Navigator.of(context).pop();
-      _toast(fire ? 'Sent to the kitchen.' : 'Order saved.');
+
+      // Queued-but-not-sent is a success. Say what happened plainly, and never
+      // leave a waiter wondering whether the kitchen has it.
+      _toast(
+        result.synced
+            ? (fire ? 'Sent to the kitchen.' : 'Order saved.')
+            : (fire
+                  ? "Saved. It goes to the kitchen the moment you're back on "
+                        'coverage.'
+                  : "Saved on this phone. It syncs when you're back on "
+                        'coverage.'),
+      );
     } on PosFailure catch (e) {
       _toast(e.message, error: true);
     } finally {
@@ -545,6 +544,25 @@ class _CartRow extends StatelessWidget {
                         'With the kitchen',
                         style: theme.textTheme.labelSmall?.copyWith(
                           color: semantic.warningText,
+                        ),
+                      ),
+                    ],
+                  ),
+                // Never colour alone: the cloud icon and the words carry it.
+                if (line.isPending)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.cloud_upload_outlined,
+                        size: 13,
+                        color: semantic.infoText,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Waiting to send',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: semantic.infoText,
                         ),
                       ),
                     ],

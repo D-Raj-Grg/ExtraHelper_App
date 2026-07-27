@@ -116,6 +116,11 @@ Five rules, each mirroring a bug the web queue had to be hardened against
 5. **Replay is serial per order and re-checks connectivity between entries.** An amend must not
    land before the create it belongs to.
 
+**Built with a fourth kind, `fire`** (2026-07-27). Sending to the kitchen is its own idempotent
+RPC, and an offline session is normally *N* adds then one fire; folding it into another entry's
+payload would either fire too early or lose the fire when nothing new was added. On an order that
+has not synced yet, `fire` flips the pending create's `fire` flag so both land together.
+
 **Offline-created orders have no server id yet.** The composer holds a local `draft_id`; amends
 against a not-yet-synced order are merged into that pending create's payload rather than enqueued
 as separate ops. This matches how create mode already batches locally on the web, and avoids

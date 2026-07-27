@@ -8,6 +8,7 @@ import '../../core/theme/tokens.dart';
 import '../../data/supabase/auth_repository.dart';
 import '../../data/supabase/supabase_providers.dart';
 import '../pos/pos_screen.dart';
+import 'sync_status_bar.dart';
 import 'tenant_providers.dart';
 import 'tenant_switcher.dart';
 
@@ -30,6 +31,7 @@ class HomeShell extends ConsumerWidget {
       appBar: AppBar(
         title: const TenantSwitcher(),
         actions: [
+          const SyncStatusAction(),
           IconButton(
             tooltip: 'Account',
             icon: const Icon(Icons.person_outline),
@@ -47,11 +49,18 @@ class HomeShell extends ConsumerWidget {
       ),
       // Permissions decide what exists, and default to false while loading, so
       // a surface never flashes up and then vanishes.
-      body: !permissionsLoaded
-          ? const Center(child: CircularProgressIndicator())
-          : (canSeeTables || canOrder)
-          ? const PosScreen()
-          : const _NoPosAccess(),
+      body: Column(
+        children: [
+          const OfflineBanner(),
+          Expanded(
+            child: !permissionsLoaded
+                ? const Center(child: CircularProgressIndicator())
+                : (canSeeTables || canOrder)
+                ? const PosScreen()
+                : const _NoPosAccess(),
+          ),
+        ],
+      ),
     );
   }
 }

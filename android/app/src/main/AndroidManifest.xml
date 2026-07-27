@@ -1,4 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- connectivity_plus: without this the watcher reports "no network" forever
+         and every write sits in the outbox on a perfectly good connection. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="extrahelper"
         android:name="${applicationName}"

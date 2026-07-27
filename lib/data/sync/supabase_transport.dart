@@ -1,0 +1,74 @@
+import '../supabase/pos_repository.dart';
+import 'transport.dart';
+
+/// The real server behind the outbox.
+///
+/// Its whole job is the rule-3 split: [PosTransientFailure] is still owed and
+/// gets retried; anything else the repository raised was a considered "no" from
+/// Postgres and must not be retried into a silent loop.
+class SupabaseTransport implements OutboxTransport {
+  const SupabaseTransport(this._repo);
+
+  final PosRepository _repo;
+
+  @override
+  Future<String> placeOrder({
+    required String idempotencyKey,
+    required Map<String, dynamic> payload,
+  }) async {
+    final items = (payload['items'] as List<dynamic>? ?? const [])
+        .cast<Map<String, dynamic>>();
+    try {
+      return await _repo.placeOrderJson(
+        items: items,
+        orderType: payload['order_type'] as String,
+        tableId: payload['table_id'] as String?,
+        guests: payload['guests'] as int?,
+        idempotencyKey: idempotencyKey,
+      );
+    } on PosTransientFailure catch (e) {
+      throw TransportTransient(e.message);
+    } on PosFailure catch (e) {
+      throw TransportRejected(e.message);
+    }
+  }
+
+  @override
+  Future<void> addItem({
+    required String orderId,
+    required Map<String, dynamic> payload,
+  }) async {
+    try {
+      await _repo.addItemJson(orderId: orderId, item: payload);
+    } on PosTransientFailure catch (e) {
+      throw TransportTransient(e.message);
+    } on PosFailure catch (e) {
+      throw TransportRejected(e.message);
+    }
+  }
+
+  @override
+  Future<void> voidLine({
+    required String orderItemId,
+    required String reason,
+  }) async {
+    try {
+      await _repo.voidLine(lineId: orderItemId, reason: reason);
+    } on PosTransientFailure catch (e) {
+      throw TransportTransient(e.message);
+    } on PosFailure catch (e) {
+      throw TransportRejected(e.message);
+    }
+  }
+
+  @override
+  Future<void> fire(String orderId) async {
+    try {
+      await _repo.fireOrder(orderId);
+    } on PosTransientFailure catch (e) {
+      throw TransportTransient(e.message);
+    } on PosFailure catch (e) {
+      throw TransportRejected(e.message);
+    }
+  }
+}

@@ -215,43 +215,157 @@ backwards. plpgsql resolves inner calls at run time, so it created cleanly and w
       the local id, `toRpcJson` omits absent options, voided lines leave the total, `canFire` and
       `isClosed` transitions.
 
+**A crash found on the emulator after E was called done (fixed 2026-07-27):** dismissing the
+void-reason dialog took the whole app down with
+`'package:flutter/src/widgets/framework.dart': Failed assertion: line 6271 pos 12:
+'_dependents.isEmpty': is not true.` — the full-screen red error, on *both* "Keep it" and "Void
+line". `_askVoidReason` created the `TextEditingController` itself and disposed it the line after
+`await showDialog(...)`. That future resolves a frame *before* the dialog's `TextField` is actually
+unmounted, so the field's own `dispose()` ran against a dead controller
+("A TextEditingController was used after being disposed"), its element never finished deactivating,
+and the `InheritedElement`s above it hit the assert. Fixed by moving the field into
+`void_reason_dialog.dart`, where a `State` owns the controller and disposes it — the same shape
+`_ItemOptionsSheet` already had. Regression test: `void_reason_dialog_test`. Also added the missing
+`mounted` guards in `pos_screen` where `ref` is touched after an `await …push()`.
+
 **A bug caught during device verification:** tapping an *occupied* table opened "New order" with an
 empty cart instead of amending. `_openTable` read `activeOrdersProvider` synchronously, but the
 Tables tab never watches it, so on a fresh launch it was unbuilt and `.valueOrNull` returned null —
 which read as "no open order" and would have started a **second order on an occupied table**. Fixed
 by awaiting `activeOrdersProvider.future` so the answer is real rather than merely available.
 
-## Milestone F — Offline
+## Milestone F — Offline ✅ (2026-07-27)
 
-- [ ] Drift schema — cache tables (items, variants, modifiers, `item_modifiers` links, categories,
-      tables, floors) + `cache_meta(tenant_id, fetched_at)` + `outbox`.
-- [ ] Cache refresh on foreground and on Realtime change. **Tenant-stamped**: switching tenant wipes
-      and refetches, so one tenant's menu can never render under another.
-- [ ] Outbox — `kind` (`order` | `amend_add` | `amend_void`), `payload_json`, `idempotency_key`,
-      `attempts`, `state` (`pending|inflight|done|dead`), `last_error`.
-- [ ] **All** order writes go through the outbox, online included — enqueue first, then attempt, so
-      a mid-flight network throw is already durable under the same key.
-- [ ] Replay engine — serial per order, re-checks connectivity between entries (an amend must never
-      land before the create it belongs to), `inflight` persisted inside a transaction before the
-      call, retry cap 5.
-- [ ] Server-reject → `dead` immediately with the error kept; transient → retry without burning the
-      cap toward a silent drop.
-- [ ] Offline-created orders — composer holds a local `draft_id`; amends against a not-yet-synced
-      order merge into that pending create's payload instead of enqueuing separate ops.
-- [ ] Connectivity watcher + a pending-count badge and a dead-entry warning in the app bar.
-- [ ] **Verify — unit tests, no emulator** (the sync layer is pure Dart): double-enqueue → one row;
-      kill mid-`inflight` → restart re-attempts under the same key, no duplicate; server-reject →
-      `dead`, not retried; 6 transient failures → dead after 5, error preserved; tenant switch →
-      cache wiped.
-- [ ] **Verify on a real device in airplane mode** (a simulator's network stubbing is not the same
-      thing): take a full order offline → return to coverage → the order reaches the kitchen
-      **exactly once**.
+- [x] Drift schema — cache tables (items, variants, modifiers, `item_modifiers` links, categories,
+      tables, floors) + `cache_meta(tenant_id, fetched_at)` + `outbox`. Schema v2 adds the identity
+      cache; migrated in place, never by dropping the file — the outbox may be holding a real order.
+- [x] Cache refresh on POS open, on foreground and on Realtime change. **Tenant-stamped**:
+      `adoptTenant` wipes every other tenant's rows before a single row is read.
+- [x] Outbox — `kind`, `payload_json`, `idempotency_key` (**unique**), `attempts`, `state`
+      (`pending|inflight|done|dead`), `last_error`, `order_ref`.
+- [x] **All** order writes go through the outbox, online included — `OrderQueue` enqueues, then
+      drains. A mid-flight network throw is already durable under the same key.
+- [x] Replay engine — serial in enqueue order, re-checks connectivity between entries, `inflight`
+      persisted in a transaction before the call, retry cap 5. Pure Dart: no widgets, no sqlite.
+- [x] Server-reject → `dead` at once with the reason kept; transient → `attempts++` and retry.
+      Entries queued behind a create that died are failed with a reason rather than fired at the
+      server one by one.
+- [x] Offline-created orders — the composer holds `draft:<uuid>`; an amend against a not-yet-synced
+      order **merges into that pending create's payload**. Once the create lands, `remapOrderRef`
+      rewrites every entry behind it to the real order id, durably.
+- [x] Connectivity watcher, offline banner, app-bar badge (owed vs failed, icon + count, never
+      colour alone) and a dialog listing dead entries with their reason and a "Try now".
+- [x] **Verify — unit tests, no emulator** (`outbox_test`, `local_cache_test`, 53 tests):
+      double-enqueue → one row; kill mid-`inflight` → re-attempted under the same key, no duplicate;
+      server-reject → `dead`, never retried; 6 transient failures → dead after 5 with the error
+      preserved; amend merges into a pending create; replay is serial; tenant switch → cache wiped.
+- [x] **Verified on the Android emulator in airplane mode**, end to end: cold start with no
+      coverage renders the tenant, role, floor plan and menu **from cache alone** → compose an order
+      → "Send to kitchen" returns immediately with *"Saved. It goes to the kitchen the moment you're
+      back on coverage."* and the app bar shows a **1** → coverage restored → badge clears by itself
+      and the order appears In kitchen. Database confirms **exactly once**: one order, one item, one
+      KOT, `waiter_id` set, for both the dine-in and the takeaway run. All test rows deleted
+      afterwards and A1 restored to `free`.
+
+**A fourth outbox kind.** `PLANNING.md` §2 names three (`order`, `amend_add`, `amend_void`); this
+adds `fire`. Sending to the kitchen is its own idempotent RPC, and an offline session is normally
+*N* adds then one fire — folding it into another entry's payload would either fire too early or
+lose the fire when there was nothing new to add. On an order that hasn't synced, `fire` instead
+flips the pending create's `fire` flag, so the create and the fire land together.
+
+**What "offline" turned out to mean, beyond the queue.** Four things broke on a real airplane-mode
+run that no unit test would have caught, each because a *read* was allowed to block a *write*:
+
+- Cold start showed **"No ordering access"** — memberships and permissions were network-only, so the
+  shell had no tenant and no keys. Now cached (`IdentityCache`), cleared on sign-out.
+- Tapping a table **hung**: `_openTable` awaited `activeOrdersProvider`, and with no network that
+  sits on a long HTTP timeout. Now it asks connectivity first and caps the wait at 6s. Offline, a
+  *free* table still opens; an *occupied* one says so rather than guessing "no open order" and
+  starting a second order on a taken table.
+- "Send to kitchen" **spun forever** — the commit awaited a table refresh after the write. The write
+  was already durable; the refresh is now unawaited.
+- **The offline error stuck after coverage returned.** An `AsyncError` is sticky: the order list
+  kept saying "No coverage" over a live LTE bar, and the only way out was the waiter tapping "Try
+  again". `SyncLoop` now watches for the offline→online edge and rebuilds what gave up — which also
+  re-subscribes the Realtime channel the offline build skipped. Verified: go offline on Orders, get
+  the error, restore coverage, and the list recovers on its own with no tap.
+- The menu was fetched only when the composer opened, i.e. exactly too late. The POS now warms
+  menu, categories and floors on open, and an empty cache with no coverage says so immediately
+  instead of spinning.
+
+**Verified on iOS (simulator, iPhone 17 Pro / iOS 26.2), 2026-07-27.** Builds, launches, Supabase
+initialises, Drift opens `Documents/extrahelper.sqlite` with all 11 tables, and the POS renders in
+dark theme with the live board. Cache warms identically to Android: 20 menu items, 4 categories,
+1 floor, 4 tables, 2 memberships, 35 permissions, 0 outbox rows. No exceptions in the run log.
+
+**A bug the iOS cache dump caught: `permissions` cached 0 rows.** `adoptTenant` wiped everything
+whenever `cache_meta` did not already hold exactly this tenant — and on a *fresh install* the meta
+is empty, while the shell has already cached this tenant's permissions by the time the POS mounts.
+So the very first run deleted them, and the next cold start with no coverage would have rendered
+"No ordering access" again. Android never showed it because by the time it was tested the app had
+launched several times. Fixed by keying the delete on `tenant_id != current` instead of "wipe unless
+the stamp matches", which is immune to who wrote first. Regression tests in `local_cache_test`.
+
+**Also plugged:** `done` outbox rows were never removed — a phone on a service floor for a year
+would carry every order it ever sent. `SyncLoop` now prunes `done` rows older than 7 days on each
+drain. `dead` rows are never pruned; someone still has to see them.
+
+**Not yet verified on iOS: the offline path.** A simulator has no airplane mode, and
+`connectivity_plus` on the simulator reports the host's network rather than the device's, so an
+offline test there would prove nothing. The physical iPhone is the right target — and is what
+`CLAUDE.md` asks for — but the run failed with *"Almighty is not available because the Developer
+Disk Image is not mounted"*: the device needs to be unlocked and trusted. Signing itself is fine
+(`Apple Development: divyashwar@icloud.com`).
+
+**Codegen note:** `dart run build_runner build` fails with *"Failed to compile build script"* —
+sqlite3 3.x uses Dart build hooks, and `dart compile exe` refuses to AOT-compile a build script in
+that graph. Use **`dart run build_runner build --force-jit`**.
+
+## Milestone G — Manager ops
+
+The floor's next real need after taking an order: the things a manager does mid-service. Chosen
+over the owner dashboard because every rule below **already exists server-side** — this is mostly UI
+over RPCs the web already calls, so it ships without inventing a single new business rule.
+
+Permission keys involved, all already in the catalog: `menu.edit` (86), `tables.edit` (table state),
+`order.void`, `order.discount`. Gate every surface on `hasPermissionProvider`, never on a role
+string — and remember the server enforces the same keys inside the RPCs, so the gate is an
+affordance, not the boundary.
+
+- [ ] **86 toggle** — mark a dish sold out and back. `menu_items.is_86` is a plain column under RLS
+      + `menu.edit`, not an RPC. Long-press a `MenuTile` in the composer, or a dedicated Menu screen;
+      decide which during brainstorming. **Realtime**: an 86 must reach every other waiter's phone,
+      so subscribe `menu_items` on the same authed socket the board already uses, and write through
+      to the Drift cache like `upsertTable` does.
+- [ ] **Table state control** — free / occupied / reserved / bill_requested / cleaning, from the
+      board. Direct update under `tables.edit`, then `refresh_table_state(_table, _tenant)` so the
+      derived state matches what the orders say. Confirm before any state that abandons an open
+      order, and name the consequence.
+- [ ] **Void approval** — `void_order_item(_order_item_id, _reason)` already demands a reason and
+      audits it; the waiter path exists. What's missing is the *manager* view: which lines were
+      voided today, by whom, and why, read from `audit_logs`.
+- [ ] **Discounts** — `apply_item_discount(_order_item_id, _type, _value, _reason)` and
+      `apply_bill_discount(_bill_id, _type, _value, _reason)`, both `discount_type` enum
+      (percent/amount). Behind `order.discount`. **Never compute a discounted total in Dart** — read
+      it back from the server, or the till and the kitchen ticket disagree.
+- [ ] **Offline stance — decide before building.** These are *manager* actions taken at a moment of
+      judgement, not orders queued mid-rush. Proposal: 86 and table state go through the outbox
+      (they are safe to replay and matter to other staff); voids and discounts require a connection
+      and say so, because approving money movement against a stale view is worse than waiting. Write
+      the decision into `PLANNING.md` §2 either way.
+- [ ] **Verify — unit tests** for any new outbox kinds, and **on both platforms**: an 86 set on the
+      emulator appears on the simulator without a refresh (that is the Realtime + cache path), a
+      discount's total matches the server to the cent, and a void without permission is refused by
+      the server even if the UI is coaxed into offering it.
+
+**Open first (from Open Questions):** does a waiter ever take payment tableside? If yes, bill
+discounts belong to a payments milestone, not this one, and this milestone shrinks to 86 + table
+state + the void log.
 
 ## Backlog / Later phases
 
 - [ ] Owner dashboard — KPI tiles + revenue chart, read-only. Closes the `mobile (Flutter)` TODO on
       `../extrahelper/TASKS.md` line 77.
-- [ ] Manager ops — 86 toggle, table state control, void/discount approval.
 - [ ] Inventory — stock counts and adjustments in the store room; barcode/QR scan via camera.
 - [ ] App icon + splash, both platforms.
 - [ ] Store release — signing, TestFlight + Play internal testing track, then production. Closes the

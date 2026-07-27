@@ -101,6 +101,11 @@ Mobile-specific ones, plus the shared ones that will bite again:
   limbo otherwise. Persisted + same idempotency key makes restart-retry safe.
 - **A transient failure must not burn the retry cap.** Separate server-reject (→ dead, surface the
   error) from network-transient (→ retry). Conflating them silently drops real orders.
+- **A dialog owns its controllers.** Never create a `TextEditingController` beside a `showDialog`
+  call and dispose it after the `await` — the future resolves a frame before the field unmounts, and
+  the field's `dispose()` then hits a dead controller. The element never finishes deactivating and
+  the app dies on `'_dependents.isEmpty': is not true`. Put the field in a `StatefulWidget` and
+  dispose in its `State`.
 - **Never key a list row by its content.** A signature key that changes on every keystroke rebuilds
   the row and loses the caret mid-word. Key on a stable id; use the signature only to decide merges.
 - **`create or replace function` cannot change a function's arity** — it silently creates an
@@ -108,7 +113,17 @@ Mobile-specific ones, plus the shared ones that will bite again:
   re-issuing `revoke`/`grant` **naming the full new signature**: `public` holds EXECUTE by default.
 - **Every new `security definer` function needs `revoke execute from public` + an explicit grant to
   `authenticated`.** `revoke from anon` alone does nothing.
-- **Don't hand-edit generated code** (`*.g.dart`, drift output) — run the generator.
+- **Don't hand-edit generated code** (`*.g.dart`, drift output) — run the generator, and run it as
+  **`dart run build_runner build --force-jit`**. Plain `build_runner build` dies with "Failed to
+  compile build script": sqlite3 3.x uses Dart build hooks, and `dart compile exe` refuses to
+  AOT-compile a build script in that package graph.
+- **Never let a read block a write, and never `await` a network read on a tap.** Offline, an HTTP
+  call sits on a long timeout, so an awaited refresh turns a durable queued order into a spinner
+  that never resolves. Ask connectivity first, cap the wait, and leave post-write refreshes
+  unawaited. Every offline bug found on the airplane-mode run was this one shape.
+- **Cache the shell, not just the board.** Memberships and permissions are network reads; without
+  them a cold start with no coverage renders "No ordering access" and the app is useless. They are
+  cached for rendering only — the RPCs still enforce every key.
 - **iOS plugins need CocoaPods.** Without it `supabase_flutter` simply won't build on iOS, and the
   error doesn't say so plainly.
 - **Test offline on a real device in airplane mode.** A simulator's network stubbing is not the

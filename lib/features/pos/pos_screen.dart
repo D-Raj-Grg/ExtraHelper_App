@@ -6,6 +6,7 @@ import '../../core/format/money.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/tokens.dart';
 import '../../data/supabase/pos_repository.dart';
+import '../../data/sync/sync_providers.dart';
 import '../tenant/tenant_providers.dart';
 import 'models.dart';
 import 'order_composer.dart';
@@ -28,6 +29,20 @@ class _PosScreenState extends ConsumerState<PosScreen>
   late final TabController _tabs = TabController(length: 2, vsync: this);
 
   @override
+  void initState() {
+    super.initState();
+    // Warm the offline cache the moment the POS opens, not when a waiter first
+    // taps a table. The menu has to already be on the phone *before* coverage
+    // drops — fetching it at the moment it is needed is exactly too late.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(menuProvider);
+      ref.read(categoriesProvider);
+      ref.read(floorsProvider);
+    });
+  }
+
+  @override
   void dispose() {
     _tabs.dispose();
     super.dispose();
@@ -40,11 +55,46 @@ class _PosScreenState extends ConsumerState<PosScreen>
     // unbuilt and `.valueOrNull` is null — which read as "no open order" and
     // started a SECOND order on an occupied table. Awaiting the future builds
     // it if needed, so the answer is real rather than merely available.
-    final orders = await ref.read(activeOrdersProvider.future);
-    final open = orders
+    //
+    // Offline, don't await it at all: with no network the HTTP call sits on a
+    // long timeout and the tap looks dead. Ask connectivity first, and cap the
+    // wait even when there is a connection — a slow one must not freeze a tap
+    // mid-service.
+    final online = ref.read(isOnlineProvider).valueOrNull ?? true;
+    List<PosOrder>? orders;
+    if (online) {
+      try {
+        orders = await ref
+            .read(activeOrdersProvider.future)
+            .timeout(const Duration(seconds: 6));
+      } on Object {
+        orders = ref.read(activeOrdersProvider).valueOrNull;
+      }
+    } else {
+      orders = ref.read(activeOrdersProvider).valueOrNull;
+    }
+    if (!mounted) return;
+
+    // Offline, with no idea what is already on this table. A free table is
+    // safe to start; an occupied one is not — guessing "no open order" is
+    // exactly how you put a second order on a table that already has one.
+    if (orders == null && !table.isFree) {
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text(
+              "No coverage — this table's existing order can't be opened yet. "
+              'It will be there when the connection is back.',
+            ),
+          ),
+        );
+      return;
+    }
+
+    final open = (orders ?? const <PosOrder>[])
         .where((o) => o.tableId == table.id && !o.isClosed)
         .firstOrNull;
-    if (!mounted) return;
 
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -53,7 +103,12 @@ class _PosScreenState extends ConsumerState<PosScreen>
             : OrderComposer(seedTable: table),
       ),
     );
+    // The composer is gone; this screen may be too (tenant switch, sign-out).
+    // `ref` after dispose throws, and it would throw from a Future nobody
+    // awaits — an unhandled error rather than a visible one.
+    if (!mounted) return;
     await ref.read(tablesProvider.notifier).refresh();
+    if (!mounted) return;
     ref.invalidate(activeOrdersProvider);
   }
 
@@ -63,6 +118,7 @@ class _PosScreenState extends ConsumerState<PosScreen>
         builder: (_) => OrderComposer(existingOrder: order),
       ),
     );
+    if (!mounted) return;
     ref.invalidate(activeOrdersProvider);
     await ref.read(tablesProvider.notifier).refresh();
   }
@@ -71,6 +127,7 @@ class _PosScreenState extends ConsumerState<PosScreen>
     await Navigator.of(
       context,
     ).push(MaterialPageRoute<void>(builder: (_) => const OrderComposer()));
+    if (!mounted) return;
     ref.invalidate(activeOrdersProvider);
   }
 

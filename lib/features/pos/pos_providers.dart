@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../data/local/pos_cache.dart';
 import '../../data/supabase/pos_repository.dart';
 import '../../data/supabase/supabase_providers.dart';
+import '../../data/sync/sync_providers.dart';
 import '../tenant/tenant_providers.dart';
 import 'models.dart';
 
@@ -16,47 +18,171 @@ final posRepoProvider = Provider<PosRepository?>((ref) {
   return ref.watch(posRepositoryProvider(tenant.tenantId));
 });
 
-final menuProvider = FutureProvider<List<PosMenuItem>>((ref) async {
-  final repo = ref.watch(posRepoProvider);
-  if (repo == null) return const [];
-  return repo.menu();
-});
-
-final categoriesProvider = FutureProvider<List<PosCategory>>((ref) async {
-  final repo = ref.watch(posRepoProvider);
-  if (repo == null) return const [];
-  return repo.categories();
-});
-
-final floorsProvider = FutureProvider<List<PosFloor>>((ref) async {
-  final repo = ref.watch(posRepoProvider);
-  if (repo == null) return const [];
-  return repo.floors();
-});
-
-/// Tables, kept live.
+/// A read that must work on dead wifi.
 ///
-/// Realtime is a freshness optimization layered on the fetch — the screen must
-/// render correctly from the fetch alone (`CLAUDE.md` rule 5). Changed rows are
-/// merged in place rather than refetching the world, so a table's state flips
-/// without the board flickering.
-class TablesNotifier extends AsyncNotifier<List<PosTable>> {
-  RealtimeChannel? _channel;
+/// **Cache first, network second** (`CLAUDE.md` rule 5): if there are cached
+/// rows the screen gets them immediately and a refresh runs behind it; if there
+/// are none there is nothing to show but the fetch. A failed refresh never
+/// replaces good cached data with an error — the waiter would rather see this
+/// morning's menu than a red box.
+///
+/// [adoptTenant] runs first on every build, so a tenant switch wipes before a
+/// single row is read.
+abstract class _CachedList<T> extends AsyncNotifier<List<T>> {
+  Future<List<T>> readCache(PosCache cache, String tenantId);
+
+  Future<List<T>> fetch(PosRepository repo);
+
+  Future<void> writeCache(PosCache cache, String tenantId, List<T> rows);
 
   @override
-  Future<List<PosTable>> build() async {
+  Future<List<T>> build() async {
     final repo = ref.watch(posRepoProvider);
     final tenant = ref.watch(activeTenantProvider);
     if (repo == null || tenant == null) return const [];
 
-    _subscribe(tenant.tenantId);
-    ref.onDispose(() {
-      final channel = _channel;
-      _channel = null;
-      if (channel != null) unawaited(channel.unsubscribe());
-    });
+    final cache = ref.watch(posCacheProvider);
+    await cache.adoptTenant(tenant.tenantId);
 
-    return repo.tables();
+    final cached = await readCache(cache, tenant.tenantId);
+    if (cached.isNotEmpty) {
+      unawaited(refresh());
+      return cached;
+    }
+
+    // Nothing cached and no coverage. Say that, immediately — a fetch with no
+    // network sits on a long HTTP timeout, and a spinner that never resolves
+    // reads as a broken app rather than a missing one.
+    if (!await ref.read(connectivityProvider).isOnline()) {
+      throw const PosFailure(
+        "No coverage, and this hasn't been saved to this phone yet. Connect "
+        'once and it will be here next time.',
+      );
+    }
+    return _fetchAndSave(repo, cache, tenant.tenantId);
+  }
+
+  Future<List<T>> _fetchAndSave(
+    PosRepository repo,
+    PosCache cache,
+    String tenantId,
+  ) async {
+    final fresh = await fetch(repo);
+    await writeCache(cache, tenantId, fresh);
+    return fresh;
+  }
+
+  Future<void> refresh() async {
+    final repo = ref.read(posRepoProvider);
+    final tenant = ref.read(activeTenantProvider);
+    if (repo == null || tenant == null) return;
+    final cache = ref.read(posCacheProvider);
+    try {
+      state = AsyncData(await _fetchAndSave(repo, cache, tenant.tenantId));
+    } catch (e, st) {
+      // Keep what we have. Only an empty screen becomes an error screen.
+      if (state.valueOrNull?.isNotEmpty ?? false) return;
+      state = AsyncError(e, st);
+    }
+  }
+}
+
+class MenuNotifier extends _CachedList<PosMenuItem> {
+  @override
+  Future<List<PosMenuItem>> readCache(PosCache cache, String tenantId) =>
+      cache.menu(tenantId);
+
+  @override
+  Future<List<PosMenuItem>> fetch(PosRepository repo) => repo.menu();
+
+  @override
+  Future<void> writeCache(
+    PosCache cache,
+    String tenantId,
+    List<PosMenuItem> rows,
+  ) => cache.saveMenu(tenantId, rows);
+}
+
+final menuProvider = AsyncNotifierProvider<MenuNotifier, List<PosMenuItem>>(
+  MenuNotifier.new,
+);
+
+class CategoriesNotifier extends _CachedList<PosCategory> {
+  @override
+  Future<List<PosCategory>> readCache(PosCache cache, String tenantId) =>
+      cache.categories(tenantId);
+
+  @override
+  Future<List<PosCategory>> fetch(PosRepository repo) => repo.categories();
+
+  @override
+  Future<void> writeCache(
+    PosCache cache,
+    String tenantId,
+    List<PosCategory> rows,
+  ) => cache.saveCategories(tenantId, rows);
+}
+
+final categoriesProvider =
+    AsyncNotifierProvider<CategoriesNotifier, List<PosCategory>>(
+      CategoriesNotifier.new,
+    );
+
+class FloorsNotifier extends _CachedList<PosFloor> {
+  @override
+  Future<List<PosFloor>> readCache(PosCache cache, String tenantId) =>
+      cache.floors(tenantId);
+
+  @override
+  Future<List<PosFloor>> fetch(PosRepository repo) => repo.floors();
+
+  @override
+  Future<void> writeCache(
+    PosCache cache,
+    String tenantId,
+    List<PosFloor> rows,
+  ) => cache.saveFloors(tenantId, rows);
+}
+
+final floorsProvider = AsyncNotifierProvider<FloorsNotifier, List<PosFloor>>(
+  FloorsNotifier.new,
+);
+
+/// Tables, cached and kept live.
+///
+/// Realtime is a freshness optimization layered on the cache — the board must
+/// render correctly from cache alone (`CLAUDE.md` rule 5). Changed rows are
+/// merged in place *and written through to the cache*, so a cold start doesn't
+/// show a state the waiter already watched change.
+class TablesNotifier extends _CachedList<PosTable> {
+  RealtimeChannel? _channel;
+
+  @override
+  Future<List<PosTable>> readCache(PosCache cache, String tenantId) =>
+      cache.tables(tenantId);
+
+  @override
+  Future<List<PosTable>> fetch(PosRepository repo) => repo.tables();
+
+  @override
+  Future<void> writeCache(
+    PosCache cache,
+    String tenantId,
+    List<PosTable> rows,
+  ) => cache.saveTables(tenantId, rows);
+
+  @override
+  Future<List<PosTable>> build() async {
+    final tenant = ref.watch(activeTenantProvider);
+    if (tenant != null) {
+      _subscribe(tenant.tenantId);
+      ref.onDispose(() {
+        final channel = _channel;
+        _channel = null;
+        if (channel != null) unawaited(channel.unsubscribe());
+      });
+    }
+    return super.build();
   }
 
   void _subscribe(String tenantId) {
@@ -83,6 +209,9 @@ class TablesNotifier extends AsyncNotifier<List<PosTable>> {
             final row = payload.newRecord;
             if (row.isEmpty) return;
             final changed = PosTable.fromRow(row);
+            unawaited(
+              ref.read(posCacheProvider).upsertTable(tenantId, changed),
+            );
             final current = state.valueOrNull;
             if (current == null) return;
             state = AsyncData([
@@ -93,12 +222,6 @@ class TablesNotifier extends AsyncNotifier<List<PosTable>> {
         )
         .subscribe();
   }
-
-  Future<void> refresh() async {
-    final repo = ref.read(posRepoProvider);
-    if (repo == null) return;
-    state = AsyncData(await repo.tables());
-  }
 }
 
 final tablesProvider = AsyncNotifierProvider<TablesNotifier, List<PosTable>>(
@@ -106,6 +229,10 @@ final tablesProvider = AsyncNotifierProvider<TablesNotifier, List<PosTable>>(
 );
 
 /// Active orders, kept live off the same authed socket.
+///
+/// Not cached: an order list is the one screen where stale is worse than
+/// absent, and an offline waiter's own orders live in the outbox, which the
+/// composer reads directly.
 class ActiveOrdersNotifier extends AsyncNotifier<List<PosOrder>> {
   RealtimeChannel? _channel;
   Timer? _debounce;
@@ -115,6 +242,16 @@ class ActiveOrdersNotifier extends AsyncNotifier<List<PosOrder>> {
     final repo = ref.watch(posRepoProvider);
     final tenant = ref.watch(activeTenantProvider);
     if (repo == null || tenant == null) return const [];
+
+    // Say it, don't spin. This list is the one screen that genuinely needs the
+    // server — a waiter's own queued orders are in the outbox, and the board
+    // still works — so with no coverage it explains itself and offers a retry.
+    if (!await ref.read(connectivityProvider).isOnline()) {
+      throw const PosFailure(
+        'No coverage — the order list needs a connection. The tables board and '
+        'new orders still work.',
+      );
+    }
 
     _subscribe(tenant.tenantId);
     ref.onDispose(() {
@@ -172,6 +309,8 @@ class ActiveOrdersNotifier extends AsyncNotifier<List<PosOrder>> {
     try {
       state = AsyncData(await repo.activeOrders());
     } catch (e, st) {
+      // Offline is not an error state here if we already have a list.
+      if (state.valueOrNull?.isNotEmpty ?? false) return;
       state = AsyncError(e, st);
     }
   }

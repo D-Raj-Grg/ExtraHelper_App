@@ -1,8 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../data/local/identity_cache.dart';
 import '../../data/supabase/supabase_providers.dart';
 import '../../data/supabase/tenant_repository.dart';
+import '../../data/sync/sync_providers.dart';
 
 /// Which restaurant the user is working in right now.
 ///
@@ -15,13 +17,33 @@ final _prefsProvider = FutureProvider<SharedPreferences>(
   (ref) => SharedPreferences.getInstance(),
 );
 
+final identityCacheProvider = Provider<IdentityCache>(
+  (ref) => IdentityCache(ref.watch(appDatabaseProvider)),
+);
+
 /// Restaurants the user can work in. Refetched whenever auth changes, so a
 /// sign-out can't leave another user's memberships in the cache.
+///
+/// **Cache first**: a cold start with no coverage must still land the waiter in
+/// their restaurant. A failed refresh keeps the cached answer rather than
+/// signing them out of a shift.
 final membershipsProvider = FutureProvider<List<Membership>>((ref) async {
   ref.watch(authStateProvider);
   final user = ref.watch(currentUserProvider);
-  if (user == null) return const [];
-  return ref.watch(tenantRepositoryProvider).activeMemberships();
+  final cache = ref.watch(identityCacheProvider);
+  if (user == null) {
+    await cache.clear();
+    return const [];
+  }
+  try {
+    final fresh = await ref.watch(tenantRepositoryProvider).activeMemberships();
+    await cache.saveMemberships(fresh);
+    return fresh;
+  } on Object {
+    final cached = await cache.memberships();
+    if (cached.isNotEmpty) return cached;
+    rethrow;
+  }
 });
 
 /// Memberships awaiting owner approval — the difference between "ask for a
@@ -85,11 +107,24 @@ final activeTenantProvider = Provider<Membership?>((ref) {
   return memberships.first;
 });
 
-/// Granular permissions for the active tenant, straight from the server.
+/// Granular permissions for the active tenant, straight from the server —
+/// cached only so the app still draws the right surfaces with no coverage. The
+/// RPCs enforce the same keys, so this is never the boundary.
 final permissionsProvider = FutureProvider<Set<String>>((ref) async {
   final tenant = ref.watch(activeTenantProvider);
   if (tenant == null) return const {};
-  return ref.watch(tenantRepositoryProvider).permissions(tenant.tenantId);
+  final cache = ref.watch(identityCacheProvider);
+  try {
+    final fresh = await ref
+        .watch(tenantRepositoryProvider)
+        .permissions(tenant.tenantId);
+    await cache.savePermissions(tenant.tenantId, fresh);
+    return fresh;
+  } on Object {
+    final cached = await cache.permissions(tenant.tenantId);
+    if (cached.isNotEmpty) return cached;
+    rethrow;
+  }
 });
 
 /// Whether the user holds a permission key in the active tenant.
