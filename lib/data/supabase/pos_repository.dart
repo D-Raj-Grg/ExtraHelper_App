@@ -1,0 +1,331 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
+
+import '../../features/pos/models.dart';
+import 'supabase_providers.dart';
+
+/// Failure with a message a waiter can act on. The repository boundary never
+/// leaks `PostgrestException`.
+class PosFailure implements Exception {
+  const PosFailure(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+/// Reads and writes for the POS.
+///
+/// Trusted logic stays in SQL and is called by RPC — `place_staff_order` to
+/// create, `amend_order_add_item` to add to an existing order,
+/// `void_order_item` to remove a fired line, `fire_order` to send to the
+/// kitchen. Plain reads go through PostgREST under RLS, **plus an explicit
+/// tenant filter** as defense in depth (rule 2).
+class PosRepository {
+  const PosRepository(this._client, this._tenantId);
+
+  final SupabaseClient _client;
+  final String _tenantId;
+
+  static const _uuid = Uuid();
+
+  // --- Menu ----------------------------------------------------------------
+
+  Future<List<PosCategory>> categories() async {
+    final rows = await _client
+        .from('menu_categories')
+        .select('id, name, sort')
+        .eq('tenant_id', _tenantId)
+        .eq('is_active', true)
+        .order('sort');
+    return rows
+        .map(
+          (r) => PosCategory(
+            id: r['id'] as String,
+            name: (r['name'] as String?) ?? '',
+            sort: (r['sort'] as int?) ?? 0,
+          ),
+        )
+        .toList();
+  }
+
+  /// Menu with variants and **only the add-ons linked to each item**.
+  ///
+  /// The link matters: the server rejects a modifier that isn't in
+  /// `item_modifiers` for that item, so offering a tenant-wide list would build
+  /// a picker whose choices get refused ("Extra cheese" on a beer).
+  Future<List<PosMenuItem>> menu() async {
+    final rows = await _client
+        .from('menu_items')
+        .select(
+          'id, name, base_price_cents, category_id, is_86, is_veg, image_url, '
+          'item_variants(id, name, price_delta_cents), '
+          'item_modifiers(modifiers(id, name, price_cents))',
+        )
+        .eq('tenant_id', _tenantId)
+        .eq('is_active', true)
+        .order('name');
+
+    return rows.map((r) {
+      final variants =
+          (r['item_variants'] as List<dynamic>? ?? const [])
+              .map((v) => PosVariant.fromRow(v as Map<String, dynamic>))
+              .toList()
+            ..sort((a, b) => a.priceDeltaCents.compareTo(b.priceDeltaCents));
+
+      final modifiers = (r['item_modifiers'] as List<dynamic>? ?? const [])
+          .map((l) => (l as Map<String, dynamic>)['modifiers'])
+          .whereType<Map<String, dynamic>>()
+          .map(PosModifier.fromRow)
+          .toList();
+
+      return PosMenuItem(
+        id: r['id'] as String,
+        name: (r['name'] as String?) ?? '',
+        basePriceCents: (r['base_price_cents'] as int?) ?? 0,
+        categoryId: r['category_id'] as String?,
+        is86: (r['is_86'] as bool?) ?? false,
+        imageUrl: r['image_url'] as String?,
+        isVeg: r['is_veg'] as bool?,
+        variants: variants,
+        modifiers: modifiers,
+      );
+    }).toList();
+  }
+
+  // --- Floor ---------------------------------------------------------------
+
+  Future<List<PosFloor>> floors() async {
+    final rows = await _client
+        .from('floors')
+        .select('id, name, sort')
+        .eq('tenant_id', _tenantId)
+        .order('sort');
+    return rows
+        .map(
+          (r) => PosFloor(
+            id: r['id'] as String,
+            name: (r['name'] as String?) ?? '',
+            sort: (r['sort'] as int?) ?? 0,
+          ),
+        )
+        .toList();
+  }
+
+  Future<List<PosTable>> tables() async {
+    final rows = await _client
+        .from('restaurant_tables')
+        .select('id, label, capacity, state, floor_id, current_order_id')
+        .eq('tenant_id', _tenantId)
+        .order('label');
+    return rows.map((r) => PosTable.fromRow(r)).toList();
+  }
+
+  // --- Orders --------------------------------------------------------------
+
+  static const _orderSelect =
+      'id, status, order_type, created_at, table_id, guests, '
+      'restaurant_tables!orders_table_id_fkey(label), '
+      'order_items(id, name_snapshot, qty, unit_price_cents, status, is_void, notes, '
+      'order_item_modifiers(name_snapshot))';
+
+  /// Orders still on the floor. Closed and cancelled ones are history.
+  Future<List<PosOrder>> activeOrders() async {
+    final rows = await _client
+        .from('orders')
+        .select(_orderSelect)
+        .eq('tenant_id', _tenantId)
+        .not('status', 'in', '("closed","cancelled","billed")')
+        .order('created_at', ascending: false);
+    return rows.map((r) => PosOrder.fromRow(r)).toList();
+  }
+
+  Future<PosOrder?> order(String orderId) async {
+    final row = await _client
+        .from('orders')
+        .select(_orderSelect)
+        .eq('id', orderId)
+        .eq('tenant_id', _tenantId)
+        .maybeSingle();
+    return row == null ? null : PosOrder.fromRow(row);
+  }
+
+  /// Create an order in one call.
+  ///
+  /// The idempotency key is **minted here, by the client, and reused across
+  /// retries**. `place_staff_order` has a replay fast-path that returns the
+  /// existing order before any write, so a resend can't duplicate an order or
+  /// orphan a customer. Milestone F's outbox depends on this being caller-owned.
+  Future<String> placeOrder({
+    required List<CartLine> lines,
+    required String orderType,
+    String? tableId,
+    int? guests,
+    String? idempotencyKey,
+  }) async {
+    if (lines.isEmpty) throw const PosFailure('Add something first.');
+    final key = idempotencyKey ?? _uuid.v4();
+
+    try {
+      final id = await _client.rpc(
+        'place_staff_order',
+        params: {
+          '_tenant': _tenantId,
+          '_idempotency_key': key,
+          '_table_id': tableId,
+          '_order_type': orderType,
+          '_items': lines.map((l) => l.toRpcJson()).toList(),
+          '_guests': ?guests,
+        },
+      );
+      return id as String;
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    } catch (_) {
+      throw const PosFailure(
+        "Couldn't reach the server. The order was not placed.",
+      );
+    }
+  }
+
+  /// Add a line to an existing order — the shared RPC, same one the web uses,
+  /// so pricing can't drift between the two clients.
+  Future<String> addItem({
+    required String orderId,
+    required CartLine line,
+  }) async {
+    try {
+      final id = await _client.rpc(
+        'amend_order_add_item',
+        params: {
+          '_order_id': orderId,
+          '_item_id': line.item.id,
+          '_qty': line.qty,
+          if (line.variant != null) '_variant_id': line.variant!.id,
+          if (line.modifiers.isNotEmpty)
+            '_modifier_ids': line.modifiers.map((m) => m.id).toList(),
+          if (line.notes != null && line.notes!.trim().isNotEmpty)
+            '_notes': line.notes!.trim(),
+        },
+      );
+      return id as String;
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    } catch (_) {
+      throw const PosFailure("Couldn't reach the server. Nothing was added.");
+    }
+  }
+
+  /// Delete a line that was never fired. A fired line must be voided instead —
+  /// it's on a kitchen ticket, so removing it needs a reason and an audit row.
+  Future<void> deleteDraftLine(String lineId) async {
+    try {
+      await _client
+          .from('order_items')
+          .delete()
+          .eq('id', lineId)
+          .eq('tenant_id', _tenantId)
+          .eq('status', 'draft');
+    } catch (_) {
+      throw const PosFailure("Couldn't remove that line.");
+    }
+  }
+
+  /// Void a fired line. Manager-gated, reason required, audited — all enforced
+  /// inside the RPC, so the app must not offer a path that skips it.
+  Future<void> voidLine({
+    required String lineId,
+    required String reason,
+  }) async {
+    if (reason.trim().isEmpty) {
+      throw const PosFailure('A void needs a reason.');
+    }
+    try {
+      await _client.rpc(
+        'void_order_item',
+        params: {'_order_item_id': lineId, '_reason': reason.trim()},
+      );
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    }
+  }
+
+  Future<void> setLineQty({required String lineId, required int qty}) async {
+    final clamped = qty.clamp(1, 99);
+    try {
+      await _client
+          .from('order_items')
+          .update({'qty': clamped})
+          .eq('id', lineId)
+          .eq('tenant_id', _tenantId)
+          .eq('status', 'draft');
+    } catch (_) {
+      throw const PosFailure("Couldn't change the quantity.");
+    }
+  }
+
+  /// Send to the kitchen. Splits per station into KOTs server-side; idempotent,
+  /// so a double-tap can't double-print.
+  Future<void> fireOrder(String orderId) async {
+    try {
+      await _client.rpc('fire_order', params: {'_order_id': orderId});
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    } catch (_) {
+      throw const PosFailure(
+        "Couldn't reach the kitchen. Check the order before re-firing.",
+      );
+    }
+  }
+
+  Future<void> cancelOrder({
+    required String orderId,
+    required String reason,
+  }) async {
+    try {
+      await _client.rpc(
+        'cancel_order',
+        params: {'_order_id': orderId, '_reason': reason.trim()},
+      );
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    }
+  }
+
+  /// Turn the RPCs' SQL prose into something a waiter can act on. Anything
+  /// unmapped passes through — an opaque message beats a swallowed one.
+  static String _friendly(String message) {
+    final m = message.toLowerCase();
+    if (m.contains('modifier not available')) {
+      return "That add-on isn't available for this dish.";
+    }
+    if (m.contains("is 86'd") || m.contains('out of stock')) {
+      return message.split('\n').first;
+    }
+    if (m.contains('cannot be amended')) {
+      return "This order is closed — it can't be changed.";
+    }
+    if (m.contains('not authorized') || m.contains('not permitted')) {
+      return "You don't have permission to do that.";
+    }
+    if (m.contains('variant not found')) {
+      return 'That size is no longer available.';
+    }
+    if (m.contains('item not found')) {
+      return 'That dish is no longer on the menu.';
+    }
+    if (m.contains('no valid items')) {
+      return 'None of those dishes are available any more.';
+    }
+    if (m.contains('table implies')) {
+      return 'Pick a table or takeaway, not both.';
+    }
+    return message;
+  }
+}
+
+final posRepositoryProvider = Provider.family<PosRepository, String>(
+  (ref, tenantId) => PosRepository(ref.watch(supabaseProvider), tenantId),
+);

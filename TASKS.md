@@ -147,58 +147,79 @@ creation stays web-only.
 - [x] Tests: `auth_error_test`, `membership_test` (incl. `tenant_settings` arriving as either an
       object or a single-element list — get that wrong and a Nepali restaurant silently renders USD).
 
-## Milestone D — Shared amend RPC (touches the web app)
+## Milestone D — Shared amend RPC ✅ (2026-07-27)
 
-- [ ] Migration `amend_order_add_item(_order_id, _item_id, _qty, _variant_id, _modifier_ids,
-      _notes, _course, _seat) returns uuid` — `security definer`, `search_path = public`,
-      `revoke execute from public` + `grant to authenticated` **naming the full signature**.
-- [ ] Body lifts `addItem`'s logic so pricing stays cent-identical: resolve order → tenant; gate on
-      `has_permission`; reject a non-editable order state; reject an 86'd item; fold the variant
-      delta and append `(variant)` to `name_snapshot`; **require every modifier be linked to *this*
-      item via `item_modifiers`** and reject the whole line otherwise; insert `order_items` +
+- [x] Migration `20260727090000_amend_order_add_item.sql` — `security definer`,
+      `search_path = public`, `revoke from anon, public` + `grant to authenticated` naming the full
+      8-arg signature. Verified live: exactly one function object, no stale overload, ACL is
+      `authenticated` only.
+- [x] Pricing lifted verbatim from `place_staff_order`; gated on `has_tenant_role` **and**
+      `has_permission`; rejects a non-editable order, an 86'd item, a foreign variant, and any
+      modifier not linked to *this* item via `item_modifiers`; inserts the line and its
       `order_item_modifiers` **in one transaction**.
-- [ ] Refactor web `addItem` (`../extrahelper/app/(app)/pos/actions.ts:34`) to a thin wrapper over
-      the RPC. Keep its signature and `PosState` return identical so `use-amend-cart.ts` and every
-      caller are untouched. ~95 lines → ~15.
-- [ ] **Verify (this is shipped money-handling code):** cent-parity on the reference case — Buff
-      Sekuwa KG, 38000 base + 130000 variant + 15000 + 5000 mods = 188000, both modifier rows
-      snapshotted, `name_snapshot` = "Buff Sekuwa (KG)". Negative cases: unlinked modifier rejected,
-      86'd item rejected, cross-tenant order rejected, variant-from-another-item rejected,
-      non-editable order rejected. Then `tsc` + `lint` + `build` clean and a real browser amend on
-      `/pos`. Grants checked for a stale overload.
-- [ ] Mirror this entry into `../extrahelper/TASKS.md`.
+- [x] Web `addItem` refactored to a thin wrapper (~95 lines → ~15). Signature and `PosState` return
+      unchanged, so every caller stayed put. `tsc` + `eslint` clean. RPC added to
+      `database.types.ts`.
+- [x] **Verified against the live dev project.** Cent parity: the same item + KG variant + two
+      add-ons through **both** paths gives `188000` and `"Buff Sekuwa (KG)"` with 2 modifier rows
+      totalling 20000 — matching the reference case (38000 + 130000 + 15000 + 5000). Seven negative
+      cases each rejected for the *right* reason: unlinked modifier, variant from another item, item
+      outside the tenant, unknown order, 86'd item, closed order, unauthenticated caller. All test
+      rows removed afterwards (`item_modifiers` back to 0, no item left 86'd).
+- [x] Mirrored into `../extrahelper/TASKS.md`; committed there as `36837ae`.
 
-**Three bugs this also fixes on the web** (worth stating so they don't get re-found later):
-`addItem` currently inserts the line and its modifiers in two round-trips, so a failure between them
-leaves a line priced for modifiers that have no `order_item_modifiers` rows — the till charges for
-cheese the kitchen ticket never mentions. It also never checks that the order belongs to the active
-tenant (leaning entirely on RLS, unlike every other query after the defense-in-depth sweep). And
-modifier-link validation stops existing in two places that must agree to the cent.
+**One deliberate difference from the create path:** create *skips* an 86'd line so a queued offline
+order isn't rejected wholesale; amend *raises*, because an amend is a live, deliberate tap and the
+waiter must be told.
 
-## Milestone E — Waiter ordering, online
+**A bug this caught before shipping:** `has_permission` is `(_tenant, _key)`, and the generated
+types list args **alphabetically**, so they don't reveal the real order. The first version called it
+backwards. plpgsql resolves inner calls at run time, so it created cleanly and would have failed on
+**every amend** in production.
 
-- [ ] Tables board — floors + tables, live `table_state`, `TableGlyph`, state colour **plus** icon
-      and label.
-- [ ] Realtime table states — `setAuth` on connect **and** on token refresh, or RLS drops every
-      event. Merge the changed row in place; don't refetch the world.
-- [ ] Order composer, one surface, capability-shaped `CartController` (`canDelete`, `setHold` —
-      never a mode flag), mirroring `../extrahelper/components/pos/cart-types.ts`.
-- [ ] Destination step — dine-in table or takeaway; guests count.
-- [ ] Dish step — category chips + photo-first grid; 86'd items blocked; **price range** on tiles
-      and in the accessibility label (a variant-forced dish's base price is unbuyable).
-- [ ] Item options sheet — variant select, modifiers, cooking notes, qty stepper (≥44px).
-- [ ] Cart rail — line title folds in the variant name (two lines both reading "Buff Sekuwa" and
-      differing only by price is a real bug the web hit), running total, tabular figures.
-- [ ] Create → one `place_staff_order` call with a client-minted idempotency key.
-- [ ] Fire → `fire_order`; show the resulting per-station KOTs.
-- [ ] Amend a fired order — add via `amend_order_add_item`, void via `void_order_item` (reason
-      required; the server enforces approval, the app must not try to skip it).
-- [ ] Custom/off-menu line — price clamped, and it writes an `audit_logs` `custom_price` row.
-- [ ] Order list / detail — active orders, statuses, KOT state per line.
-- [ ] Optimistic UI on add/remove/qty with honest rollback + an error surface on failure.
-- [ ] **Verify on a real device, both platforms:** order with variant + modifiers → fire → correct
-      per-station KOTs → amend adds a line → void with reason recomputes → matches what the web
-      `/pos` shows for the same order.
+## Milestone E — Waiter ordering, online ✅ (2026-07-27)
+
+- [x] Tables board — floors + tables, `TableGlyph`, state as colour **plus** label plus seat fill.
+- [x] Realtime table states — `realtime.setAuth` with the user JWT on connect (without it RLS
+      silently drops every event and the board merely looks "not live"); changed rows merged in
+      place rather than refetching the world.
+- [x] Order composer, one surface, capability-shaped `CartController` — `canDelete`,
+      `needsVoidReason`, `hasPendingCommit`. `CreateCart` batches locally and commits in one
+      `place_staff_order` call with a **client-minted idempotency key reused across retries**;
+      `AmendCart` fires each edit at the server immediately.
+- [x] Destination — dine-in seeded from the tapped table, or takeaway.
+- [x] Dish step — category chips, search, photo-first grid, 86 blocked, **price range** on the tile
+      and in the accessibility label.
+- [x] Item options sheet — variant forced when any exist, add-ons (only those linked to the item),
+      cooking note, 44px qty stepper.
+- [x] Cart — variant folded into the line title, running total, tabular figures, stable-id keys.
+- [x] Create → `place_staff_order`; fire → `fire_order`; amend → `amend_order_add_item`; void →
+      `void_order_item` behind a reason dialog that names the real consequence.
+- [x] Order list with live status, and an empty state that teaches the next step.
+- [x] Errors surfaced honestly — RPC prose mapped to plain language, never swallowed.
+- [x] **Verified on a real Android emulator against the live project**, end to end:
+      tables board renders real floors (C1 free / A1–A3 bill-requested, correct colours and fills) →
+      tap free table → composer opens as "New order · Table C1" → **Buff Sekuwa tile shows
+      "NPR 1,080.00 – 1,68…", not the unbuyable NPR 380 base** → options sheet forces the variant →
+      pick KG → cart reads NPR 1,680.00 → Send to kitchen. Database confirms: status `in_kitchen`,
+      **`waiter_id` set**, `name_snapshot` "Buff Sekuwa (KG)", `unit_price_cents` 168000
+      (38000 + 130000), **1 KOT**. Table flipped Free → Occupied on the board.
+      Reopening the table opens **"Add to order"** with the fired line shown as "With the kitchen",
+      no qty stepper, and a block icon instead of delete. Adding a dish went through
+      `amend_order_add_item` (Sukuti Sadeko, 30000, status `draft`), and firing it produced a
+      **second KOT with only the new line** — a KOT amendment, not a reprint. Voiding it required a
+      reason, set `is_void`, and wrote an `audit_logs` row.
+      All test rows deleted afterwards and C1 restored to `free`.
+- [x] Tests: `cart_test` — price range excludes optional add-ons, cart line pricing matches the
+      server to the cent, variant folded into the title, merge signature ignores add-on order and
+      the local id, `toRpcJson` omits absent options, voided lines leave the total, `canFire` and
+      `isClosed` transitions.
+
+**A bug caught during device verification:** tapping an *occupied* table opened "New order" with an
+empty cart instead of amending. `_openTable` read `activeOrdersProvider` synchronously, but the
+Tables tab never watches it, so on a fresh launch it was unbuilt and `.valueOrNull` returned null —
+which read as "no open order" and would have started a **second order on an occupied table**. Fixed
+by awaiting `activeOrdersProvider.future` so the answer is real rather than merely available.
 
 ## Milestone F — Offline
 

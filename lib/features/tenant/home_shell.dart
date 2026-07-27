@@ -7,17 +7,93 @@ import '../../core/format/money.dart';
 import '../../core/theme/tokens.dart';
 import '../../data/supabase/auth_repository.dart';
 import '../../data/supabase/supabase_providers.dart';
+import '../pos/pos_screen.dart';
 import 'tenant_providers.dart';
 import 'tenant_switcher.dart';
 
-/// The signed-in shell.
+/// The signed-in shell: the POS is the app's home surface, because taking an
+/// order is what a waiter opened this for.
 ///
-/// Milestone C's job is to prove the chain end to end — session → tenant →
-/// permissions — so this shows what was resolved and which surfaces the user's
-/// permissions unlock. The tables board and order composer replace the body in
-/// Milestone E.
+/// The account/permissions view moved behind the person icon — useful for
+/// checking why a button is missing, not something to look at mid-service.
 class HomeShell extends ConsumerWidget {
   const HomeShell({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final canSeeTables = ref.watch(hasPermissionProvider('tables.view'));
+    final canOrder = ref.watch(hasPermissionProvider('order.create'));
+    final permissionsLoaded =
+        ref.watch(permissionsProvider).valueOrNull != null;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const TenantSwitcher(),
+        actions: [
+          IconButton(
+            tooltip: 'Account',
+            icon: const Icon(Icons.person_outline),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const AccountScreen()),
+            ),
+          ),
+          if (kDebugMode)
+            IconButton(
+              tooltip: 'Design system',
+              icon: const Icon(Icons.palette_outlined),
+              onPressed: () => context.push('/dev/design'),
+            ),
+        ],
+      ),
+      // Permissions decide what exists, and default to false while loading, so
+      // a surface never flashes up and then vanishes.
+      body: !permissionsLoaded
+          ? const Center(child: CircularProgressIndicator())
+          : (canSeeTables || canOrder)
+          ? const PosScreen()
+          : const _NoPosAccess(),
+    );
+  }
+}
+
+/// Signed in, in a restaurant, but without the keys to take orders — a real
+/// state for a kitchen or inventory role. Say which, and what to do about it.
+class _NoPosAccess extends StatelessWidget {
+  const _NoPosAccess();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.lock_outline,
+              size: 40,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 12),
+            Text('No ordering access', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 6),
+            Text(
+              "Your role in this restaurant doesn't include taking orders. An "
+              'owner or manager can change that on the web app under Team.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Who you are, where you are, and what you're allowed to do.
+class AccountScreen extends ConsumerWidget {
+  const AccountScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -28,14 +104,8 @@ class HomeShell extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const TenantSwitcher(),
+        title: const Text('Account'),
         actions: [
-          if (kDebugMode)
-            IconButton(
-              tooltip: 'Design system',
-              icon: const Icon(Icons.palette_outlined),
-              onPressed: () => context.push('/dev/design'),
-            ),
           IconButton(
             tooltip: 'Sign out',
             icon: const Icon(Icons.logout),
@@ -98,11 +168,6 @@ class HomeShell extends ConsumerWidget {
                             ),
                       ],
                     ),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'Taking orders lands in Milestone E.',
-              style: theme.textTheme.bodySmall,
             ),
           ],
         ),
