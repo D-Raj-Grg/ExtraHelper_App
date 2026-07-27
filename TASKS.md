@@ -388,6 +388,16 @@ surface must never appear and then vanish.
 
 ## Backlog / Later phases
 
+- [ ] **Offline on a physical iPhone, in airplane mode.** The one verification `CLAUDE.md` asks for
+      that is still outstanding. A simulator has no airplane mode and `connectivity_plus` there
+      reports the *host's* network, so it proves nothing. Blocked on the device being unlocked with
+      developer services enabled — signing itself already works
+      (`Apple Development: divyashwar@icloud.com`). Everything else in Milestone F is verified on
+      the Android emulator.
+- [ ] **Decide on a `menu.86` permission key.** The kitchen must be able to 86 a dish but must not
+      hold `menu.edit` (which is full menu editing, prices included), so `set_item_86` checks the
+      role directly today. A dedicated key is the clean fix; it is a shared-catalog change, so it
+      lands in `../extrahelper/TASKS.md` too.
 - [ ] Owner dashboard — KPI tiles + revenue chart, read-only. Closes the `mobile (Flutter)` TODO on
       `../extrahelper/TASKS.md` line 77.
 - [ ] Inventory — stock counts and adjustments in the store room; barcode/QR scan via camera.
