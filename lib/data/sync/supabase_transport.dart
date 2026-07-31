@@ -1,3 +1,4 @@
+import '../supabase/inventory_repository.dart';
 import '../supabase/pos_repository.dart';
 import 'transport.dart';
 
@@ -7,9 +8,10 @@ import 'transport.dart';
 /// gets retried; anything else the repository raised was a considered "no" from
 /// Postgres and must not be retried into a silent loop.
 class SupabaseTransport implements OutboxTransport {
-  const SupabaseTransport(this._repo);
+  const SupabaseTransport(this._repo, this._inventory);
 
   final PosRepository _repo;
+  final InventoryRepository _inventory;
 
   @override
   Future<String> placeOrder({
@@ -90,6 +92,20 @@ class SupabaseTransport implements OutboxTransport {
   }) async {
     try {
       await _repo.setTableState(tableId: tableId, state: state);
+    } on PosTransientFailure catch (e) {
+      throw TransportTransient(e.message);
+    } on PosFailure catch (e) {
+      throw TransportRejected(e.message);
+    }
+  }
+
+  @override
+  Future<void> setCountActual({
+    required String countItemId,
+    required double actual,
+  }) async {
+    try {
+      await _inventory.setCountActual(countItemId: countItemId, actual: actual);
     } on PosTransientFailure catch (e) {
       throw TransportTransient(e.message);
     } on PosFailure catch (e) {

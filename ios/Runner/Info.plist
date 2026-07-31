@@ -47,5 +47,7 @@
 		<true/>
 		<key>UIStatusBarHidden</key>
 		<false/>
+		<key>NSCameraUsageDescription</key>
+		<string>ExtraHelper uses the camera to scan item labels while you count the store room. You can always search by name instead.</string>
 	</dict>
 </plist>

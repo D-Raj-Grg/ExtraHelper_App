@@ -49,4 +49,10 @@ abstract class OutboxTransport {
   Future<void> setItem86({required String itemId, required bool is86});
 
   Future<void> setTableState({required String tableId, required String state});
+
+  /// An absolute counted quantity for one line of a stock count.
+  Future<void> setCountActual({
+    required String countItemId,
+    required double actual,
+  });
 }

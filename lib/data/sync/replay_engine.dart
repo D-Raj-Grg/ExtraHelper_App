@@ -136,6 +136,13 @@ class ReplayEngine {
           tableId: entry.payload['table_id'] as String,
           state: entry.payload['state'] as String,
         );
+      case OutboxKind.stockCount:
+        await _transport.setCountActual(
+          countItemId: entry.payload['count_item_id'] as String,
+          // Written by us, but it has been through JSON: an integer count comes
+          // back as `int`, not `double`.
+          actual: (entry.payload['actual'] as num).toDouble(),
+        );
     }
   }
 }

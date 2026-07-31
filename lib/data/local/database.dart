@@ -126,6 +126,28 @@ class CachedPermissions extends Table with _TenantScoped {
   Set<Column<Object>> get primaryKey => {tenantId, key};
 }
 
+/// The store room, for reading with no coverage.
+///
+/// A walk-in freezer or a back store room is exactly where the signal dies, and
+/// a count is a job you walk into a room to do. This holds enough to list and
+/// search what needs counting; the counted numbers themselves go through the
+/// outbox.
+class CachedInventoryItems extends Table with _TenantScoped {
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+  TextColumn get uom => text()();
+  TextColumn get category => text().nullable()();
+  RealColumn get currentQty => real()();
+  RealColumn get reorderLevel => real()();
+  IntColumn get costCents => integer()();
+
+  /// Null for most items — the scanner falls back to search.
+  TextColumn get barcode => text().nullable()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {tenantId, id};
+}
+
 /// The write path. One row per owed write.
 class OutboxRows extends Table {
   IntColumn get id => integer().autoIncrement()();
@@ -156,6 +178,7 @@ class OutboxRows extends Table {
     CachedTables,
     CachedMemberships,
     CachedPermissions,
+    CachedInventoryItems,
     OutboxRows,
   ],
 )
@@ -166,11 +189,11 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.memory() : super(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
-  /// v2 added the identity cache. A phone that already has a v1 file is
-  /// upgraded in place — dropping the file would take the outbox with it, and
-  /// the outbox may be holding a real order.
+  /// v2 added the identity cache, v3 the store room. A phone that already has an
+  /// older file is upgraded in place — dropping the file would take the outbox
+  /// with it, and the outbox may be holding a real order.
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) => m.createAll(),
@@ -178,6 +201,9 @@ class AppDatabase extends _$AppDatabase {
       if (from < 2) {
         await m.createTable(cachedMemberships);
         await m.createTable(cachedPermissions);
+      }
+      if (from < 3) {
+        await m.createTable(cachedInventoryItems);
       }
     },
   );

@@ -189,6 +189,43 @@ class OrderQueue {
     return _drainAndReport(entry.id, entry.orderRef);
   }
 
+  /// Record a counted quantity for one line of a stock count.
+  ///
+  /// Counting a shelf twice is normal — someone miscounts, or finds another
+  /// case behind the door. So a still-pending entry for the same line has its
+  /// payload **replaced** rather than a second entry queued: the value is
+  /// absolute, only the last one matters, and a queue of five edits to one line
+  /// would show the store keeper five owed writes for one shelf.
+  Future<QueueOutcome> setCountActual({
+    required String countItemId,
+    required double actual,
+  }) async {
+    final ref = 'count_item:$countItemId';
+    final payload = {'count_item_id': countItemId, 'actual': actual};
+
+    final pending = (await _store.due())
+        .where(
+          (e) =>
+              e.kind == OutboxKind.stockCount &&
+              e.orderRef == ref &&
+              e.state == OutboxState.pending,
+        )
+        .firstOrNull;
+    if (pending != null) {
+      await _store.updatePayload(pending.id, payload);
+      return _drainAndReport(pending.id, ref);
+    }
+
+    final entry = await _store.enqueue(
+      tenantId: _tenantId,
+      kind: OutboxKind.stockCount,
+      orderRef: ref,
+      idempotencyKey: _uuid.v4(),
+      payload: payload,
+    );
+    return _drainAndReport(entry.id, ref);
+  }
+
   /// Has the server finished with this row, one way or the other? A settled
   /// row is either on the server or given up on — in both cases the composer
   /// must stop drawing its own optimistic copy of the line.

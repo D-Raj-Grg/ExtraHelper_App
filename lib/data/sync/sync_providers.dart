@@ -8,6 +8,7 @@ import '../../features/tenant/tenant_providers.dart';
 import '../local/database.dart';
 import '../local/drift_outbox_store.dart';
 import '../local/pos_cache.dart';
+import '../supabase/inventory_repository.dart';
 import 'connectivity.dart';
 import 'order_queue.dart';
 import 'outbox.dart';
@@ -42,11 +43,15 @@ final isOnlineProvider = StreamProvider<bool>((ref) async* {
 
 final replayEngineProvider = Provider<ReplayEngine?>((ref) {
   final repo = ref.watch(posRepoProvider);
-  if (repo == null) return null;
+  final tenant = ref.watch(activeTenantProvider);
+  if (repo == null || tenant == null) return null;
   final watcher = ref.watch(connectivityProvider);
   return ReplayEngine(
     store: ref.watch(outboxStoreProvider),
-    transport: SupabaseTransport(repo),
+    transport: SupabaseTransport(
+      repo,
+      ref.watch(inventoryRepositoryProvider(tenant.tenantId)),
+    ),
     isOnline: watcher.isOnline,
   );
 });

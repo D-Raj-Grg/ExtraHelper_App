@@ -2,6 +2,7 @@ import 'package:extrahelper/data/local/database.dart';
 import 'package:extrahelper/data/local/drift_outbox_store.dart';
 import 'package:extrahelper/data/local/identity_cache.dart';
 import 'package:extrahelper/data/local/pos_cache.dart';
+import 'package:extrahelper/data/supabase/inventory_repository.dart';
 import 'package:extrahelper/data/supabase/tenant_repository.dart';
 import 'package:extrahelper/data/sync/outbox.dart';
 import 'package:extrahelper/data/sync/replay_engine.dart';
@@ -50,6 +51,12 @@ class _RecordingTransport implements OutboxTransport {
     required String tableId,
     required String state,
   }) async => calls.add('setTableState:$tableId:$state');
+
+  @override
+  Future<void> setCountActual({
+    required String countItemId,
+    required double actual,
+  }) async => calls.add('setCountActual:$countItemId:$actual');
 }
 
 PosMenuItem _item(
@@ -466,6 +473,64 @@ void main() {
 
       expect((await cache.menu('t1')).single.is86, isTrue);
       expect((await cache.menu('t2')).single.is86, isFalse);
+    });
+  });
+
+  group('store room cache', () {
+    late AppDatabase db;
+
+    setUp(() => db = AppDatabase.memory());
+    tearDown(() => db.close());
+
+    InventoryItem inv(String id, {String name = 'Flour', double qty = 8}) =>
+        InventoryItem(
+          id: id,
+          name: name,
+          uom: 'kg',
+          currentQty: qty,
+          reorderLevel: 10,
+          costCents: 12000,
+          barcode: '590$id',
+        );
+
+    test('a count in a walk-in reads its worklist from cache alone', () async {
+      final cache = PosCache(db);
+      await cache.saveInventory('t1', [
+        inv('i1', name: 'Flour'),
+        inv('i2', name: 'Rice', qty: 40),
+      ]);
+
+      final rows = await cache.inventory('t1');
+      expect(rows.map((r) => r.name), ['Flour', 'Rice']);
+      // The low flag has to survive the round trip: it is the reason the list
+      // is sorted the way it is.
+      expect(rows.firstWhere((r) => r.name == 'Flour').isLow, isTrue);
+      expect(rows.firstWhere((r) => r.name == 'Rice').isLow, isFalse);
+      expect(rows.first.barcode, '590i1');
+    });
+
+    test(
+      "switching tenant takes the other restaurant's stock with it",
+      () async {
+        final cache = PosCache(db);
+        await cache.adoptTenant('t1');
+        await cache.saveInventory('t1', [inv('i1')]);
+        expect(await cache.inventory('t1'), isNotEmpty);
+
+        await cache.adoptTenant('t2');
+
+        expect(await cache.inventory('t1'), isEmpty);
+        expect(await cache.inventory('t2'), isEmpty);
+      },
+    );
+
+    test('one restaurant cannot see another quantities', () async {
+      final cache = PosCache(db);
+      await cache.saveInventory('t1', [inv('i1', qty: 8)]);
+      await cache.saveInventory('t2', [inv('i1', qty: 99)]);
+
+      expect((await cache.inventory('t1')).single.currentQty, 8);
+      expect((await cache.inventory('t2')).single.currentQty, 99);
     });
   });
 }

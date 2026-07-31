@@ -11,7 +11,21 @@ import 'dart:convert';
 /// queue for the same reason orders do: they are things other staff need to see
 /// (a sold-out dish, a table freed) and they are safe to replay, because both
 /// are last-write-wins on a single row rather than an append.
-enum OutboxKind { order, amendAdd, amendVoid, fire, menu86, tableState }
+///
+/// `stockCount` queues on the same argument, and a store room or walk-in is
+/// exactly where coverage dies. It carries an **absolute** counted quantity, so
+/// a replay writes the same number again. A stock *adjustment* is deliberately
+/// **not** here: it is a delta, `adjust_inventory` takes no idempotency key, and
+/// a delta replayed twice moves stock twice.
+enum OutboxKind {
+  order,
+  amendAdd,
+  amendVoid,
+  fire,
+  menu86,
+  tableState,
+  stockCount,
+}
 
 /// `inflight` is a **persisted** state, not a memory flag (rule 4). A process
 /// killed mid-call leaves the row `inflight`; the next run re-attempts it under

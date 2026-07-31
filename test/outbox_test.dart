@@ -78,6 +78,15 @@ class FakeTransport implements OutboxTransport {
     calls.add('setTableState:$tableId:$state');
     _maybeThrow();
   }
+
+  @override
+  Future<void> setCountActual({
+    required String countItemId,
+    required double actual,
+  }) async {
+    calls.add('setCountActual:$countItemId:$actual');
+    _maybeThrow();
+  }
 }
 
 CartLine _line(String itemId, {int qty = 1}) => CartLine(
@@ -500,6 +509,106 @@ void main() {
       final dead = await h.queue.deadEntries();
       expect(dead.single.kind, OutboxKind.tableState);
       expect(dead.single.lastError, 'table A1 still has an open order');
+    });
+  });
+
+  group('stock counts', () {
+    ({MemoryOutboxStore store, FakeTransport transport, OrderQueue queue})
+    harness({required bool Function() online}) {
+      final store = MemoryOutboxStore();
+      final transport = FakeTransport();
+      final engine = ReplayEngine(
+        store: store,
+        transport: transport,
+        isOnline: () async => online(),
+      );
+      return (
+        store: store,
+        transport: transport,
+        queue: OrderQueue(store: store, engine: engine, tenantId: 'tenant-1'),
+      );
+    }
+
+    test('a count made in a walk-in reaches the server later', () async {
+      var online = false;
+      final h = harness(online: () => online);
+
+      final outcome = await h.queue.setCountActual(
+        countItemId: 'line-1',
+        actual: 12,
+      );
+      expect(outcome.synced, isFalse, reason: 'no coverage in the walk-in');
+      expect(h.transport.calls, isEmpty);
+
+      online = true;
+      await h.queue.setCountActual(countItemId: 'line-2', actual: 3.5);
+
+      expect(h.transport.calls, [
+        'setCountActual:line-1:12.0',
+        'setCountActual:line-2:3.5',
+      ]);
+      expect(await h.queue.pendingCount(), 0);
+    });
+
+    test(
+      'recounting the same shelf replaces the queued value, never queues twice',
+      () async {
+        var online = false;
+        final h = harness(online: () => online);
+
+        await h.queue.setCountActual(countItemId: 'line-1', actual: 9);
+        await h.queue.setCountActual(countItemId: 'line-1', actual: 11);
+        await h.queue.setCountActual(countItemId: 'line-1', actual: 10);
+
+        // One shelf, one owed write — not three. A store keeper who miscounts
+        // twice must not see three pending writes for one shelf.
+        expect(await h.queue.pendingCount(), 1);
+
+        online = true;
+        await h.queue.setCountActual(countItemId: 'line-1', actual: 10);
+
+        // And only the last number reaches the server.
+        expect(h.transport.calls, ['setCountActual:line-1:10.0']);
+      },
+    );
+
+    test(
+      'replaying an already-sent count is harmless — it is absolute',
+      () async {
+        final h = harness(online: () => true);
+
+        await h.queue.setCountActual(countItemId: 'line-1', actual: 4);
+        // Simulate the app dying between the call and the row being marked done:
+        // the row goes back to inflight and is replayed under the same key.
+        final row = (await h.store.all()).single;
+        await h.store.markInflight(row.id);
+        await h.queue.setCountActual(countItemId: 'line-9', actual: 1);
+
+        expect(h.transport.calls, [
+          'setCountActual:line-1:4.0',
+          'setCountActual:line-1:4.0',
+          'setCountActual:line-9:1.0',
+        ]);
+        // Writing 4 twice leaves 4. That is the whole reason a count may queue
+        // and an adjustment may not.
+      },
+    );
+
+    test('a refused count dies with its reason, and says which line', () async {
+      final h = harness(online: () => true);
+      h.transport.failures.add(
+        const TransportRejected('this count was already posted'),
+      );
+
+      final outcome = await h.queue.setCountActual(
+        countItemId: 'line-1',
+        actual: 7,
+      );
+
+      expect(outcome.error, 'this count was already posted');
+      final dead = await h.queue.deadEntries();
+      expect(dead.single.kind, OutboxKind.stockCount);
+      expect(dead.single.orderRef, 'count_item:line-1');
     });
   });
 }

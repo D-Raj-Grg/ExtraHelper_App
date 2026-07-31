@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 import '../../features/pos/models.dart';
+import '../supabase/inventory_repository.dart' show InventoryItem;
 import 'database.dart';
 
 /// The read path, on disk.
@@ -52,6 +53,9 @@ class PosCache {
       _db.cachedPermissions,
     )..where((t) => t.tenantId.equals(tenantId).not())).go();
     await (_db.delete(
+      _db.cachedInventoryItems,
+    )..where((t) => t.tenantId.equals(tenantId).not())).go();
+    await (_db.delete(
       _db.cacheMeta,
     )..where((t) => t.tenantId.equals(tenantId).not())).go();
   });
@@ -65,8 +69,58 @@ class PosCache {
     await _db.delete(_db.cachedFloors).go();
     await _db.delete(_db.cachedTables).go();
     await _db.delete(_db.cachedPermissions).go();
+    await _db.delete(_db.cachedInventoryItems).go();
     await _db.delete(_db.cacheMeta).go();
   });
+
+  /// The store room, cached for a count with no coverage.
+  Future<void> saveInventory(String tenantId, List<InventoryItem> rows) =>
+      _db.transaction(() async {
+        await (_db.delete(
+          _db.cachedInventoryItems,
+        )..where((t) => t.tenantId.equals(tenantId))).go();
+        await _db.batch((b) {
+          for (final i in rows) {
+            b.insert(
+              _db.cachedInventoryItems,
+              CachedInventoryItemsCompanion.insert(
+                tenantId: tenantId,
+                id: i.id,
+                name: i.name,
+                uom: i.uom,
+                currentQty: i.currentQty,
+                reorderLevel: i.reorderLevel,
+                costCents: i.costCents,
+                category: Value(i.category),
+                barcode: Value(i.barcode),
+              ),
+              mode: InsertMode.insertOrReplace,
+            );
+          }
+        });
+      });
+
+  Future<List<InventoryItem>> inventory(String tenantId) async {
+    final rows =
+        await (_db.select(_db.cachedInventoryItems)
+              ..where((t) => t.tenantId.equals(tenantId))
+              ..orderBy([(t) => OrderingTerm.asc(t.name)]))
+            .get();
+    return rows
+        .map(
+          (r) => InventoryItem(
+            id: r.id,
+            name: r.name,
+            uom: r.uom,
+            currentQty: r.currentQty,
+            reorderLevel: r.reorderLevel,
+            costCents: r.costCents,
+            category: r.category,
+            barcode: r.barcode,
+          ),
+        )
+        .toList();
+  }
 
   Future<DateTime?> fetchedAt(String tenantId) async {
     final row = await (_db.select(

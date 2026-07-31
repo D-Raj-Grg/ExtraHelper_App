@@ -3443,6 +3443,575 @@ class CachedPermissionsCompanion extends UpdateCompanion<CachedPermission> {
   }
 }
 
+class $CachedInventoryItemsTable extends CachedInventoryItems
+    with TableInfo<$CachedInventoryItemsTable, CachedInventoryItem> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CachedInventoryItemsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _tenantIdMeta = const VerificationMeta(
+    'tenantId',
+  );
+  @override
+  late final GeneratedColumn<String> tenantId = GeneratedColumn<String>(
+    'tenant_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _uomMeta = const VerificationMeta('uom');
+  @override
+  late final GeneratedColumn<String> uom = GeneratedColumn<String>(
+    'uom',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _categoryMeta = const VerificationMeta(
+    'category',
+  );
+  @override
+  late final GeneratedColumn<String> category = GeneratedColumn<String>(
+    'category',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _currentQtyMeta = const VerificationMeta(
+    'currentQty',
+  );
+  @override
+  late final GeneratedColumn<double> currentQty = GeneratedColumn<double>(
+    'current_qty',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _reorderLevelMeta = const VerificationMeta(
+    'reorderLevel',
+  );
+  @override
+  late final GeneratedColumn<double> reorderLevel = GeneratedColumn<double>(
+    'reorder_level',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _costCentsMeta = const VerificationMeta(
+    'costCents',
+  );
+  @override
+  late final GeneratedColumn<int> costCents = GeneratedColumn<int>(
+    'cost_cents',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _barcodeMeta = const VerificationMeta(
+    'barcode',
+  );
+  @override
+  late final GeneratedColumn<String> barcode = GeneratedColumn<String>(
+    'barcode',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    tenantId,
+    id,
+    name,
+    uom,
+    category,
+    currentQty,
+    reorderLevel,
+    costCents,
+    barcode,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'cached_inventory_items';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CachedInventoryItem> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('tenant_id')) {
+      context.handle(
+        _tenantIdMeta,
+        tenantId.isAcceptableOrUnknown(data['tenant_id']!, _tenantIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_tenantIdMeta);
+    }
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('uom')) {
+      context.handle(
+        _uomMeta,
+        uom.isAcceptableOrUnknown(data['uom']!, _uomMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_uomMeta);
+    }
+    if (data.containsKey('category')) {
+      context.handle(
+        _categoryMeta,
+        category.isAcceptableOrUnknown(data['category']!, _categoryMeta),
+      );
+    }
+    if (data.containsKey('current_qty')) {
+      context.handle(
+        _currentQtyMeta,
+        currentQty.isAcceptableOrUnknown(data['current_qty']!, _currentQtyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_currentQtyMeta);
+    }
+    if (data.containsKey('reorder_level')) {
+      context.handle(
+        _reorderLevelMeta,
+        reorderLevel.isAcceptableOrUnknown(
+          data['reorder_level']!,
+          _reorderLevelMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_reorderLevelMeta);
+    }
+    if (data.containsKey('cost_cents')) {
+      context.handle(
+        _costCentsMeta,
+        costCents.isAcceptableOrUnknown(data['cost_cents']!, _costCentsMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_costCentsMeta);
+    }
+    if (data.containsKey('barcode')) {
+      context.handle(
+        _barcodeMeta,
+        barcode.isAcceptableOrUnknown(data['barcode']!, _barcodeMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {tenantId, id};
+  @override
+  CachedInventoryItem map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CachedInventoryItem(
+      tenantId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}tenant_id'],
+      )!,
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      uom: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}uom'],
+      )!,
+      category: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}category'],
+      ),
+      currentQty: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}current_qty'],
+      )!,
+      reorderLevel: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}reorder_level'],
+      )!,
+      costCents: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}cost_cents'],
+      )!,
+      barcode: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}barcode'],
+      ),
+    );
+  }
+
+  @override
+  $CachedInventoryItemsTable createAlias(String alias) {
+    return $CachedInventoryItemsTable(attachedDatabase, alias);
+  }
+}
+
+class CachedInventoryItem extends DataClass
+    implements Insertable<CachedInventoryItem> {
+  final String tenantId;
+  final String id;
+  final String name;
+  final String uom;
+  final String? category;
+  final double currentQty;
+  final double reorderLevel;
+  final int costCents;
+
+  /// Null for most items — the scanner falls back to search.
+  final String? barcode;
+  const CachedInventoryItem({
+    required this.tenantId,
+    required this.id,
+    required this.name,
+    required this.uom,
+    this.category,
+    required this.currentQty,
+    required this.reorderLevel,
+    required this.costCents,
+    this.barcode,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['tenant_id'] = Variable<String>(tenantId);
+    map['id'] = Variable<String>(id);
+    map['name'] = Variable<String>(name);
+    map['uom'] = Variable<String>(uom);
+    if (!nullToAbsent || category != null) {
+      map['category'] = Variable<String>(category);
+    }
+    map['current_qty'] = Variable<double>(currentQty);
+    map['reorder_level'] = Variable<double>(reorderLevel);
+    map['cost_cents'] = Variable<int>(costCents);
+    if (!nullToAbsent || barcode != null) {
+      map['barcode'] = Variable<String>(barcode);
+    }
+    return map;
+  }
+
+  CachedInventoryItemsCompanion toCompanion(bool nullToAbsent) {
+    return CachedInventoryItemsCompanion(
+      tenantId: Value(tenantId),
+      id: Value(id),
+      name: Value(name),
+      uom: Value(uom),
+      category: category == null && nullToAbsent
+          ? const Value.absent()
+          : Value(category),
+      currentQty: Value(currentQty),
+      reorderLevel: Value(reorderLevel),
+      costCents: Value(costCents),
+      barcode: barcode == null && nullToAbsent
+          ? const Value.absent()
+          : Value(barcode),
+    );
+  }
+
+  factory CachedInventoryItem.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CachedInventoryItem(
+      tenantId: serializer.fromJson<String>(json['tenantId']),
+      id: serializer.fromJson<String>(json['id']),
+      name: serializer.fromJson<String>(json['name']),
+      uom: serializer.fromJson<String>(json['uom']),
+      category: serializer.fromJson<String?>(json['category']),
+      currentQty: serializer.fromJson<double>(json['currentQty']),
+      reorderLevel: serializer.fromJson<double>(json['reorderLevel']),
+      costCents: serializer.fromJson<int>(json['costCents']),
+      barcode: serializer.fromJson<String?>(json['barcode']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'tenantId': serializer.toJson<String>(tenantId),
+      'id': serializer.toJson<String>(id),
+      'name': serializer.toJson<String>(name),
+      'uom': serializer.toJson<String>(uom),
+      'category': serializer.toJson<String?>(category),
+      'currentQty': serializer.toJson<double>(currentQty),
+      'reorderLevel': serializer.toJson<double>(reorderLevel),
+      'costCents': serializer.toJson<int>(costCents),
+      'barcode': serializer.toJson<String?>(barcode),
+    };
+  }
+
+  CachedInventoryItem copyWith({
+    String? tenantId,
+    String? id,
+    String? name,
+    String? uom,
+    Value<String?> category = const Value.absent(),
+    double? currentQty,
+    double? reorderLevel,
+    int? costCents,
+    Value<String?> barcode = const Value.absent(),
+  }) => CachedInventoryItem(
+    tenantId: tenantId ?? this.tenantId,
+    id: id ?? this.id,
+    name: name ?? this.name,
+    uom: uom ?? this.uom,
+    category: category.present ? category.value : this.category,
+    currentQty: currentQty ?? this.currentQty,
+    reorderLevel: reorderLevel ?? this.reorderLevel,
+    costCents: costCents ?? this.costCents,
+    barcode: barcode.present ? barcode.value : this.barcode,
+  );
+  CachedInventoryItem copyWithCompanion(CachedInventoryItemsCompanion data) {
+    return CachedInventoryItem(
+      tenantId: data.tenantId.present ? data.tenantId.value : this.tenantId,
+      id: data.id.present ? data.id.value : this.id,
+      name: data.name.present ? data.name.value : this.name,
+      uom: data.uom.present ? data.uom.value : this.uom,
+      category: data.category.present ? data.category.value : this.category,
+      currentQty: data.currentQty.present
+          ? data.currentQty.value
+          : this.currentQty,
+      reorderLevel: data.reorderLevel.present
+          ? data.reorderLevel.value
+          : this.reorderLevel,
+      costCents: data.costCents.present ? data.costCents.value : this.costCents,
+      barcode: data.barcode.present ? data.barcode.value : this.barcode,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CachedInventoryItem(')
+          ..write('tenantId: $tenantId, ')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('uom: $uom, ')
+          ..write('category: $category, ')
+          ..write('currentQty: $currentQty, ')
+          ..write('reorderLevel: $reorderLevel, ')
+          ..write('costCents: $costCents, ')
+          ..write('barcode: $barcode')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    tenantId,
+    id,
+    name,
+    uom,
+    category,
+    currentQty,
+    reorderLevel,
+    costCents,
+    barcode,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CachedInventoryItem &&
+          other.tenantId == this.tenantId &&
+          other.id == this.id &&
+          other.name == this.name &&
+          other.uom == this.uom &&
+          other.category == this.category &&
+          other.currentQty == this.currentQty &&
+          other.reorderLevel == this.reorderLevel &&
+          other.costCents == this.costCents &&
+          other.barcode == this.barcode);
+}
+
+class CachedInventoryItemsCompanion
+    extends UpdateCompanion<CachedInventoryItem> {
+  final Value<String> tenantId;
+  final Value<String> id;
+  final Value<String> name;
+  final Value<String> uom;
+  final Value<String?> category;
+  final Value<double> currentQty;
+  final Value<double> reorderLevel;
+  final Value<int> costCents;
+  final Value<String?> barcode;
+  final Value<int> rowid;
+  const CachedInventoryItemsCompanion({
+    this.tenantId = const Value.absent(),
+    this.id = const Value.absent(),
+    this.name = const Value.absent(),
+    this.uom = const Value.absent(),
+    this.category = const Value.absent(),
+    this.currentQty = const Value.absent(),
+    this.reorderLevel = const Value.absent(),
+    this.costCents = const Value.absent(),
+    this.barcode = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CachedInventoryItemsCompanion.insert({
+    required String tenantId,
+    required String id,
+    required String name,
+    required String uom,
+    this.category = const Value.absent(),
+    required double currentQty,
+    required double reorderLevel,
+    required int costCents,
+    this.barcode = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : tenantId = Value(tenantId),
+       id = Value(id),
+       name = Value(name),
+       uom = Value(uom),
+       currentQty = Value(currentQty),
+       reorderLevel = Value(reorderLevel),
+       costCents = Value(costCents);
+  static Insertable<CachedInventoryItem> custom({
+    Expression<String>? tenantId,
+    Expression<String>? id,
+    Expression<String>? name,
+    Expression<String>? uom,
+    Expression<String>? category,
+    Expression<double>? currentQty,
+    Expression<double>? reorderLevel,
+    Expression<int>? costCents,
+    Expression<String>? barcode,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (tenantId != null) 'tenant_id': tenantId,
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (uom != null) 'uom': uom,
+      if (category != null) 'category': category,
+      if (currentQty != null) 'current_qty': currentQty,
+      if (reorderLevel != null) 'reorder_level': reorderLevel,
+      if (costCents != null) 'cost_cents': costCents,
+      if (barcode != null) 'barcode': barcode,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CachedInventoryItemsCompanion copyWith({
+    Value<String>? tenantId,
+    Value<String>? id,
+    Value<String>? name,
+    Value<String>? uom,
+    Value<String?>? category,
+    Value<double>? currentQty,
+    Value<double>? reorderLevel,
+    Value<int>? costCents,
+    Value<String?>? barcode,
+    Value<int>? rowid,
+  }) {
+    return CachedInventoryItemsCompanion(
+      tenantId: tenantId ?? this.tenantId,
+      id: id ?? this.id,
+      name: name ?? this.name,
+      uom: uom ?? this.uom,
+      category: category ?? this.category,
+      currentQty: currentQty ?? this.currentQty,
+      reorderLevel: reorderLevel ?? this.reorderLevel,
+      costCents: costCents ?? this.costCents,
+      barcode: barcode ?? this.barcode,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (tenantId.present) {
+      map['tenant_id'] = Variable<String>(tenantId.value);
+    }
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (uom.present) {
+      map['uom'] = Variable<String>(uom.value);
+    }
+    if (category.present) {
+      map['category'] = Variable<String>(category.value);
+    }
+    if (currentQty.present) {
+      map['current_qty'] = Variable<double>(currentQty.value);
+    }
+    if (reorderLevel.present) {
+      map['reorder_level'] = Variable<double>(reorderLevel.value);
+    }
+    if (costCents.present) {
+      map['cost_cents'] = Variable<int>(costCents.value);
+    }
+    if (barcode.present) {
+      map['barcode'] = Variable<String>(barcode.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CachedInventoryItemsCompanion(')
+          ..write('tenantId: $tenantId, ')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('uom: $uom, ')
+          ..write('category: $category, ')
+          ..write('currentQty: $currentQty, ')
+          ..write('reorderLevel: $reorderLevel, ')
+          ..write('costCents: $costCents, ')
+          ..write('barcode: $barcode, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $OutboxRowsTable extends OutboxRows
     with TableInfo<$OutboxRowsTable, OutboxRow> {
   @override
@@ -4072,6 +4641,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $CachedMembershipsTable(this);
   late final $CachedPermissionsTable cachedPermissions =
       $CachedPermissionsTable(this);
+  late final $CachedInventoryItemsTable cachedInventoryItems =
+      $CachedInventoryItemsTable(this);
   late final $OutboxRowsTable outboxRows = $OutboxRowsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
@@ -4088,6 +4659,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     cachedTables,
     cachedMemberships,
     cachedPermissions,
+    cachedInventoryItems,
     outboxRows,
   ];
 }
@@ -6090,6 +6662,302 @@ typedef $$CachedPermissionsTableProcessedTableManager =
       CachedPermission,
       PrefetchHooks Function()
     >;
+typedef $$CachedInventoryItemsTableCreateCompanionBuilder =
+    CachedInventoryItemsCompanion Function({
+      required String tenantId,
+      required String id,
+      required String name,
+      required String uom,
+      Value<String?> category,
+      required double currentQty,
+      required double reorderLevel,
+      required int costCents,
+      Value<String?> barcode,
+      Value<int> rowid,
+    });
+typedef $$CachedInventoryItemsTableUpdateCompanionBuilder =
+    CachedInventoryItemsCompanion Function({
+      Value<String> tenantId,
+      Value<String> id,
+      Value<String> name,
+      Value<String> uom,
+      Value<String?> category,
+      Value<double> currentQty,
+      Value<double> reorderLevel,
+      Value<int> costCents,
+      Value<String?> barcode,
+      Value<int> rowid,
+    });
+
+class $$CachedInventoryItemsTableFilterComposer
+    extends Composer<_$AppDatabase, $CachedInventoryItemsTable> {
+  $$CachedInventoryItemsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get tenantId => $composableBuilder(
+    column: $table.tenantId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get uom => $composableBuilder(
+    column: $table.uom,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get category => $composableBuilder(
+    column: $table.category,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get currentQty => $composableBuilder(
+    column: $table.currentQty,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get reorderLevel => $composableBuilder(
+    column: $table.reorderLevel,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get costCents => $composableBuilder(
+    column: $table.costCents,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get barcode => $composableBuilder(
+    column: $table.barcode,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CachedInventoryItemsTableOrderingComposer
+    extends Composer<_$AppDatabase, $CachedInventoryItemsTable> {
+  $$CachedInventoryItemsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get tenantId => $composableBuilder(
+    column: $table.tenantId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get uom => $composableBuilder(
+    column: $table.uom,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get category => $composableBuilder(
+    column: $table.category,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get currentQty => $composableBuilder(
+    column: $table.currentQty,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get reorderLevel => $composableBuilder(
+    column: $table.reorderLevel,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get costCents => $composableBuilder(
+    column: $table.costCents,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get barcode => $composableBuilder(
+    column: $table.barcode,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CachedInventoryItemsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CachedInventoryItemsTable> {
+  $$CachedInventoryItemsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get tenantId =>
+      $composableBuilder(column: $table.tenantId, builder: (column) => column);
+
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get uom =>
+      $composableBuilder(column: $table.uom, builder: (column) => column);
+
+  GeneratedColumn<String> get category =>
+      $composableBuilder(column: $table.category, builder: (column) => column);
+
+  GeneratedColumn<double> get currentQty => $composableBuilder(
+    column: $table.currentQty,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get reorderLevel => $composableBuilder(
+    column: $table.reorderLevel,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get costCents =>
+      $composableBuilder(column: $table.costCents, builder: (column) => column);
+
+  GeneratedColumn<String> get barcode =>
+      $composableBuilder(column: $table.barcode, builder: (column) => column);
+}
+
+class $$CachedInventoryItemsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CachedInventoryItemsTable,
+          CachedInventoryItem,
+          $$CachedInventoryItemsTableFilterComposer,
+          $$CachedInventoryItemsTableOrderingComposer,
+          $$CachedInventoryItemsTableAnnotationComposer,
+          $$CachedInventoryItemsTableCreateCompanionBuilder,
+          $$CachedInventoryItemsTableUpdateCompanionBuilder,
+          (
+            CachedInventoryItem,
+            BaseReferences<
+              _$AppDatabase,
+              $CachedInventoryItemsTable,
+              CachedInventoryItem
+            >,
+          ),
+          CachedInventoryItem,
+          PrefetchHooks Function()
+        > {
+  $$CachedInventoryItemsTableTableManager(
+    _$AppDatabase db,
+    $CachedInventoryItemsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CachedInventoryItemsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CachedInventoryItemsTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$CachedInventoryItemsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> tenantId = const Value.absent(),
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> uom = const Value.absent(),
+                Value<String?> category = const Value.absent(),
+                Value<double> currentQty = const Value.absent(),
+                Value<double> reorderLevel = const Value.absent(),
+                Value<int> costCents = const Value.absent(),
+                Value<String?> barcode = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CachedInventoryItemsCompanion(
+                tenantId: tenantId,
+                id: id,
+                name: name,
+                uom: uom,
+                category: category,
+                currentQty: currentQty,
+                reorderLevel: reorderLevel,
+                costCents: costCents,
+                barcode: barcode,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String tenantId,
+                required String id,
+                required String name,
+                required String uom,
+                Value<String?> category = const Value.absent(),
+                required double currentQty,
+                required double reorderLevel,
+                required int costCents,
+                Value<String?> barcode = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CachedInventoryItemsCompanion.insert(
+                tenantId: tenantId,
+                id: id,
+                name: name,
+                uom: uom,
+                category: category,
+                currentQty: currentQty,
+                reorderLevel: reorderLevel,
+                costCents: costCents,
+                barcode: barcode,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CachedInventoryItemsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CachedInventoryItemsTable,
+      CachedInventoryItem,
+      $$CachedInventoryItemsTableFilterComposer,
+      $$CachedInventoryItemsTableOrderingComposer,
+      $$CachedInventoryItemsTableAnnotationComposer,
+      $$CachedInventoryItemsTableCreateCompanionBuilder,
+      $$CachedInventoryItemsTableUpdateCompanionBuilder,
+      (
+        CachedInventoryItem,
+        BaseReferences<
+          _$AppDatabase,
+          $CachedInventoryItemsTable,
+          CachedInventoryItem
+        >,
+      ),
+      CachedInventoryItem,
+      PrefetchHooks Function()
+    >;
 typedef $$OutboxRowsTableCreateCompanionBuilder =
     OutboxRowsCompanion Function({
       Value<int> id,
@@ -6404,6 +7272,8 @@ class $AppDatabaseManager {
       $$CachedMembershipsTableTableManager(_db, _db.cachedMemberships);
   $$CachedPermissionsTableTableManager get cachedPermissions =>
       $$CachedPermissionsTableTableManager(_db, _db.cachedPermissions);
+  $$CachedInventoryItemsTableTableManager get cachedInventoryItems =>
+      $$CachedInventoryItemsTableTableManager(_db, _db.cachedInventoryItems);
   $$OutboxRowsTableTableManager get outboxRows =>
       $$OutboxRowsTableTableManager(_db, _db.outboxRows);
 }

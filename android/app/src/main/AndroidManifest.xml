@@ -3,6 +3,11 @@
          and every write sits in the outbox on a perfectly good connection. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Scanning item labels during a stock count. Optional: every screen that
+         offers the camera also works by typing, so a phone without one (or a
+         user who says no) still counts the store room. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <application
         android:label="ExtraHelper"
         android:name="${applicationName}"

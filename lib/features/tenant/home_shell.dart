@@ -7,6 +7,8 @@ import '../../core/format/money.dart';
 import '../../core/theme/tokens.dart';
 import '../../data/supabase/auth_repository.dart';
 import '../../data/supabase/supabase_providers.dart';
+import '../dashboard/dashboard_screen.dart';
+import '../inventory/inventory_screen.dart';
 import '../pos/manager_ops.dart';
 import '../pos/pos_screen.dart';
 import 'sync_status_bar.dart';
@@ -28,6 +30,10 @@ class HomeShell extends ConsumerWidget {
     // `audit_logs` RLS is owner/manager only; `order.void` is held by exactly
     // those two, so it is the honest key to hang this on.
     final canReview = ref.watch(hasPermissionProvider('order.void'));
+    // Revenue is not a waiter's business, and `dashboard_summary` refuses it
+    // server-side anyway — this only avoids offering a door that won't open.
+    final canSeeReports = ref.watch(hasPermissionProvider('reports.view'));
+    final canSeeStock = ref.watch(hasPermissionProvider('inventory.view'));
     // A tenant that hasn't resolved yet makes `permissionsProvider` answer with
     // an empty set — which reads as "loaded, and you may do nothing", so the
     // shell flashed "No ordering access" at every launch before settling. Wait
@@ -41,6 +47,29 @@ class HomeShell extends ConsumerWidget {
         title: const TenantSwitcher(),
         actions: [
           const SyncStatusAction(),
+          if (canSeeReports)
+            IconButton(
+              tooltip: 'Dashboard',
+              icon: const Icon(Icons.insights_outlined),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const DashboardScreen(),
+                ),
+              ),
+            ),
+          // The store room. `inventory.view` is Owner/Manager/Inventory, so a
+          // waiter never sees the door; the RPCs enforce `inventory.edit`
+          // separately, which is why a viewer still gets a read-only screen.
+          if (canSeeStock)
+            IconButton(
+              tooltip: 'Store room',
+              icon: const Icon(Icons.inventory_2_outlined),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const InventoryScreen(),
+                ),
+              ),
+            ),
           if (canReview)
             IconButton(
               tooltip: 'Manager log',

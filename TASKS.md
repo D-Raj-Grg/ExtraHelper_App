@@ -142,8 +142,12 @@ creation stays web-only.
       `supabase_flutter` + `shared_preferences`, both already proven to load on the device. To close
       it: grant Terminal Accessibility (System Settings → Privacy & Security → Accessibility), or
       sign in by hand once in the Simulator.
-- [ ] Cross-tenant isolation check (a tenant-B user sees zero tenant-A rows) — deferred to
-      Milestone E, when there are actual rows to read. RLS covers it server-side today.
+- [~] Cross-tenant isolation check (a tenant-B user sees zero tenant-A rows) — **partly closed in
+      Milestone I**: an owner of tenant A calling `dashboard_summary` for tenant B gets `null`, and
+      their own tenant's figures otherwise. That covers the RPC path. Still unchecked **through the
+      app's own reads and its local cache** — the Drift rows are tenant-stamped and `adoptTenant`
+      wipes on switch (unit-tested in `local_cache_test`), but nobody has driven a two-tenant switch
+      on a device and confirmed the menu, board and dashboard all change. RLS covers it server-side.
 - [x] Tests: `auth_error_test`, `membership_test` (incl. `tenant_settings` arriving as either an
       object or a single-element list — get that wrong and a Nepali restaurant silently renders USD).
 
@@ -409,6 +413,210 @@ surface must never appear and then vanish.
       shows the rounded black icon, and the dark splash renders. `flutter analyze` clean, 82 tests
       passing.
 
+## Milestone I — Owner dashboard ✅ (2026-07-30)
+
+Read-only. The owner's glance: what today made, what is still open, what is running out.
+
+- [x] **The whole screen is one shared RPC** — `dashboard_summary(_tenant, _days)`, migration
+      `20260730090000_dashboard_summary.sql` in `../extrahelper/supabase/migrations/`. The web
+      dashboard ran six parallel PostgREST reads plus tz-aware day bucketing in TypeScript
+      (`Intl.DateTimeFormat` per bill). Flutter cannot copy that: **`package:intl` carries no IANA
+      timezone database**, so bucketing "today" in `Asia/Kathmandu` in Dart would have meant a new
+      dependency *and* a second implementation of the day boundary — the drift rule 1 forbids.
+      Postgres already owns `tenant_settings.timezone`, so the arithmetic moved there and both
+      clients now render the same payload. Reservation and payment timestamps come back **already
+      formatted** in the tenant's zone (`to_char`), for the same reason.
+- [x] `security invoker` + an explicit tenant filter on every read inside it — RLS remains the
+      boundary. Gated on `reports.view` exactly as `report_extras` is, and it **returns null rather
+      than raising** when the caller lacks the key, so a kitchen role gets a state to render instead
+      of a red box. `revoke from public, anon` + grant to `authenticated`; verified
+      `{postgres=X, authenticated=X, service_role=X}`.
+- [x] **Web refactored onto the same RPC** (`../extrahelper/app/(app)/page.tsx`) — ~90 lines of
+      query + bucketing deleted. `database.types.ts` updated; `tsc`, `eslint` and `next build` clean.
+      **Behaviour change worth knowing**: `/` used to show revenue to *every* member of a
+      restaurant, because the page only called `requireTenant()`. It is now gated on `reports.view`
+      like every other reporting surface, and roles without it see a "no access to reports" card.
+- [x] Flutter — `data/supabase/dashboard_repository.dart` (typed envelope, tolerant of missing keys
+      and of numerics arriving as strings), `features/dashboard/` (screen, providers, chart).
+      Reached from the app-bar chart icon, shown only when the user holds `reports.view`.
+- [x] **Revenue chart hand-painted** (`revenue_chart.dart`, `CustomPainter`) rather than adding a
+      charting package: one zero-filled series, no axes, no interaction — and every charting
+      dependency arrives with its own idea of colour and type. Zero-fill matters: a gap would draw
+      as a straight line between the days either side. The peak carries a **dot and a printed
+      figure**, both ends print their dates, and the whole thing has a `Semantics` summary, so
+      nothing is conveyed by the line's colour alone.
+- [x] **Network-only, deliberately.** Every other read in this app is cache-first because a waiter
+      must keep taking orders on dead wifi. This one is an owner glancing at today's money, where a
+      silently stale figure is worse than an honest "couldn't load" — the error state says so, and
+      says the POS still works offline.
+- [x] `reservationStatusLabel` added to `core/format/labels.dart` — `pending` reads "Not confirmed".
+- [x] Tests: `dashboard_summary_test` (9 cases) — envelope parsing, numerics as strings
+      (`"3.750"` → 3.75), a null `table_label` surviving as null, a missing key never throwing,
+      `deltaPct` matching the web formula, **null when yesterday sold nothing** (not infinity, not
+      100%), and `isEmpty` telling a quiet day apart from a restaurant that hasn't opened.
+      `flutter analyze` clean, **91 tests passing**.
+- [x] **Cent/figure parity verified against a direct tz-aware query** on the live dev project: today
+      revenue, today bill count and the 30-day series sum all match to the cent, 30 buckets for a
+      30-day window. **Isolation verified**: a non-platform-admin owner of tenant A gets `null` for
+      tenant B and data for their own.
+- [x] **Verified on the Android emulator** against the live project, light and dark: KPI tiles,
+      window chips (7/14/30/90) re-querying, the chart redrawing, "Chicken Kima −6 / 1 kg ·
+      Oversold" with an icon and the word, empty states for reservations, recent payments with
+      tenant-zone timestamps and Table/Takeaway labels. **Greyscale screenshot passed** — selection
+      carries a check, oversold carries an icon plus the word plus a minus sign.
+- [x] **A second revenue leak closed while scoping this** (migration
+      `20260730093000_report_sales_guard.sql`, mirrored in `../extrahelper/TASKS.md`): the
+      2026-07-12 report-security pass added the `reports.view` guard to six report RPCs and missed
+      **`report_sales`** — the one returning the headline revenue figure. Same shape as the `/`
+      dashboard leak above: `bills` RLS is tenant-scoped only, so any member could read the takings
+      through the API. Guard added (same arity, plain replace), and `public`/`anon` EXECUTE revoked —
+      the original migration granted to `authenticated` and never revoked, so `public` held it by
+      default. No caller regressed.
+- [x] **Process note: two sessions built this milestone at once, and Postgres kept both RPCs.** A
+      parallel session wrote `dashboard_summary(_tenant, _days, _tz)` while `(_tenant, _days)` was
+      already live — the arity trap in `CLAUDE.md`, from the other direction: not a replace that
+      silently overloads, but two authors landing two signatures. PostgREST naming `{_tenant, _days}`
+      matches either, so `/` would have failed on an ambiguous function call. The 3-arg version was
+      dropped ~14 minutes later; one `dashboard_summary(uuid, int)` exists now. **Check `pg_proc` for
+      the name before adding an RPC** — the repo is not the whole truth about what is deployed.
+- [ ] **iOS: the dashboard screen itself is not yet eyeballed.** `flutter build ios --simulator`
+      succeeds and the app runs on the iPhone 17 Pro simulator (signed in, POS renders, the new
+      app-bar icon is there) — but scripted taps into the Simulator's Metal view didn't register, so
+      the screen was never opened there. No platform channels and no plugins are involved, so this
+      is a look-check, not a risk. Do it by hand next time the simulator is open.
+
+## Milestone J — Inventory / store room ✅ (2026-07-30)
+
+The store keeper's surface: what is on hand, counting it, correcting it. Scoped with the owner as
+**barcode scanning in, counts offline, adjustments online-only**.
+
+- [x] **An unguarded stock write, closed** (migration `20260730214500_inventory_ops.sql`).
+      `adjust_inventory` — behind every adjustment and every waste write-off — had **no
+      authorization at all**: `security invoker`, no role check, no permission check, and RLS on
+      `inventory_items` / `stock_movements` is tenant-scoped only. The single guard was
+      `requireRole(...)` in the TypeScript action, whose comment claimed *"RLS + role enforced
+      inside"*. It was not. Any member — waiter, cook — could move stock through the API. Nothing
+      wrote an `audit_logs` row either, and `stock_movements` has no actor column, so **who** moved
+      stock was recorded nowhere. Now `security definer`, gated on `inventory.edit` (whose holders
+      are exactly the old role list, so nothing regressed) and audited as `stock_adjust` /
+      `stock_waste` with the item, delta, reason and resulting quantity.
+- [x] **The definer trap, and why the order of two statements matters.** The old body derived the
+      tenant *from the update itself* (`update … returning tenant_id`). That was only safe because
+      RLS fenced the update. Under `security definer` the same shape would write another
+      restaurant's stock and *then* ask whether the caller was allowed. Now: select the tenant,
+      guard, then update. **Verified live**: a non-platform-admin owner of Demo Diner reaching into
+      a Sekuwa Station item is refused `42501` and the foreign row does not move.
+- [x] **`set_stock_count_actual`** — new, `security definer`, gated on `inventory.edit`, refuses a
+      posted count, returns the variance. The web wrote `stock_count_items.actual_qty` straight
+      through PostgREST, where RLS is tenant-only, so any member could edit the numbers a manager
+      then posts. It is also what makes a count line **one replayable call** for the outbox.
+- [x] `post_stock_count` now writes an audit row — posting is what actually moves shrinkage into
+      stock, and it left no trace of who did it.
+- [x] **Barcode** — `inventory_items.barcode`, unique **per tenant and only where set** (partial
+      index). **Verified live**: a duplicate inside one restaurant is refused, the same code in two
+      restaurants is fine, and many nulls do not collide. The web `item-sheet` grew a Barcode field,
+      because a scanner with nothing to match is a toy; the constraint error is rewritten into
+      something a store keeper can act on.
+- [x] Web onto the same rules — `setCountActual` calls the RPC, the false comment on `adjustStock`
+      is corrected, `database.types.ts` updated. `tsc` + `next build` clean; the only lint errors in
+      the repo are pre-existing and in untouched files.
+- [x] **`mobile_scanner 7.4.0` resolves** on Flutter 3.38.7 / Dart 3.10.7 — checked before a line of
+      UI was written, because the Riverpod-3 wall in Milestone A cost a day. Needs iOS 12 / minSdk
+      23 against this project's iOS 13 / compileSdk 36, so nothing had to move. Camera permission
+      strings on both platforms, and a **denied camera degrades to search** rather than a dead
+      screen.
+- [x] Flutter — `data/supabase/inventory_repository.dart`, `features/inventory/` (list, count,
+      adjust sheet, scanner). Reached from the app-bar box icon, shown only on `inventory.view`;
+      `inventory.edit` decides whether anything can be changed, so a viewer gets a read-only screen
+      that says so.
+- [x] **Counts queue, adjustments do not.** New outbox kind `stockCount` carrying an **absolute**
+      quantity: replay writes the same number again, which is exactly why it is safe. An adjustment
+      is a *delta* and `adjust_inventory` takes no idempotency key, so replaying one would move
+      stock twice — it stays online-only with an honest failure. Re-counting a shelf **replaces** the
+      queued value instead of queuing a second write.
+- [x] Drift **schema v3** — `CachedInventoryItems`, tenant-stamped, wiped by the existing
+      `adoptTenant` sweep, so the worklist renders in a walk-in with no signal.
+- [x] Tests: `inventory_test` (quantity formatting, numerics arriving as strings, an uncounted line
+      staying null rather than becoming zero, signed variance, enum wire values matching
+      `stock_movement_type`), `outbox_test` (a count queued offline lands later; recounting replaces
+      rather than queues; a replayed count converges; a refused count dies with its reason),
+      `local_cache_test` (store room from cache alone, tenant wipe, no cross-tenant quantities).
+      `flutter analyze` clean, **110 tests passing**.
+- [x] **Verified on the Android emulator against the live project**: store room lists low stock
+      first with `Low` carried by an icon *and* the word; an adjustment of +12 kg on an item at
+      −8 kg previews "leaves 4 kg", applies, and writes an `audit_logs` row naming the actor; a
+      count reads "System 5 kg" per line, a counted 3 shows **↓ Short −2 kg** (arrow, word and sign
+      — greyscale-safe), posting reconciles on-hand and writes a `count` movement of −2. Every test
+      row was removed afterwards and both items restored.
+
+**Three things the device run caught that no unit test would have:**
+
+1. **A count with no lines rendered as a blank page** under a live "Post the count" button. Resuming
+   an old count opened before anything existed in the store room hit it. Now an empty state that
+   says to start a fresh one, and no post button.
+2. **"2 of 2 counted" before anyone had walked to a shelf.** `start_stock_count` seeds every line's
+   `actual_qty` with the system's own on-hand figure, so *nothing is ever uncounted* and a progress
+   bar off that is a lie. The summary now says what is actually true and actually useful — how many
+   lines **differ** from the system, i.e. what posting would move. The confirm sheet lost its
+   "lines nobody counted are left alone" sentence for the same reason: it promised a safety net
+   that cannot happen from this app.
+3. The below-zero warning in the adjust sheet fired **before any amount was typed** on an item
+   already in the negative, reading as an objection to opening the sheet.
+
+**A judgement call worth recording.** The honest fix for (2) is for `start_stock_count` to seed
+`actual_qty` as **null**, which is also what makes `post_stock_count`'s own "skip uncounted lines"
+branch meaningful — it is currently unreachable. It was **not** changed here: the web count page does
+`Number(r.actual_qty)`, so a null would render there as a counted **0**, which is worse. It needs the
+web page and `StockCountSheet` changed in the same breath. Left as a decision for the owner rather
+than a half-change across two clients.
+
+- [x] **Offline count verified on the device** (airplane mode, Android emulator): counting a shelf
+      with no coverage answers *"Saved. It goes up the moment you're back on coverage."*, the row
+      shows **Waiting for coverage**, the app-bar badge counts it, and posting is **blocked** with
+      "1 count waiting for coverage". Restoring coverage drained the queue by itself — no tap — and
+      the database shows the counted value landed **exactly once** (`actual_qty` 7, variance 2).
+
+**Five defects found in a review pass after the milestone was first called done.** Four were mine;
+the fifth was not:
+
+1. **A count could be written against the wrong item.** `_CountRow` is a `StatefulWidget` in a
+   `ListView` and had **no key**, so Flutter matched rows by index: filter the list and row 0's live
+   controller — holding a number typed for another shelf — is handed to whatever item is now first.
+   Blurring it would have recorded that number against the wrong stock. Now keyed on the line id.
+   Verified on the device: with 3 typed for Flour, filtering to "chick" shows Chicken Kima's own
+   −8 kg. This is the same trap `CLAUDE.md` records for the POS, reached from the other side — not
+   a content key, but *no* key.
+2. **Posting was allowed while counts were still queued.** `_pending` cleared as soon as the write
+   was durable, so offline the Post button re-enabled and would have reconciled stock against
+   numbers the server had never seen — and closed the count, so those queued writes would then be
+   refused. Now tracked separately as `_owed`, and the button says what it is waiting for.
+3. **The row's field never reacted to the model changing.** A refused count dropped the optimistic
+   value everywhere except the text field, which kept showing a figure nobody had recorded. Added
+   `didUpdateWidget`, which never rewrites a field that has focus.
+4. **The search box did not show what the scanner read.** Both screens drove the filter through
+   state while the `TextField` was uncontrolled, so the list changed under an unchanged box. Both
+   now own a controller. Also fixed a **57px overflow** on the count row when a variance and a
+   queued badge appeared together — `Wrap`, not `Row`, which also survives a larger text scale.
+5. **Not mine, and worth knowing:** an **expired access token plus no coverage hangs the shell on a
+   spinner**. `supabase_flutter` cannot refresh the token offline and retries forever, so every
+   request aborts and `permissionsProvider` never resolves — the cached fallback is never reached.
+   Confirmed **pre-existing** by stashing all of Milestone J, rebuilding, and reproducing it
+   identically on the baseline. Milestone F's offline verification passed because its token was
+   still fresh. Logged in the backlog.
+
+- [ ] **Cold start offline with an expired token hangs on a spinner** (found 2026-07-30, pre-dates
+      Milestone J — reproduced on a build with J stashed). `supabase_flutter` retries the token
+      refresh forever with no network, so `membershipsProvider` / `permissionsProvider` never settle
+      and the identity cache that exists for exactly this case is never consulted. The fix is a
+      bounded wait before falling back to cache — the same "never let a read block" shape as the
+      Milestone F bugs. A waiter whose phone sat idle overnight and opens the app in a basement
+      hits it.
+- [ ] **Not verified: scanning with a real camera.** The permission strings, the sheet and the
+      no-match path are in place, but no barcode has been read on a device — and no inventory item
+      carries a code yet, which is a labelling job before it can be tested end to end.
+- [ ] **iOS: not run this milestone at all.** Nothing here is platform-specific except the camera,
+      which is exactly the part that wants a real device.
+
 ## Backlog / Later phases
 
 - [ ] **Offline on a physical iPhone, in airplane mode.** The one verification `CLAUDE.md` asks for
@@ -421,8 +629,6 @@ surface must never appear and then vanish.
       hold `menu.edit` (which is full menu editing, prices included), so `set_item_86` checks the
       role directly today. A dedicated key is the clean fix; it is a shared-catalog change, so it
       lands in `../extrahelper/TASKS.md` too.
-- [ ] Owner dashboard — KPI tiles + revenue chart, read-only. Closes the `mobile (Flutter)` TODO on
-      `../extrahelper/TASKS.md` line 77.
 - [ ] Inventory — stock counts and adjustments in the store room; barcode/QR scan via camera.
 - [ ] Store release — signing, TestFlight + Play internal testing track, then production. Closes the
       blocked `../extrahelper/TASKS.md` line 107.
