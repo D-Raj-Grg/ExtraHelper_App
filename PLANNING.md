@@ -222,8 +222,10 @@ add manager ops, inventory, and the owner dashboard.
 1. **Waiter ordering (online)** — tables board with live states, order composer (destination →
    dishes → variants/modifiers/notes → cart → fire), amend a fired order, void with reason.
 2. **Offline** — menu/table cache, outbox, replay engine, pending badge, dead-entry surfacing.
-3. **Owner dashboard** — KPI tiles + revenue chart, read-only (`../extrahelper/TASKS.md` line 77
-   wants this).
+3. **Owner dashboard** — KPI tiles + revenue chart, read-only. **Done 2026-07-30** (Milestone I):
+   one shared `dashboard_summary` RPC aggregates in the tenant's timezone and the web dashboard was
+   refactored onto it, because `package:intl` has no IANA timezone database and day bucketing in
+   Dart would have forked the definition of "today".
 4. **Manager ops** — 86 toggle, table state control, void/discount approval.
 5. **Inventory** — stock counts and adjustments in the store room; barcode scan via camera.
 6. **Store release** — signing, icons/splash, TestFlight + Play internal track, then production.

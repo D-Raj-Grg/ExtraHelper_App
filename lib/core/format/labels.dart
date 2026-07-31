@@ -65,6 +65,17 @@ const _roleLabels = {
 
 String roleLabel(String role) => _roleLabels[role] ?? _humanize(role);
 
+const _reservationStatusLabels = {
+  'pending': 'Not confirmed',
+  'confirmed': 'Confirmed',
+  'seated': 'Seated',
+  'cancelled': 'Cancelled',
+  'no_show': 'No show',
+};
+
+String reservationStatusLabel(String status) =>
+    _reservationStatusLabels[status] ?? _humanize(status);
+
 /// Last resort for an enum this build doesn't know: "bill_requested" →
 /// "Bill requested". Better than showing the raw value, worse than a real
 /// label — add the label when you meet one of these.
