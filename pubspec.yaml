@@ -36,7 +36,17 @@ dependencies:
   intl: ^0.20.3
   shared_preferences: ^2.5.5
   mobile_scanner: ^7.4.0
+  # Bluetooth thermal printing (Android). Its own permission request is
+  # commented out in the plugin source, and it returns from the method handler
+  # without completing the result when the permission is missing — so every call
+  # is wrapped in a timeout and the permission is asked for by permission_handler
+  # instead. See lib/data/print/transports/bluetooth_transport.dart.
   print_bluetooth_thermal: ^1.2.1
+  # Pinned to 12.x deliberately: permission_handler_android 14 ships a
+  # build.gradle.kts that does not compile against this project's Kotlin 2.2.20 /
+  # AGP 8.11.1. Bumping the Android toolchain to suit one permission is not worth
+  # the blast radius.
+  permission_handler: ^12.0.1
 
 dev_dependencies:
   flutter_test:

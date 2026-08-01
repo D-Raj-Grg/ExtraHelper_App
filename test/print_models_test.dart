@@ -1,5 +1,10 @@
 import 'package:extrahelper/data/print/print_models.dart';
+import 'package:extrahelper/data/print/print_repository.dart';
+import 'package:extrahelper/data/print/print_service.dart';
+import 'package:extrahelper/data/print/render_client.dart';
+import 'package:extrahelper/data/print/transports/print_transport.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// The printing layer's parsing rules, which decide two things that matter on
 /// paper: what this device is willing to claim, and how a printer is addressed.
@@ -105,4 +110,88 @@ void main() {
       expect(job.base64, isNull);
     });
   });
+
+  group('PrintService capability gate', () {
+    test('a transport for a printer nobody owns is never even asked', () async {
+      // Asking the Bluetooth plugin raises a permission dialog. A restaurant
+      // with only WiFi printers must never be nagged for Bluetooth, least of
+      // all every twenty seconds forever.
+      final bluetooth = _SpyTransport(PrinterConnection.bluetooth);
+      final service = _service(
+        transports: [_SpyTransport(PrinterConnection.network), bluetooth],
+        configured: const {PrinterConnection.network},
+      );
+
+      await service.drain();
+
+      expect(bluetooth.asked, isFalse);
+    });
+
+    test('a configured transport is asked', () async {
+      final bluetooth = _SpyTransport(PrinterConnection.bluetooth);
+      final service = _service(
+        transports: [bluetooth],
+        configured: const {PrinterConnection.bluetooth},
+      );
+
+      await service.drain();
+
+      expect(bluetooth.asked, isTrue);
+    });
+
+    test('nothing available means nothing is claimed', () async {
+      // Claiming work this device cannot finish takes the ticket off the queue
+      // and produces no paper — worse than leaving it for something that can.
+      final offline = _SpyTransport(PrinterConnection.bluetooth, ready: false);
+      final service = _service(
+        transports: [offline],
+        configured: const {PrinterConnection.bluetooth},
+      );
+
+      expect(await service.drain(), 0);
+      expect(service.lastError, isNull);
+    });
+  });
+}
+
+/// A service pointed at a host that does not resolve.
+///
+/// Every assertion above is about what happens *before* the claim, and a claim
+/// that does go out fails as a transient — which is exactly the shape of a
+/// phone with no coverage, and must not throw out of `drain()`.
+PrintService _service({
+  required List<PrintTransport> transports,
+  required Set<PrinterConnection> configured,
+}) {
+  final client = SupabaseClient(
+    'https://nowhere.invalid',
+    'test-publishable-key',
+  );
+  return PrintService(
+    repository: PrintRepository(client, 'tenant'),
+    renderClient: RenderClient(client, 'tenant'),
+    transports: transports,
+    claimer: 'test',
+    configured: configured,
+  );
+}
+
+class _SpyTransport implements PrintTransport {
+  _SpyTransport(this.connection, {this.ready = true});
+
+  @override
+  final PrinterConnection connection;
+  final bool ready;
+  bool asked = false;
+
+  @override
+  Future<bool> get available async {
+    asked = true;
+    return ready;
+  }
+
+  @override
+  Future<void> send(RenderedPrinter printer, String base64) async {
+    throw StateError('nothing should be sent in these tests');
+  }
 }

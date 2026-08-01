@@ -30,16 +30,25 @@ final _prefsProvider = FutureProvider<SharedPreferences>(
 );
 
 class PrintEnabled extends Notifier<bool> {
+  /// Whether the stored value has had its say. Without this, a tap made while
+  /// SharedPreferences was still opening is silently undone the moment it
+  /// resolves — the switch flicks back on its own and the phone stops printing.
+  bool _settled = false;
+
   @override
   bool build() {
     ref.listen(_prefsProvider, (_, next) {
       final prefs = next.valueOrNull;
-      if (prefs != null) state = prefs.getBool(_printEnabledKey) ?? false;
+      if (prefs == null || _settled) return;
+      _settled = true;
+      state = prefs.getBool(_printEnabledKey) ?? false;
     }, fireImmediately: true);
     return false;
   }
 
   Future<void> set(bool value) async {
+    // A deliberate tap outranks whatever is on disk.
+    _settled = true;
     state = value;
     final prefs = await ref.read(_prefsProvider.future);
     await prefs.setBool(_printEnabledKey, value);
@@ -106,11 +115,23 @@ final printServiceProvider = Provider<PrintService?>((ref) {
   final repo = ref.watch(_printRepoProvider);
   if (tenant == null || repo == null) return null;
 
+  // What the restaurant actually owns decides which transports are consulted at
+  // all. Until the registry answers, network alone — see `PrintService.configured`.
+  final registry = ref.watch(printersProvider).valueOrNull;
+  final configured = registry == null
+      ? const {PrinterConnection.network}
+      : {
+          PrinterConnection.network,
+          for (final p in registry)
+            if (p.isActive) p.connection,
+        };
+
   return PrintService(
     repository: repo,
     renderClient: RenderClient(ref.watch(supabaseProvider), tenant.tenantId),
     transports: ref.watch(printTransportsProvider),
     claimer: ref.watch(printClaimerProvider),
+    configured: configured,
   );
 });
 
@@ -153,9 +174,15 @@ class _PrintLoopState extends ConsumerState<PrintLoop>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Coming back to the app is the moment a waiter expects the backlog to
-    // clear, and iOS will have suspended the socket while it was away.
-    if (state == AppLifecycleState.resumed) _drain();
+    if (state != AppLifecycleState.resumed) return;
+    // The registry is read once and cached, so a printer added on the web while
+    // this app sat in the background would otherwise stay invisible — and with
+    // it, whether Bluetooth is worth consulting at all. Re-reading on resume is
+    // the cheapest honest moment.
+    ref.invalidate(printersProvider);
+    // Coming back is also when a waiter expects the backlog to clear; iOS will
+    // have suspended the socket while the app was away.
+    _drain();
   }
 
   Future<void> _drain() async {
@@ -202,13 +229,35 @@ class _PrintLoopState extends ConsumerState<PrintLoop>
 
   @override
   Widget build(BuildContext context) {
-    final service = ref.watch(printServiceProvider);
-    final tenantId = ref.watch(activeTenantProvider)?.tenantId;
-
-    if (service == null || tenantId == null) {
+    // A token refresh leaves the socket authed with the *old* JWT, and RLS then
+    // drops every event silently — the queue would only move on the 20s poll.
+    // Re-subscribing carries the new token.
+    ref.listen(authStateProvider, (_, _) {
+      final tenant = _subscribedTenant;
+      if (tenant == null) return;
       _unsubscribe();
-    } else {
-      _subscribe(tenantId);
+      _subscribe(tenant);
+    });
+
+    final service = ref.watch(printServiceProvider);
+    final want = service == null
+        ? null
+        : ref.watch(activeTenantProvider)?.tenantId;
+
+    if (want != _subscribedTenant) {
+      // Subscribing is a side effect on an external system, so it happens after
+      // the frame rather than during it.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (want == null) {
+          _unsubscribe();
+        } else {
+          _subscribe(want);
+          // Switched on, or switched restaurant: clear whatever is waiting
+          // rather than idling until the next tick.
+          _drain();
+        }
+      });
     }
 
     return widget.child;

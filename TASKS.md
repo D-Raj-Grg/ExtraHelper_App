@@ -760,10 +760,48 @@ The queue was already the right shape. This app just became a third consumer of 
 - [x] Android manifest: `BLUETOOTH_CONNECT` + `BLUETOOTH_SCAN` with
       `neverForLocation` — without that flag Play asks what a printing app wants with the user's
       whereabouts. iOS: Bluetooth and local-network usage strings.
-- [x] `flutter analyze` clean, `dart format` applied, **150 tests passing** (6 new in
-      `test/print_models_test.dart`).
+- [x] `flutter analyze` clean, `dart format` applied, **153 tests passing** (9 new in
+      `test/print_models_test.dart`), and the Android APK builds with both native plugins.
 - [ ] On the real KP307: WiFi from Android and from an iPhone, Bluetooth from Android, and four
       drainers running at once producing exactly one slip. Needs the physical printer.
+
+### Defects found by re-reading it afterwards (2026-08-01)
+
+Seven, of which two would have made Bluetooth impossible and one would have killed printing on a
+device permanently.
+
+- [x] **`print_bluetooth_thermal` never asks for the permission.** Its request code is commented out
+      in the plugin's own Kotlin. On Android 12+ `isPermissionBluetoothGranted` therefore answers
+      "no" forever and nothing ever prints, with nothing in the app to fix it. `permission_handler`
+      now asks — from a button on the Printing screen, never from the drain loop, because a dialog
+      that appears by itself mid-service is worse than no Bluetooth.
+- [x] **The same plugin can hang the app's printing for good.** When the permission is missing its
+      method handler `return`s *without completing the result*, so the Dart future never resolves. A
+      hung `available` would leave `_draining` true forever — printing dead on that device until a
+      restart. Every plugin call now has a timeout, and the permission is checked before anything
+      that can hang.
+- [x] **A WiFi-only shop was going to be nagged for Bluetooth every 20 seconds.** The drain asked
+      every transport whether it was available, and asking raises a permission prompt.
+      `PrintService.configured` now comes from the registry: a transport for a printer nobody owns is
+      never consulted. Three unit tests hold this down.
+- [x] **A tap on the switch could undo itself.** `PrintEnabled` overwrote its state when
+      SharedPreferences finished opening, so toggling during launch flicked back on its own.
+- [x] **Realtime went deaf after a token refresh.** `setAuth` ran only at subscribe time; an
+      hour-old socket carries a stale JWT and RLS drops every event silently. The channel now
+      re-subscribes on auth change. (The 20s poll hid this, which is exactly why it was worth
+      finding.)
+- [x] **A stale registry.** `printersProvider` is cached for the app's lifetime, so a printer added
+      on the web stayed invisible — including whether Bluetooth was worth consulting. Re-read on
+      resume.
+- [x] **Test print was offered to people the server refuses.** `enqueue_print_job` gates a test page
+      on `settings.edit`; a waiter only ever got a 42501. The button is now gated and says who can.
+- [x] Losing the `printed` acknowledgement re-queues the job after 60s and the kitchen gets the
+      ticket twice. The paper is already out by then, so it is worth three attempts, not one.
+- [x] Subscribing moved out of `build()` into a post-frame callback — it is a side effect on an
+      external system.
+- [x] `permission_handler` pinned to **12.x**: 14's `build.gradle.kts` does not compile against this
+      project's Kotlin 2.2.20 / AGP 8.11.1, and bumping the Android toolchain for one permission is
+      not a trade worth making. Reasoning is in `pubspec.yaml` next to the pin.
 
 **Not built, on purpose.**
 

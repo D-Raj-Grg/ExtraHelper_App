@@ -188,6 +188,8 @@ class _CapabilityRows extends ConsumerStatefulWidget {
 
 class _CapabilityRowsState extends ConsumerState<_CapabilityRows> {
   bool? _bluetooth;
+  bool _permanentlyDenied = false;
+  bool _asking = false;
 
   @override
   void initState() {
@@ -196,13 +198,32 @@ class _CapabilityRowsState extends ConsumerState<_CapabilityRows> {
   }
 
   Future<void> _check() async {
-    final ready = await ref.read(bluetoothTransportProvider).available;
-    if (mounted) setState(() => _bluetooth = ready);
+    final transport = ref.read(bluetoothTransportProvider);
+    final ready = await transport.available;
+    final denied = ready ? false : await transport.permanentlyDenied;
+    if (!mounted) return;
+    setState(() {
+      _bluetooth = ready;
+      _permanentlyDenied = denied;
+    });
+  }
+
+  /// The permission is asked for here and nowhere else. The plugin never asks
+  /// on its own — its request code is commented out — and a dialog that appears
+  /// by itself mid-service is worse than no Bluetooth at all.
+  Future<void> _ask() async {
+    setState(() => _asking = true);
+    await ref.read(bluetoothTransportProvider).requestPermission();
+    if (!mounted) return;
+    setState(() => _asking = false);
+    await _check();
   }
 
   @override
   Widget build(BuildContext context) {
     final bt = _bluetooth;
+    final supported = BluetoothPrintTransport.supportedPlatform;
+
     return Column(
       children: [
         const _CapabilityRow(
@@ -214,12 +235,33 @@ class _CapabilityRowsState extends ConsumerState<_CapabilityRows> {
         _CapabilityRow(
           icon: Icons.bluetooth,
           label: 'Bluetooth printers',
-          ready: bt,
-          detail: bt == false
-              ? 'Bluetooth is off, or permission was declined. Turn it on and '
-                    'pull down to refresh.'
+          ready: supported ? bt : false,
+          detail: !supported
+              ? 'An iPhone cannot drive a thermal printer over Bluetooth — '
+                    'Apple requires a licensing chip these printers do not have. '
+                    'Use WiFi, or an Android phone.'
+              : bt == false
+              ? _permanentlyDenied
+                    ? 'Nearby devices permission was refused. Turn it on in the '
+                          "phone's app settings, then pull down to refresh."
+                    : 'Bluetooth is off, or the app has not been allowed to use '
+                          'it yet.'
               : 'Printers this phone has been paired with.',
         ),
+        // Only where it can actually change something: not on iPhone, and not
+        // once the answer is a permanent no.
+        if (supported && bt == false && !_permanentlyDenied)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 32, bottom: 4),
+              child: OutlinedButton.icon(
+                onPressed: _asking ? null : _ask,
+                icon: const Icon(Icons.bluetooth_searching),
+                label: Text(_asking ? 'Asking…' : 'Allow Bluetooth'),
+              ),
+            ),
+          ),
         const _CapabilityRow(
           icon: Icons.usb,
           label: 'USB printers',
@@ -405,14 +447,25 @@ class _PrinterTileState extends ConsumerState<_PrinterTile> {
                 ),
               ),
             const SizedBox(height: 6),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: OutlinedButton.icon(
-                onPressed: _busy || widget.tenantId == null ? null : _test,
-                icon: const Icon(Icons.description_outlined),
-                label: Text(_busy ? 'Queueing…' : 'Test print'),
+            // `enqueue_print_job` gates a test page on `settings.edit`, so a
+            // waiter would only ever get a 42501 out of this button. Say who
+            // can, rather than offering a door that will not open.
+            if (ref.watch(hasPermissionProvider('settings.edit')))
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: _busy || widget.tenantId == null ? null : _test,
+                  icon: const Icon(Icons.description_outlined),
+                  label: Text(_busy ? 'Queueing…' : 'Test print'),
+                ),
+              )
+            else
+              Text(
+                'An owner or manager can send a test page.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: semantic.neutral,
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -450,6 +503,13 @@ class _PairedBluetoothState extends ConsumerState<_PairedBluetooth> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final devices = _devices;
+
+    // On iPhone the plugin lists *nearby BLE* devices with CoreBluetooth UUIDs,
+    // not paired printers with MAC addresses — an address copied from here
+    // would not work on any other phone. Offering the list would be a lie.
+    if (!BluetoothPrintTransport.supportedPlatform) {
+      return const SizedBox.shrink();
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

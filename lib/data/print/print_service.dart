@@ -20,6 +20,7 @@ class PrintService {
     required RenderClient renderClient,
     required List<PrintTransport> transports,
     required this.claimer,
+    this.configured = const {PrinterConnection.network},
     this.branchId,
   }) : _repo = repository,
        _render = renderClient,
@@ -28,6 +29,18 @@ class PrintService {
   final PrintRepository _repo;
   final RenderClient _render;
   final List<PrintTransport> _transports;
+
+  /// Which kinds of printer this restaurant actually has.
+  ///
+  /// A transport outside this set is never even asked whether it is available,
+  /// and that is the point: asking the Bluetooth plugin raises a permission
+  /// prompt, and a shop with nothing but WiFi printers must never be nagged for
+  /// Bluetooth — least of all every twenty seconds, forever.
+  ///
+  /// Defaults to network alone, which is the safe answer while the registry is
+  /// still loading: nothing is claimed that this device cannot drive, and the
+  /// next rebuild widens it.
+  final Set<PrinterConnection> configured;
 
   /// Written to `print_jobs.claimed_by`, so "who printed this twice?" has an
   /// answer.
@@ -60,6 +73,7 @@ class PrintService {
     try {
       final connections = <String>[];
       for (final t in _transports) {
+        if (!configured.contains(t.connection)) continue;
         if (await t.available) {
           connections.add(printerConnectionWire(t.connection));
         }
@@ -148,15 +162,22 @@ class PrintService {
       return false;
     }
 
-    try {
-      await _repo.complete(job.id, 'printed');
-    } catch (_) {
-      // The paper is already out. Losing the acknowledgement re-queues the job
-      // after 60s and prints it twice, which is worth knowing about but not
-      // worth failing the print for.
-      lastError =
-          'Printed ${prepared.label}, but could not tell the server. '
-          'It may print again.';
+    // The paper is already out, so this acknowledgement is worth fighting for:
+    // a lost one leaves the job claimed, and the 60s stale sweep re-queues it —
+    // the kitchen then gets the same ticket twice. Three tries over a blip.
+    for (var attempt = 0; ; attempt++) {
+      try {
+        await _repo.complete(job.id, 'printed');
+        break;
+      } catch (_) {
+        if (attempt >= 2) {
+          lastError =
+              'Printed ${prepared.label}, but could not tell the server. '
+              'It may print again.';
+          break;
+        }
+        await Future<void>.delayed(Duration(milliseconds: 300 * (attempt + 1)));
+      }
     }
     return true;
   }

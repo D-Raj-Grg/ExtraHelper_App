@@ -31,6 +31,8 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+# Gradle drops its own output here, and `/build/` above only matches the root.
+/android/build/
 /coverage/
 
 # Symbolication related
