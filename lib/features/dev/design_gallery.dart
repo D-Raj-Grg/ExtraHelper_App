@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/app_scaffold.dart';
 import '../../core/format/labels.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/choice_chip.dart';
@@ -48,8 +49,8 @@ class _DesignGalleryState extends State<DesignGallery> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Design system')),
+    return AppScaffold(
+      title: 'Design system',
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [

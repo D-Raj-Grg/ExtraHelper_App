@@ -87,6 +87,30 @@ class FakeTransport implements OutboxTransport {
     calls.add('setCountActual:$countItemId:$actual');
     _maybeThrow();
   }
+
+  @override
+  Future<void> setKotLineStatus({
+    required String kotItemId,
+    required String status,
+  }) async {
+    calls.add('setKotLineStatus:$kotItemId:$status');
+    _maybeThrow();
+  }
+
+  @override
+  Future<void> setKotStatus({
+    required String kotId,
+    required String status,
+  }) async {
+    calls.add('setKotStatus:$kotId:$status');
+    _maybeThrow();
+  }
+
+  @override
+  Future<void> markOrderServed(String orderId) async {
+    calls.add('markOrderServed:$orderId');
+    _maybeThrow();
+  }
 }
 
 CartLine _line(String itemId, {int qty = 1}) => CartLine(

@@ -143,6 +143,18 @@ class ReplayEngine {
           // back as `int`, not `double`.
           actual: (entry.payload['actual'] as num).toDouble(),
         );
+      case OutboxKind.kotLine:
+        await _transport.setKotLineStatus(
+          kotItemId: entry.payload['kot_item_id'] as String,
+          status: entry.payload['status'] as String,
+        );
+      case OutboxKind.kotTicket:
+        await _transport.setKotStatus(
+          kotId: entry.payload['kot_id'] as String,
+          status: entry.payload['status'] as String,
+        );
+      case OutboxKind.orderServed:
+        await _transport.markOrderServed(entry.orderRef);
     }
   }
 }

@@ -604,18 +604,179 @@ the fifth was not:
    identically on the baseline. Milestone F's offline verification passed because its token was
    still fresh. Logged in the backlog.
 
-- [ ] **Cold start offline with an expired token hangs on a spinner** (found 2026-07-30, pre-dates
-      Milestone J — reproduced on a build with J stashed). `supabase_flutter` retries the token
-      refresh forever with no network, so `membershipsProvider` / `permissionsProvider` never settle
-      and the identity cache that exists for exactly this case is never consulted. The fix is a
-      bounded wait before falling back to cache — the same "never let a read block" shape as the
-      Milestone F bugs. A waiter whose phone sat idle overnight and opens the app in a basement
-      hits it.
+- [x] **Cold start offline with an expired token sat on a spinner** (found 2026-07-30, fixed
+      2026-07-31). See "Milestone L" below for the measurement and the fix — the original note said
+      the refresh "retries forever", which the resolved gotrue 2.26.0 does not; it gives up after
+      about ten seconds, per request.
 - [ ] **Not verified: scanning with a real camera.** The permission strings, the sheet and the
       no-match path are in place, but no barcode has been read on a device — and no inventory item
       carries a code yet, which is a labelling job before it can be tested end to end.
 - [ ] **iOS: not run this milestone at all.** Nothing here is platform-specific except the camera,
       which is exactly the part that wants a real device.
+
+## Milestone K — Shell redesign: drawer, one status band (2026-07-31)
+
+The root app bar had become the navigation. An owner in debug saw a two-line `TenantSwitcher`
+title competing with **six 44px actions** — sync, dashboard, store room, manager log, account,
+design gallery. 6 × 44 = 264px of actions on a 360dp phone, leaving about 90px for a restaurant
+name, all of it in the top-right corner a waiter holding a tray can least reach. Below it sat the
+`OfflineBanner`, and below that a `TabBar` with an icon *and* a label per tab: three stacked bands
+before any content.
+
+- [x] **Destinations moved to a navigation drawer** (`features/tenant/app_drawer.dart`). Same
+      permission keys, same reasoning, but each door gets a row with its name spelled out instead
+      of an icon someone has to decode mid-service. The restaurant moved to the drawer header
+      (`TenantDrawerHeader`), where switching expands into a list rather than a `PopupMenuButton`
+      hung off the title.
+- [x] **The app bar names the surface** — "POS", "Store room", "Dashboard" — which is the web's own
+      page-frame rule (`../extrahelper/CLAUDE.md`: *never `{tenant.name} · X` as the title*). The
+      Flutter shell had been breaking it since Milestone C.
+- [x] **One shared frame** (`app/app_scaffold.dart`). `AppScaffold` owns the drawer, the sync strip
+      and the one-line title, so chrome cannot drift screen to screen. Every destination and both
+      leaves (composer, stock count) render through it; leaves pass `showDrawer: false` and keep
+      the back arrow, because leaving a half-entered count by jumping elsewhere is not a move
+      anyone means to make. Lives in `app/` rather than `core/` so `core` never imports `features`.
+- [x] **The badge that vanished is now a band that stays.** `SyncStatusAction` hid itself whenever
+      the outbox was clean, so the app bar silently changed width mid-service; the offline banner
+      said a second half of the same story one row down. Both are now `SyncStrip`: offline, owed,
+      refused — one row, tappable to the existing dialog. It is the **only coloured band in the app
+      frame**, so colour in the chrome means exactly one thing: *this work is not on the server
+      yet.* Icon + word + count on every state, so it still reads in greyscale.
+- [x] **POS tabs moved into `AppBar.bottom`**, text-only. The bar and the tabs now read as one band
+      instead of two, and the stacked icon+label tab (two lines) is gone. The `TabController` is
+      owned by the shell and passed to `PosScreen`.
+- [x] **Destinations are real routes** (`/dashboard`, `/store-room`, `/manager-log`, `/account`)
+      rather than imperative `MaterialPageRoute` pushes, so the drawer can say which one you are on
+      without tracking it itself. They replace each other; `AppScaffold` puts a `PopScope` on them
+      so Back always means "return to the POS" rather than "leave the app".
+- [x] **Text-scale safety pass.** Bar titles are one line with an ellipsis; the composer's two-line
+      title (`New order` / `Table C1`) became title + subtitle, and the dashboard's hardcoded
+      `Size.fromHeight(30)` subtitle strip — which clips at the larger text steps — is now derived
+      from `MediaQuery.textScalerOf`.
+- [x] `AccountScreen` extracted from `home_shell.dart` to its own file now that it is a destination.
+- [x] 10 widget tests (`test/shell_chrome_test.dart`): drawer gating (an owner is offered every
+      surface; a waiter is offered no door the server would shut), tapping a destination navigates,
+      the header offers no switch on one restaurant and expands on two, and every `SyncStrip` state
+      including a refused write outranking the queue. `flutter analyze` clean, `dart format` clean,
+      **120 tests passing** (was 110).
+
+- [x] **Two same-named restaurants were indistinguishable in the switcher** — found while looking at
+      the expanded list on the emulator, where the demo account holds two "The Sekuwa Station"
+      memberships. Each row now carries `@slug · Role`, which is the fix the web shipped for the
+      same bug (`../extrahelper` 1.0.8). Verified: `@d-raj-a859` and `@d-raj`.
+- [x] **Verified on the Android emulator, signed in as owner.** Drawer opens from the hamburger;
+      Dashboard, Store room and Account each land with the hamburger (not a back arrow), the app bar
+      naming the surface, and the drawer row filled and bold; Back from a destination returns to the
+      POS; the composer opens as a leaf with a back arrow, `New order` on one line and `Table C3`
+      beneath it. Airplane mode raises the strip — *"Offline — orders are saved on this phone and
+      sent when coverage is back"* — under the tabs, and it **stays put** at every state instead of
+      resizing the bar. Greyscale crop of that band still reads (icon + sentence + chevron).
+      Screenshots at text scale 1.0 and **1.5** on the POS, the drawer and the dashboard: no
+      clipping, no overflow, and the dashboard subtitle that used to sit in a hardcoded 30px strip
+      now grows with the text.
+- [ ] **iOS not run for this milestone.** Nothing here is platform-specific, but "builds" is not
+      "runs".
+
+## Milestone L — The offline cold start, measured and capped (2026-07-31)
+
+- [x] **Reproduced it properly, and the original diagnosis was wrong in one detail.** The 07-30 note
+      said `supabase_flutter` "retries the token refresh forever". With the resolved **gotrue
+      2.26.0** it does not: `_refreshAccessToken` stops retrying once the next backoff would outrun
+      `Constants.autoRefreshTickDuration` (10s), then throws. So the wait is bounded — per request —
+      at about ten seconds, not infinite. Repro without waiting an hour or rooting the emulator:
+      `adb shell run-as com.extrahelper.app` to rewrite `expires_at` in
+      `FlutterSharedPreferences.xml` to two hours ago, force-stop, airplane mode, cold start.
+      Measured on the baseline build: splash at 2s, **shell with a spinner at 10s, the board at
+      ~13–15s.**
+- [x] **Root cause.** `supabase`'s `_getAccessToken` (`supabase_client.dart:255`) awaits a token
+      refresh before *every* request when the session has expired. Offline that refresh can never
+      succeed, so `membershipsProvider` and `permissionsProvider` each paid the full retry window
+      before their `catch` reached the identity cache that exists for exactly this case. The cache
+      was never the problem; nothing asked it in time.
+- [x] **The fix: ask connectivity first, and cap the wait even when the answer is yes** —
+      `data/local/cache_backed.dart`, `cacheBackedRead`. Offline with something cached: serve the
+      cache, attempt nothing. Offline with an empty cache: attempt anyway, because an empty cache is
+      not an answer and the failure is what explains itself. Online: attempt, capped at 6s, falling
+      back to the cache on an overrun or a throw and only surfacing the error when there is nothing
+      to fall back to. The connectivity check itself is capped at 2s and treated as "online" when it
+      doesn't answer, so it can never become the new block.
+- [x] Both identity providers moved onto it, and both now **watch** `isOnlineProvider`, so a shift
+      that started with no coverage refetches the real answer when coverage returns rather than
+      living on the cache until something else invalidates it. Connectivity is resolved before the
+      first await so the dependency registers at build time, not across an async gap.
+- [x] 8 unit tests (`test/cache_backed_test.dart`), pure Dart, no emulator: offline serves cache and
+      **does not touch the network**, offline with an empty cache still attempts, online prefers
+      fresh, an overrun and a throw both fall back, an empty cache lets the error through, and a
+      hung or throwing connectivity check does not block. **128 tests passing.**
+- [x] **Verified on the Android emulator**, same repro: **the board is up at ~4s** (splash at 2s) —
+      down from ~13–15s, and the spinner state is gone. Back online, a cold start loads fresh from
+      the server (table order matches the server's, not the cache's) and the strip stays away.
+
+## Milestone M — Printing from the phone (2026-08-01)
+
+Schema half is in `../extrahelper/TASKS.md` under "Printing from the phone — a third drainer".
+
+**Why.** The shop printer (80mm POSiFLOW KP307, USB + LAN + WiFi + BT) does not do browser print.
+It cannot: JavaScript has no raw socket. The web app already solved that with QZ Tray on a till and
+a headless Node agent on a shop PC — but this app is a native process, so it can drive the printer
+itself with nothing installed on any computer. `dart:io` opens a socket to port 9100; Android speaks
+Bluetooth SPP.
+
+The queue was already the right shape. This app just became a third consumer of it.
+
+- [x] `lib/data/print/print_models.dart` — printers, jobs, claims, and the render response. Knows
+      which connections this device can drive, which is what the claim filter is built from.
+- [x] `lib/data/print/print_repository.dart` — `claim_print_jobs`, `complete_print_job`,
+      `retry_print_job`, `enqueue_print_job` (test page), plus the `printers` and `print_jobs` reads.
+      Same `PostgrestException → PosFailure` / anything-else → `PosTransientFailure` split every
+      repository uses.
+- [x] `lib/data/print/render_client.dart` — `POST {APP_URL}/api/print/render` with the user's own
+      access token. **No ESC/POS is built on the device.** The document model, the receipt template
+      and every tax line live in TypeScript; a second implementation would drift, and then the
+      till's copy and the phone's copy would disagree. Rendering after the claim also means a ticket
+      amended in between comes out amended.
+- [x] `transports/network_transport.dart` — one socket per job, 250ms before the FIN (closing
+      immediately truncates a ticket on a printer whose buffer has not caught up), and deliberately
+      not a kept-open connection: an idle thermal printer accepts bytes on a stale socket and prints
+      nothing.
+- [x] `transports/bluetooth_transport.dart` — `print_bluetooth_thermal 1.2.1`. The link is kept
+      while it works (reconnecting per job makes a three-station fire feel broken) and dropped the
+      moment a write is refused.
+- [x] `lib/data/print/print_service.dart` — the drain loop, shaped after `tools/print-agent`:
+      single-flight, five rounds, claim → render → send × copies → complete. **Every exit path
+      completes the job**; a claimed row nobody completes only unsticks after the 60s sweep, which
+      in a kitchen is a minute of nobody cooking.
+- [x] `PrintLoop` in `print_providers.dart`, mounted beside `SyncLoop` in `main.dart`: realtime
+      INSERT on `print_jobs` (with `setAuth`, or RLS drops every event), a 20s safety poll, and a
+      drain on resume. One drainer per app, not one per screen.
+- [x] **Print from this device** is per device in SharedPreferences, off by default. A manager's
+      phone and the counter tablet are the same account; only one of them is next to the printer.
+- [x] `APP_URL` added to `core/env.dart` + `env.example.json`. Without it the switch is disabled and
+      the screen says why, rather than queueing work it cannot render.
+- [x] `features/settings/printing_screen.dart` + drawer entry: what this phone can drive (icon *and*
+      a word, so it survives greyscale), the printer list with Test print, paired Bluetooth printers
+      with their addresses copyable into the web form, and recent tickets with the failure message
+      and Retry.
+- [x] Android manifest: `BLUETOOTH_CONNECT` + `BLUETOOTH_SCAN` with
+      `neverForLocation` — without that flag Play asks what a printing app wants with the user's
+      whereabouts. iOS: Bluetooth and local-network usage strings.
+- [x] `flutter analyze` clean, `dart format` applied, **150 tests passing** (6 new in
+      `test/print_models_test.dart`).
+- [ ] On the real KP307: WiFi from Android and from an iPhone, Bluetooth from Android, and four
+      drainers running at once producing exactly one slip. Needs the physical printer.
+
+**Not built, on purpose.**
+
+- **Devanagari.** Image mode is rasterised by a browser; this app declines those jobs with a
+      sentence rather than printing question marks. Flutter is the better rasteriser (`dart:ui`
+      Canvas → `GS v 0`, a port of the web's `components/print/raster.ts`) and doing it here would
+      also unblock image mode on paths with no browser. Phase 2.
+- **Offline printing.** Printing needs the network twice today: to claim, and to render. The common
+      shop failure is *internet down, LAN up* — the printer is reachable and nothing prints. Fixing
+      it means porting `lib/print/docs.ts` + `escpos*.ts` to Dart and rendering from the drift cache.
+      Note for whoever takes it: the outbox is a **server-write** queue, and a local print is not an
+      RPC, so this needs its own queue, not a new `OutboxKind`.
+- **USB.** No desktop target and no OTG printer stack. That stays QZ Tray's job.
 
 ## Backlog / Later phases
 

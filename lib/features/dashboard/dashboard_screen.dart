@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/app_scaffold.dart';
 import '../../core/format/labels.dart';
 import '../../core/format/money.dart';
 import '../../core/theme/app_theme.dart';
@@ -24,25 +25,13 @@ class DashboardScreen extends ConsumerWidget {
     final tenant = ref.watch(activeTenantProvider);
     final summary = ref.watch(dashboardSummaryProvider);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Dashboard'),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(30),
-          child: Padding(
-            padding: const EdgeInsets.only(left: 16, bottom: 8),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                tenant == null
-                    ? 'Today at a glance'
-                    : 'Today at a glance · ${tenant.timezone}',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ),
-          ),
-        ),
-      ),
+    return AppScaffold(
+      title: 'Dashboard',
+      // The timezone is the caveat on every figure below — these are the
+      // restaurant's days, not the phone's.
+      subtitle: tenant == null
+          ? 'Today at a glance'
+          : 'Today at a glance · ${tenant.timezone}',
       body: RefreshIndicator(
         onRefresh: () async => ref.refresh(dashboardSummaryProvider.future),
         child: summary.when(

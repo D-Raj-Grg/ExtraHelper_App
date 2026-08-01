@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../data/local/cache_backed.dart';
 import '../../data/local/identity_cache.dart';
 import '../../data/supabase/supabase_providers.dart';
 import '../../data/supabase/tenant_repository.dart';
@@ -22,7 +23,8 @@ final identityCacheProvider = Provider<IdentityCache>(
 );
 
 /// Restaurants the user can work in. Refetched whenever auth changes, so a
-/// sign-out can't leave another user's memberships in the cache.
+/// sign-out can't leave another user's memberships in the cache, and again
+/// when coverage returns, so a shift started offline picks up the real answer.
 ///
 /// **Cache first**: a cold start with no coverage must still land the waiter in
 /// their restaurant. A failed refresh keeps the cached answer rather than
@@ -35,16 +37,34 @@ final membershipsProvider = FutureProvider<List<Membership>>((ref) async {
     await cache.clear();
     return const [];
   }
-  try {
-    final fresh = await ref.watch(tenantRepositoryProvider).activeMemberships();
-    await cache.saveMemberships(fresh);
-    return fresh;
-  } on Object {
-    final cached = await cache.memberships();
-    if (cached.isNotEmpty) return cached;
-    rethrow;
-  }
+  final isOnline = _connectivity(ref);
+  return cacheBackedRead<List<Membership>>(
+    isOnline: isOnline,
+    fetch: () async {
+      final fresh = await ref
+          .watch(tenantRepositoryProvider)
+          .activeMemberships();
+      await cache.saveMemberships(fresh);
+      return fresh;
+    },
+    cached: () async {
+      final rows = await cache.memberships();
+      return rows.isEmpty ? null : rows;
+    },
+  );
 });
+
+/// Connectivity for the identity reads, resolved **before** the first await so
+/// the dependency is registered at build time rather than across an async gap.
+///
+/// Watched, not read: when coverage returns the provider re-runs and the shell
+/// stops living on the cache. The direct check is the fallback for the first
+/// frame, before the stream has produced anything.
+Future<bool> Function() _connectivity(Ref ref) {
+  final known = ref.watch(isOnlineProvider).valueOrNull;
+  final watcher = ref.watch(connectivityProvider);
+  return () async => known ?? await watcher.isOnline();
+}
 
 /// Memberships awaiting owner approval — the difference between "ask for a
 /// code" and "wait for approval".
@@ -114,17 +134,21 @@ final permissionsProvider = FutureProvider<Set<String>>((ref) async {
   final tenant = ref.watch(activeTenantProvider);
   if (tenant == null) return const {};
   final cache = ref.watch(identityCacheProvider);
-  try {
-    final fresh = await ref
-        .watch(tenantRepositoryProvider)
-        .permissions(tenant.tenantId);
-    await cache.savePermissions(tenant.tenantId, fresh);
-    return fresh;
-  } on Object {
-    final cached = await cache.permissions(tenant.tenantId);
-    if (cached.isNotEmpty) return cached;
-    rethrow;
-  }
+  final isOnline = _connectivity(ref);
+  return cacheBackedRead<Set<String>>(
+    isOnline: isOnline,
+    fetch: () async {
+      final fresh = await ref
+          .watch(tenantRepositoryProvider)
+          .permissions(tenant.tenantId);
+      await cache.savePermissions(tenant.tenantId, fresh);
+      return fresh;
+    },
+    cached: () async {
+      final keys = await cache.permissions(tenant.tenantId);
+      return keys.isEmpty ? null : keys;
+    },
+  );
 });
 
 /// Whether the user holds a permission key in the active tenant.

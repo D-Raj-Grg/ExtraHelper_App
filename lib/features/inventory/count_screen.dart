@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/app_scaffold.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/tokens.dart';
 import '../../data/supabase/inventory_repository.dart';
@@ -56,17 +57,19 @@ class _CountScreenState extends ConsumerState<CountScreen> {
     final lines = ref.watch(countLinesProvider(widget.countId));
     final canEdit = ref.watch(canEditInventoryProvider);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Stock count'),
-        actions: [
-          IconButton(
-            tooltip: 'Scan a label',
-            icon: const Icon(Icons.qr_code_scanner),
-            onPressed: () => _scan(lines.valueOrNull ?? const []),
-          ),
-        ],
-      ),
+    return AppScaffold(
+      title: 'Stock count',
+      // A leaf, pushed from the store room: it keeps the back arrow rather
+      // than the drawer, because leaving a half-entered count by jumping to
+      // another destination is not a move anyone means to make.
+      showDrawer: false,
+      actions: [
+        IconButton(
+          tooltip: 'Scan a label',
+          icon: const Icon(Icons.qr_code_scanner),
+          onPressed: () => _scan(lines.valueOrNull ?? const []),
+        ),
+      ],
       body: lines.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(

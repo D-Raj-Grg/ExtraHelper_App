@@ -8,6 +8,19 @@
          user who says no) still counts the store room. -->
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <!-- Driving a paired thermal printer over Bluetooth. `neverForLocation` is
+         load-bearing: without it Play asks what a printing app wants with the
+         user's whereabouts, and the honest answer is nothing. The legacy
+         permissions are capped at Android 11, where the modern ones do not
+         exist yet. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"/>
+    <uses-permission android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30"/>
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false"/>
     <application
         android:label="ExtraHelper"
         android:name="${applicationName}"

@@ -12,7 +12,31 @@ The app is not published to the App Store or Play Store yet; `pubspec.yaml` stay
 
 ## [Unreleased]
 
-Outstanding verification, tracked in `TASKS.md`:
+### Changed
+- **Navigation moved to a drawer.** Dashboard, Store room, Manager log and Account were five icon buttons crowded into the top-right of the app bar; each now has a named row in a drawer, opened from the hamburger or an edge swipe. The restaurant — and switching between restaurants — sits at the top of it.
+- The app bar now names the screen you are on ("POS", "Store room") instead of the restaurant.
+- Tables and Orders now sit in the app bar rather than in a separate strip below it.
+
+### Fixed
+- The sync indicator used to disappear whenever everything was sent, so the app bar changed width mid-service. Connection and anything waiting to send are now one band under the bar, on every screen: `Offline`, `Offline · 2 waiting`, `2 waiting to send`, or a refused write, each tappable for detail.
+- Screens no longer clip at larger text sizes: titles are one line with an ellipsis, and the dashboard's subtitle strip sizes itself to the text.
+- Two restaurants with the same name were indistinguishable when switching; each now shows its unique @handle.
+- **Opening the app with no coverage after it sat idle overnight.** The phone spent about thirteen seconds on a spinner before showing the floor it already had saved. It now opens in about four — the app asks whether there's coverage before it asks the server anything.
+
+<details><summary>Technical</summary>
+
+- New `app/app_scaffold.dart` (`AppScaffold`) owns the drawer, the `SyncStrip` and the one-line title, so chrome can't drift per screen. In `app/` rather than `core/` so `core` never imports `features`. Leaves (composer, stock count) pass `showDrawer: false` and keep the back arrow.
+- New `features/tenant/app_drawer.dart`; `TenantSwitcher` became `TenantDrawerHeader`; `AccountScreen` extracted out of `home_shell.dart`.
+- `SyncStatusAction` + `OfflineBanner` collapsed into `SyncStrip` — the only coloured band in the app frame, so colour in the chrome means "not on the server yet". Icon + word + count on every state (greyscale-safe).
+- Destinations are real go_router routes (`/dashboard`, `/store-room`, `/manager-log`, `/account`) that replace each other, with a `PopScope` sending Back to the POS.
+- The POS `TabController` moved to the shell and feeds `AppBar.bottom`; `PosScreen` takes it as a parameter.
+- `test/shell_chrome_test.dart` — 10 widget tests covering drawer permission gating, destination navigation, the header's one-vs-many restaurant behaviour, and every `SyncStrip` state.
+- New `data/local/cache_backed.dart` (`cacheBackedRead`) backs both identity providers: offline serves the cache without attempting the network, online caps the attempt at 6s before falling back, and the connectivity check itself is capped at 2s. Root cause: `supabase`'s `_getAccessToken` awaits a token refresh before every request once the session is expired, and gotrue retries that refresh until the next backoff would outrun its 10s tick — so each identity read paid ~10s offline before its `catch` reached the cache. Both providers now watch `isOnlineProvider`, so returning coverage refetches. 8 unit tests; 128 passing overall.
+
+Verified on the Android emulator signed in as owner: drawer navigation and selected state, Back returning to the POS, the composer as a leaf with a back arrow, the strip under airplane mode, a greyscale crop of that band, and screenshots at text scale 1.0 and 1.5. Not run on iOS.
+</details>
+
+### Outstanding verification (tracked in `TASKS.md`)
 - Offline path on a physical iPhone (only emulator/simulator verified).
 - `menu.86` permission key.
 

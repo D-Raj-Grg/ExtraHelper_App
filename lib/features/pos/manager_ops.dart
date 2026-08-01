@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/app_scaffold.dart';
 import '../../core/format/labels.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/tokens.dart';
@@ -276,8 +277,8 @@ class ManagerLogScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final log = ref.watch(auditLogProvider);
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Manager log')),
+    return AppScaffold(
+      title: 'Manager log',
       body: RefreshIndicator(
         onRefresh: () async => ref.invalidate(auditLogProvider),
         child: log.when(

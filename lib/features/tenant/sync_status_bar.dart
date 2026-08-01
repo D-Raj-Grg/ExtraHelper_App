@@ -5,78 +5,102 @@ import '../../core/theme/tokens.dart';
 import '../../data/sync/outbox.dart';
 import '../../data/sync/sync_providers.dart';
 
-/// What the app still owes the server, in the app bar.
+/// Connection and what the app still owes the server — one band, under the
+/// app bar, on every screen.
 ///
-/// Two different facts, never conflated:
+/// This used to be two things: a badge in the app bar that **vanished when the
+/// outbox was clean**, so the bar changed width mid-service, and a separate
+/// offline banner below it. They describe one situation, so they are one strip.
 ///
+/// It is also the only coloured band in the app frame. Colour in the chrome
+/// means exactly one thing: *this work is not on the server yet.*
+///
+/// Three facts, never conflated:
+///
+/// * **Offline** — a state, not an error. Say it plainly and promise the thing
+///   the waiter actually cares about.
 /// * **Owed** — writes are queued and will land. A count, not an alarm.
 /// * **Failed** — the server refused something and gave up. That needs a
 ///   person, so it is a warning with the reason attached.
 ///
-/// Colour never carries either state alone: both have an icon and a number or
-/// word beside them, so this survives a greyscale screenshot.
-class SyncStatusAction extends ConsumerWidget {
-  const SyncStatusAction({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final status = ref.watch(outboxStatusProvider).valueOrNull;
-    if (status == null || status.isClean) return const SizedBox.shrink();
-
-    final semantic = context.semantic;
-    final failed = status.dead.isNotEmpty;
-
-    return IconButton(
-      tooltip: failed
-          ? '${status.dead.length} write${status.dead.length == 1 ? '' : 's'} failed'
-          : '${status.pending} waiting to send',
-      icon: Badge(
-        label: Text('${failed ? status.dead.length : status.pending}'),
-        backgroundColor: failed ? semantic.attentionText : semantic.infoText,
-        child: Icon(
-          failed
-              ? Icons.report_gmailerrorred_outlined
-              : Icons.cloud_upload_outlined,
-        ),
-      ),
-      onPressed: () => showDialog<void>(
-        context: context,
-        builder: (_) => const _SyncStatusDialog(),
-      ),
-    );
-  }
-}
-
-/// Offline is a **state, not an error**. Say it plainly, above the board, and
-/// promise the thing the waiter actually cares about.
-class OfflineBanner extends ConsumerWidget {
-  const OfflineBanner({super.key});
+/// Colour never carries any of them alone: each has an icon and a word or a
+/// number beside it, so this survives a greyscale screenshot.
+class SyncStrip extends ConsumerWidget {
+  const SyncStrip({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final online = ref.watch(isOnlineProvider).valueOrNull ?? true;
-    if (online) return const SizedBox.shrink();
+    final status = ref.watch(outboxStatusProvider).valueOrNull;
+    final pending = status?.pending ?? 0;
+    final dead = status?.dead.length ?? 0;
+
+    if (online && pending == 0 && dead == 0) return const SizedBox.shrink();
 
     final theme = Theme.of(context);
     final semantic = context.semantic;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      color: semantic.warning,
-      child: Row(
-        children: [
-          Icon(Icons.cloud_off, size: 18, color: semantic.warningText),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'No coverage — orders are saved on this phone and sent when it '
-              'comes back.',
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: semantic.warningText,
-              ),
-            ),
+
+    final (
+      IconData icon,
+      Color tone,
+      Color toneText,
+      String message,
+    ) = switch ((dead > 0, online)) {
+      (true, _) => (
+        Icons.report_gmailerrorred_outlined,
+        semantic.attention,
+        semantic.attentionText,
+        '$dead write${dead == 1 ? '' : 's'} refused — tap to see why',
+      ),
+      (false, false) when pending > 0 => (
+        Icons.cloud_off,
+        semantic.warning,
+        semantic.warningText,
+        'Offline · $pending waiting — saved on this phone',
+      ),
+      (false, false) => (
+        Icons.cloud_off,
+        semantic.warning,
+        semantic.warningText,
+        'Offline — orders are saved on this phone and sent when coverage is back',
+      ),
+      (false, true) => (
+        Icons.cloud_upload_outlined,
+        semantic.info,
+        semantic.infoText,
+        '$pending waiting to send',
+      ),
+    };
+
+    return Material(
+      color: tone.withValues(alpha: 0.16),
+      child: InkWell(
+        onTap: () => showDialog<void>(
+          context: context,
+          builder: (_) => const _SyncStatusDialog(),
+        ),
+        child: Container(
+          width: double.infinity,
+          constraints: const BoxConstraints(minHeight: Tokens.tapTarget),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: tone)),
           ),
-        ],
+          child: Row(
+            children: [
+              Icon(icon, size: 18, color: toneText),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  message,
+                  style: theme.textTheme.labelMedium?.copyWith(color: toneText),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Icon(Icons.chevron_right, size: 18, color: toneText),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -157,6 +181,9 @@ class _DeadRow extends StatelessWidget {
     OutboxKind.menu86 => 'Sold out / back on',
     OutboxKind.tableState => 'Table state',
     OutboxKind.stockCount => 'Counted quantity',
+    OutboxKind.kotLine => 'Dish status',
+    OutboxKind.kotTicket => 'Ticket status',
+    OutboxKind.orderServed => 'Delivered to the table',
   };
 
   @override

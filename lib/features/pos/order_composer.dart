@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/app_scaffold.dart';
 import '../../core/format/labels.dart';
 import '../../core/format/money.dart';
 import '../../core/theme/app_theme.dart';
@@ -212,7 +213,6 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final tenant = ref.watch(activeTenantProvider);
     final currency = tenant?.currency ?? 'USD';
     final menu = ref.watch(menuProvider);
@@ -227,16 +227,13 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
               ? 'Table ${widget.seedTable!.label}'
               : 'Takeaway');
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(_isAmend ? 'Add to order' : 'New order'),
-            Text(destination, style: theme.textTheme.labelSmall),
-          ],
-        ),
-      ),
+    return AppScaffold(
+      title: _isAmend ? 'Add to order' : 'New order',
+      // Which table this lands on is the one fact worth carrying in the frame.
+      // It used to be a second line inside the title, which clips as soon as
+      // someone raises their text size.
+      subtitle: destination,
+      showDrawer: false,
       body: Column(
         children: [
           Padding(

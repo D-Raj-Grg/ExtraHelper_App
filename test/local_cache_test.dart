@@ -57,6 +57,21 @@ class _RecordingTransport implements OutboxTransport {
     required String countItemId,
     required double actual,
   }) async => calls.add('setCountActual:$countItemId:$actual');
+
+  @override
+  Future<void> setKotLineStatus({
+    required String kotItemId,
+    required String status,
+  }) async => calls.add('setKotLineStatus:$kotItemId:$status');
+
+  @override
+  Future<void> setKotStatus({
+    required String kotId,
+    required String status,
+  }) async => calls.add('setKotStatus:$kotId:$status');
+  @override
+  Future<void> markOrderServed(String orderId) async =>
+      calls.add('markOrderServed:$orderId');
 }
 
 PosMenuItem _item(

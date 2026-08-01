@@ -6,7 +6,13 @@ import 'package:go_router/go_router.dart';
 import '../data/supabase/supabase_providers.dart';
 import '../features/auth/join_code_screen.dart';
 import '../features/auth/login_screen.dart';
+import '../features/dashboard/dashboard_screen.dart';
 import '../features/dev/design_gallery.dart';
+import '../features/inventory/inventory_screen.dart';
+import '../features/kds/kds_screen.dart';
+import '../features/pos/manager_ops.dart';
+import '../features/settings/printing_screen.dart';
+import '../features/tenant/account_screen.dart';
 import '../features/tenant/home_shell.dart';
 import '../features/tenant/tenant_providers.dart';
 
@@ -15,6 +21,12 @@ abstract final class Routes {
   static const home = '/';
   static const login = '/login';
   static const join = '/join';
+  static const kds = '/kitchen';
+  static const dashboard = '/dashboard';
+  static const inventory = '/store-room';
+  static const managerLog = '/manager-log';
+  static const printing = '/printing';
+  static const account = '/account';
   static const designGallery = '/dev/design';
 }
 
@@ -28,9 +40,12 @@ final routerProvider = Provider<GoRouter>((ref) {
 
   // Re-evaluate the redirect whenever auth or membership state moves: a session
   // that expires while backgrounded, an approval that lands, a tenant switch.
+  // Permissions too: they decide whether the POS is even a place this person
+  // can stand, and they arrive after the memberships do.
   ref
     ..listen(authStateProvider, (_, _) => refresh.value++)
     ..listen(membershipsProvider, (_, _) => refresh.value++)
+    ..listen(permissionsProvider, (_, _) => refresh.value++)
     ..onDispose(refresh.dispose);
 
   return GoRouter(
@@ -56,6 +71,20 @@ final routerProvider = Provider<GoRouter>((ref) {
       }
       // In a restaurant: /login and /join are behind them now.
       if (loc == Routes.login || loc == Routes.join) return Routes.home;
+
+      // Home is the POS, which a kitchen role cannot use — `Kitchen` holds
+      // `kds.view` and `kds.bump` and nothing else, so before this the app
+      // opened on "No ordering access" and was a dead end for exactly the
+      // person you want holding the kitchen tablet. Send them to their board.
+      if (loc == Routes.home) {
+        final permissions = ref.read(permissionsProvider).valueOrNull;
+        if (permissions != null) {
+          final canUsePos =
+              permissions.contains('tables.view') ||
+              permissions.contains('order.create');
+          if (!canUsePos && permissions.contains('kds.view')) return Routes.kds;
+        }
+      }
       return null;
     },
     routes: [
@@ -70,6 +99,29 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: Routes.join,
         builder: (context, state) => const JoinCodeScreen(),
+      ),
+      // Drawer destinations. Real routes rather than imperative pushes, so the
+      // drawer can say which one you are on without tracking it itself.
+      GoRoute(path: Routes.kds, builder: (context, state) => const KdsScreen()),
+      GoRoute(
+        path: Routes.dashboard,
+        builder: (context, state) => const DashboardScreen(),
+      ),
+      GoRoute(
+        path: Routes.inventory,
+        builder: (context, state) => const InventoryScreen(),
+      ),
+      GoRoute(
+        path: Routes.managerLog,
+        builder: (context, state) => const ManagerLogScreen(),
+      ),
+      GoRoute(
+        path: Routes.printing,
+        builder: (context, state) => const PrintingScreen(),
+      ),
+      GoRoute(
+        path: Routes.account,
+        builder: (context, state) => const AccountScreen(),
       ),
       // Debug-only: the greyscale check for "never colour alone" needs every
       // state on one screen, which real screens can't offer.

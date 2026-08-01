@@ -9,6 +9,7 @@ import '../local/database.dart';
 import '../local/drift_outbox_store.dart';
 import '../local/pos_cache.dart';
 import '../supabase/inventory_repository.dart';
+import '../supabase/kds_repository.dart';
 import 'connectivity.dart';
 import 'order_queue.dart';
 import 'outbox.dart';
@@ -51,6 +52,7 @@ final replayEngineProvider = Provider<ReplayEngine?>((ref) {
     transport: SupabaseTransport(
       repo,
       ref.watch(inventoryRepositoryProvider(tenant.tenantId)),
+      ref.watch(kdsRepositoryProvider(tenant.tenantId)),
     ),
     isOnline: watcher.isOnline,
   );

@@ -55,4 +55,17 @@ abstract class OutboxTransport {
     required String countItemId,
     required double actual,
   });
+
+  /// One dish on a kitchen ticket. The RPC re-derives the ticket and the order.
+  Future<void> setKotLineStatus({
+    required String kotItemId,
+    required String status,
+  });
+
+  /// A whole kitchen ticket. `recalled` comes through here too — it is a
+  /// status, not a separate verb, so the queue needs no extra kind for it.
+  Future<void> setKotStatus({required String kotId, required String status});
+
+  /// The waiter carried it to the table.
+  Future<void> markOrderServed(String orderId);
 }

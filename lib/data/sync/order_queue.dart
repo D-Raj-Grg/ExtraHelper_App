@@ -199,14 +199,59 @@ class OrderQueue {
   Future<QueueOutcome> setCountActual({
     required String countItemId,
     required double actual,
-  }) async {
-    final ref = 'count_item:$countItemId';
-    final payload = {'count_item_id': countItemId, 'actual': actual};
+  }) => _lastWriteWins(
+    kind: OutboxKind.stockCount,
+    ref: 'count_item:$countItemId',
+    payload: {'count_item_id': countItemId, 'actual': actual},
+  );
 
+  /// Move one dish on a kitchen ticket.
+  ///
+  /// Replaces a still-pending write for the same dish rather than queuing a
+  /// second: a status is the absolute state of one row, so only the last tap
+  /// matters — and a cook correcting a mis-tap should not owe the server two
+  /// writes for one plate. Same reasoning as a re-counted shelf.
+  Future<QueueOutcome> setKotLineStatus({
+    required String kotItemId,
+    required String status,
+  }) => _lastWriteWins(
+    kind: OutboxKind.kotLine,
+    ref: 'kot_item:$kotItemId',
+    payload: {'kot_item_id': kotItemId, 'status': status},
+  );
+
+  /// Move a whole kitchen ticket — including pulling a bumped one back, which
+  /// is the `recalled` status rather than a verb of its own.
+  Future<QueueOutcome> setKotStatus({
+    required String kotId,
+    required String status,
+  }) => _lastWriteWins(
+    kind: OutboxKind.kotTicket,
+    ref: 'kot:$kotId',
+    payload: {'kot_id': kotId, 'status': status},
+  );
+
+  /// The waiter delivered the order.
+  ///
+  /// Terminal and idempotent, so a replay writes the same state again. Queuing
+  /// it means a waiter in a dead-signal corner of the room can still close the
+  /// loop rather than holding the plate until the wifi agrees.
+  Future<QueueOutcome> markOrderServed(String orderId) => _lastWriteWins(
+    kind: OutboxKind.orderServed,
+    ref: orderId,
+    payload: const {},
+  );
+
+  /// Enqueue, or replace the payload of a pending write for the same row.
+  Future<QueueOutcome> _lastWriteWins({
+    required OutboxKind kind,
+    required String ref,
+    required Map<String, dynamic> payload,
+  }) async {
     final pending = (await _store.due())
         .where(
           (e) =>
-              e.kind == OutboxKind.stockCount &&
+              e.kind == kind &&
               e.orderRef == ref &&
               e.state == OutboxState.pending,
         )
@@ -218,7 +263,7 @@ class OrderQueue {
 
     final entry = await _store.enqueue(
       tenantId: _tenantId,
-      kind: OutboxKind.stockCount,
+      kind: kind,
       orderRef: ref,
       idempotencyKey: _uuid.v4(),
       payload: payload,

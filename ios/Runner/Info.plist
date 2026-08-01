@@ -49,5 +49,11 @@
 		<false/>
 		<key>NSCameraUsageDescription</key>
 		<string>ExtraHelper uses the camera to scan item labels while you count the store room. You can always search by name instead.</string>
+		<key>NSBluetoothAlwaysUsageDescription</key>
+		<string>ExtraHelper uses Bluetooth to print kitchen tickets and receipts on a nearby thermal printer.</string>
+		<key>NSBluetoothPeripheralUsageDescription</key>
+		<string>ExtraHelper uses Bluetooth to print kitchen tickets and receipts on a nearby thermal printer.</string>
+		<key>NSLocalNetworkUsageDescription</key>
+		<string>ExtraHelper sends kitchen tickets and receipts straight to a thermal printer on this WiFi network.</string>
 	</dict>
 </plist>

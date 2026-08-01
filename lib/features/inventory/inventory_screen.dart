@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/app_scaffold.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/tokens.dart';
 import '../../data/supabase/inventory_repository.dart';
@@ -45,17 +46,15 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     final canEdit = ref.watch(canEditInventoryProvider);
     final openCount = ref.watch(openCountProvider).valueOrNull;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Store room'),
-        actions: [
-          IconButton(
-            tooltip: 'Scan a label',
-            icon: const Icon(Icons.qr_code_scanner),
-            onPressed: () => _scan(context),
-          ),
-        ],
-      ),
+    return AppScaffold(
+      title: 'Store room',
+      actions: [
+        IconButton(
+          tooltip: 'Scan a label',
+          icon: const Icon(Icons.qr_code_scanner),
+          onPressed: () => _scan(context),
+        ),
+      ],
       floatingActionButton: canEdit
           ? FloatingActionButton.extended(
               onPressed: () => _openCount(context),

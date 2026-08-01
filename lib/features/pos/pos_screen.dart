@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -18,17 +20,19 @@ import 'pos_providers.dart';
 /// Tapping a table opens its live order if one is open, or starts a new order
 /// seeded to that table. One decision, made here, so the composer never has to
 /// ask which it is.
+///
+/// The `TabBar` itself belongs to the shell's app bar — the tabs and the bar
+/// are one band — so the controller is passed in rather than owned here.
 class PosScreen extends ConsumerStatefulWidget {
-  const PosScreen({super.key});
+  const PosScreen({super.key, required this.tabs});
+
+  final TabController tabs;
 
   @override
   ConsumerState<PosScreen> createState() => _PosScreenState();
 }
 
-class _PosScreenState extends ConsumerState<PosScreen>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 2, vsync: this);
-
+class _PosScreenState extends ConsumerState<PosScreen> {
   @override
   void initState() {
     super.initState();
@@ -41,12 +45,6 @@ class _PosScreenState extends ConsumerState<PosScreen>
       ref.read(categoriesProvider);
       ref.read(floorsProvider);
     });
-  }
-
-  @override
-  void dispose() {
-    _tabs.dispose();
-    super.dispose();
   }
 
   Future<void> _openTable(PosTable table) async {
@@ -136,26 +134,13 @@ class _PosScreenState extends ConsumerState<PosScreen>
   Widget build(BuildContext context) {
     final canOrder = ref.watch(hasPermissionProvider('order.create'));
 
-    return Column(
+    return TabBarView(
+      controller: widget.tabs,
       children: [
-        TabBar(
-          controller: _tabs,
-          tabs: const [
-            Tab(text: 'Tables', icon: Icon(Icons.table_restaurant)),
-            Tab(text: 'Orders', icon: Icon(Icons.receipt_long)),
-          ],
-        ),
-        Expanded(
-          child: TabBarView(
-            controller: _tabs,
-            children: [
-              _TablesTab(onOpen: canOrder ? _openTable : null),
-              _OrdersTab(
-                onOpen: _openOrder,
-                onNewTakeaway: canOrder ? _newTakeaway : null,
-              ),
-            ],
-          ),
+        _TablesTab(onOpen: canOrder ? _openTable : null),
+        _OrdersTab(
+          onOpen: _openOrder,
+          onNewTakeaway: canOrder ? _newTakeaway : null,
         ),
       ],
     );
@@ -319,6 +304,7 @@ class _OrdersTab extends ConsumerWidget {
                 order: list[i],
                 currency: currency,
                 onTap: () => onOpen(list[i]),
+                onDelivered: () => _markDelivered(context, ref, list[i]),
               ),
             );
           },
@@ -328,16 +314,53 @@ class _OrdersTab extends ConsumerWidget {
   }
 }
 
+/// The waiter carried the plate over.
+///
+/// `served` used to be set only as a side effect of the kitchen bumping the
+/// last ticket, which meant it recorded when the food was *ready*, not when it
+/// reached the guest. `mark_order_served` already allowed waiters; nothing
+/// called it.
+Future<void> _markDelivered(
+  BuildContext context,
+  WidgetRef ref,
+  PosOrder order,
+) async {
+  final queue = ref.read(orderQueueProvider);
+  if (queue == null) return;
+  final outcome = await queue.markOrderServed(order.id);
+  ref.invalidate(outboxStatusProvider);
+  if (outcome.synced) {
+    ref.invalidate(activeOrdersProvider);
+    unawaited(ref.read(tablesProvider.notifier).refresh());
+  }
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context)
+    ..clearSnackBars()
+    ..showSnackBar(
+      SnackBar(
+        content: Text(
+          outcome.error ??
+              (outcome.synced
+                  ? 'Marked delivered.'
+                  : "Saved on this phone. It syncs when you're back on "
+                        'coverage.'),
+        ),
+      ),
+    );
+}
+
 class _OrderCard extends StatelessWidget {
   const _OrderCard({
     required this.order,
     required this.currency,
     required this.onTap,
+    required this.onDelivered,
   });
 
   final PosOrder order;
   final String currency;
   final VoidCallback onTap;
+  final VoidCallback onDelivered;
 
   @override
   Widget build(BuildContext context) {
@@ -426,6 +449,46 @@ class _OrderCard extends StatelessWidget {
                   ],
                 ],
               ),
+              // The kitchen has plated it. This is the one status a waiter
+              // should notice from across the room, so it gets a band of its
+              // own rather than a dot in a row of grey text — and the action
+              // that closes the loop sits inside it.
+              if (order.status == 'ready') ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+                  decoration: BoxDecoration(
+                    color: semantic.good.withValues(alpha: 0.16),
+                    border: Border.all(color: semantic.good),
+                    borderRadius: BorderRadius.circular(Tokens.radiusMd),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.notifications_active,
+                        size: 18,
+                        color: semantic.goodText,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Ready to run',
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: semantic.goodText,
+                          ),
+                        ),
+                      ),
+                      FilledButton(
+                        onPressed: onDelivered,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(0, Tokens.tapTarget),
+                        ),
+                        child: const Text('Delivered'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ),

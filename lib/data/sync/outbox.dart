@@ -17,6 +17,16 @@ import 'dart:convert';
 /// a replay writes the same number again. A stock *adjustment* is deliberately
 /// **not** here: it is a delta, `adjust_inventory` takes no idempotency key, and
 /// a delta replayed twice moves stock twice.
+///
+/// `orderServed` is the waiter's half of the same loop: the kitchen says ready,
+/// the waiter carries the plate and says delivered. It is terminal and
+/// idempotent — `mark_order_served` sets one state — so it queues on the same
+/// argument as the rest.
+///
+/// `kotLine` and `kotTicket` are the kitchen's two writes, and they queue on the
+/// same last-write-wins argument: a status is an absolute state of one row, so
+/// replaying "ready" writes "ready" again. Kitchen wifi is the worst wifi in the
+/// building and a dead tap mid-rush is worse than a late one.
 enum OutboxKind {
   order,
   amendAdd,
@@ -25,6 +35,9 @@ enum OutboxKind {
   menu86,
   tableState,
   stockCount,
+  kotLine,
+  kotTicket,
+  orderServed,
 }
 
 /// `inflight` is a **persisted** state, not a memory flag (rule 4). A process

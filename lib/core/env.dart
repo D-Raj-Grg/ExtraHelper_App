@@ -12,6 +12,16 @@ class Env {
     'SUPABASE_PUBLISHABLE_KEY',
   );
 
+  /// Where the Next.js app is served, e.g. `https://app.extrahelper.io`.
+  ///
+  /// Printing needs it: a claimed job is rendered to ESC/POS by
+  /// `POST /api/print/render`, so a ticket printed from a phone is byte-identical
+  /// to one printed by the till. Optional — everything else in the app works
+  /// without it, and the printing screen says plainly when it is missing.
+  static const appUrl = String.fromEnvironment('APP_URL');
+
+  static bool get canPrint => appUrl.isNotEmpty;
+
   /// Whether both values were supplied at build time.
   static bool get isConfigured =>
       supabaseUrl.isNotEmpty && supabasePublishableKey.isNotEmpty;
