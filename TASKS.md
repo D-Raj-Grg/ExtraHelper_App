@@ -814,23 +814,62 @@ device permanently.
       it means porting `lib/print/docs.ts` + `escpos*.ts` to Dart and rendering from the drift cache.
       Note for whoever takes it: the outbox is a **server-write** queue, and a local print is not an
       RPC, so this needs its own queue, not a new `OutboxKind`.
-- **USB.** No desktop target and no OTG printer stack. That stays QZ Tray's job.
+- **USB.** No desktop target and no OTG printer stack. That stays QZ Tray's job. Worth saying
+      plainly because the KP307 has a USB port and it looks like an option: a phone cannot drive it
+      on either platform. Mobile printing means WiFi or Ethernet.
+- **Bluetooth on iPhone.** Not a gap to close — iOS refuses classic Bluetooth SPP, the profile these
+      printers speak, unless the device carries an Apple MFi authentication chip and the app drives
+      it through ExternalAccessory with a registered protocol string. The KP307 has no MFi chip and
+      nor does any printer at this price. `print_bluetooth_thermal` falls back to BLE on iOS and
+      reports *nearby* CoreBluetooth UUIDs rather than the MAC address a `printers` row holds, which
+      is why `BluetoothPrintTransport.supportedPlatform` is `Platform.isAndroid` and `send()` refuses
+      with a sentence naming the fix. A BLE transport was considered and dropped: the KP307's module
+      is undocumented as to BLE, probing it needs the printer in hand, and even then today's
+      single-shot `writeBytes` of a whole payload becomes chunked writes against an unknown MTU with
+      no flow control. **iPhone prints over the network. That is the answer, not a workaround** — for
+      a counter-mounted printer it is the better one anyway: every phone reaches it, no pairing, no
+      10m range, no single device holding the link.
 
 ## Backlog / Later phases
 
 - [ ] **Offline on a physical iPhone, in airplane mode.** The one verification `CLAUDE.md` asks for
       that is still outstanding. A simulator has no airplane mode and `connectivity_plus` there
-      reports the *host's* network, so it proves nothing. Blocked on the device being unlocked with
-      developer services enabled — signing itself already works
-      (`Apple Development: divyashwar@icloud.com`). Everything else in Milestone F is verified on
-      the Android emulator.
+      reports the *host's* network, so it proves nothing. **Unblocked by 1.0.7** — TestFlight puts a
+      signed build on the phone without needing developer services on the device. Run: cold launch,
+      airplane mode on, full order with variants and modifiers, force-quit mid-queue, relaunch,
+      airplane mode off — the order must reach the kitchen exactly once. Then a cold start with no
+      coverage at all, which must render the shell from cache, not "No ordering access". Everything
+      else in Milestone F is verified on the Android emulator.
 - [ ] **Decide on a `menu.86` permission key.** The kitchen must be able to 86 a dish but must not
       hold `menu.edit` (which is full menu editing, prices included), so `set_item_86` checks the
       role directly today. A dedicated key is the clean fix; it is a shared-catalog change, so it
       lands in `../extrahelper/TASKS.md` too.
 - [ ] Inventory — stock counts and adjustments in the store room; barcode/QR scan via camera.
-- [ ] Store release — signing, TestFlight + Play internal testing track, then production. Closes the
-      blocked `../extrahelper/TASKS.md` line 107.
+- [x] **iOS signing + TestFlight internal.** `Apple Development` identity (the old `iPhone Developer`
+      string makes an archive undistributable), `CODE_SIGN_STYLE = Automatic` pinned on the Runner
+      target, `ITSAppUsesNonExemptEncryption = false`, version `1.0.7+1`. Build with
+      `flutter build ipa --dart-define-from-file=env.json` — never archive from the Xcode GUI, which
+      reads dart-defines from a stale `Generated.xcconfig` and ships a binary that crashes on launch.
+      Internal testing skips App Review entirely.
+- [ ] **App Review submission (public App Store).** Everything internal TestFlight let us skip:
+      - [ ] A demo tenant with seeded data, plus review credentials + join code in the App Review
+            notes. The app is login-gated behind a membership; without these it is an automatic
+            rejection. Never a real tenant's data.
+      - [ ] Privacy policy URL + support URL, both live and reachable.
+      - [ ] App Store Connect privacy nutrition labels — email and user content at minimum.
+      - [ ] Guideline 5.1.1(v) account deletion. There is no in-app signup (login + join code only),
+            which is the exemption argument, but accounts are created on the web. Decide the answer
+            before submitting rather than in a rejection reply.
+      - [ ] Screenshots: iPhone and iPad, since the binary is universal.
+      - [ ] External TestFlight testers need Beta App Review — same demo-account requirement.
+- [ ] **Play internal testing track.** `android/app/build.gradle.kts` still signs release with the
+      **debug** keystore (the untouched template TODO). Needs a real keystore, `key.properties`
+      gitignored, and `flutter build appbundle` — Play takes an AAB, not the APK the README documents.
+- [ ] **iPad layout pass.** The binary is universal (`TARGETED_DEVICE_FAMILY = "1,2"`) but only
+      `kds_screen.dart:240` and `dashboard_screen.dart:222` have breakpoints; POS, composer, store
+      room, manager log, auth and the drawer are fixed single-column and read as a stretched phone on
+      a 12.9". No `SystemChrome.setPreferredOrientations` anywhere either, so every screen rotates
+      freely with no layout that accounts for it. Fine for internal testing, not for review.
 - [ ] Deep links (order links, QR) — needs universal links + app links and the associated-domain
       files, so it lands with a real bundle id and a hosted domain.
 - [ ] Widget/integration tests for the composer beyond the unit-tested sync layer.
@@ -838,7 +877,8 @@ device permanently.
 
 ## Open Questions
 
-- [ ] Confirm bundle id `com.extrahelper.app` before the first signed build.
+- [x] Confirm bundle id `com.extrahelper.app` before the first signed build. Confirmed and shipped in
+      1.0.7 — it is now the App Store Connect record's identifier and cannot change.
 - [ ] KDS on mobile — is a phone-sized kitchen display useful at all, or is it a wall-display-only
       surface? Decide before the manager-ops phase.
 - [ ] Cashier/payments on mobile — excluded from v1. Does a waiter ever take payment tableside? That

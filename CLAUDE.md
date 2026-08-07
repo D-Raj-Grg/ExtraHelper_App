@@ -128,6 +128,15 @@ Mobile-specific ones, plus the shared ones that will bite again:
 - **Cache the shell, not just the board.** Memberships and permissions are network reads; without
   them a cold start with no coverage renders "No ordering access" and the app is useless. They are
   cached for rendering only — the RPCs still enforce every key.
+- **A missing key in `env.json` can disable a feature in silence.** `SUPABASE_*` throws at startup
+  naming the command, but `APP_URL` only gates `Env.canPrint` — omit it and the app builds, runs,
+  and simply has no printing: no toggle, no error, no tickets. The first signed iOS archive shipped
+  that way and it was caught by reading, not by anything failing. Copy **all** the keys from
+  `env.example.json`, and check what actually reached the binary rather than trusting the flag:
+  decode `DART_DEFINES` out of `ios/Flutter/Generated.xcconfig`.
+- **iPhone cannot print over Bluetooth, and no amount of code changes that.** iOS blocks classic
+  Bluetooth SPP without an MFi chip in the printer. Network (port 9100) is the iOS path; classic BT
+  stays Android-only. Don't re-open it — the reasoning is in `TASKS.md` under Milestone M.
 - **iOS plugins need CocoaPods.** Without it `supabase_flutter` simply won't build on iOS, and the
   error doesn't say so plainly.
 - **Test offline on a real device in airplane mode.** A simulator's network stubbing is not the

@@ -4,13 +4,27 @@ All notable changes to the **ExtraHelper mobile app** (iOS + Android).
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions are patch-level: each release is a milestone's worth of work that shipped together. Dates are ship dates taken from git history. Each release ends with a collapsed **Technical** note listing the commits and the substance behind them.
 
-The app is not published to the App Store or Play Store yet; `pubspec.yaml` stays at `1.0.0+1` until the first store build. Business rules live in Postgres and are shared with the web app — see `../extrahelper/CHANGELOG.md` for the server-side half of any release noted below.
+The app is not on the public App Store or Play Store. 1.0.7 is the first build to leave a simulator: iOS, signed, distributed through **TestFlight internal testing** (which skips App Review). `pubspec.yaml` now tracks the store version — the build number after the `+` increases on every upload. Business rules live in Postgres and are shared with the web app — see `../extrahelper/CHANGELOG.md` for the server-side half of any release noted below.
 
 > **Branch note.** 1.0.0 and 1.0.1 are on `main`. 1.0.2 through 1.0.6 currently live on `milestone-f-offline` and are not merged to `main` yet.
 
 ---
 
 ## [Unreleased]
+
+---
+
+## [1.0.7] — 2026-08-07 · First build on a real phone
+
+The first signed iOS build, distributed to internal testers through TestFlight. Nothing in the app changed to make that possible — the work was signing, versioning and one plist key. It matters because the offline queue, the whole reason this app exists over the mobile web, has until now only ever been exercised against an emulator that cannot go into airplane mode.
+
+### Added
+- iOS release signing. The project shipped with the pre-2019 `iPhone Developer` identity, which pins an archive to a development certificate and makes it undistributable; it is now `Apple Development`, with `CODE_SIGN_STYLE = Automatic` pinned on the Runner target so Xcode substitutes the distribution identity at export.
+- `ITSAppUsesNonExemptEncryption = false` in `Info.plist`. The app reaches Supabase over HTTPS and nothing else, which is the standard exemption. Without the key, every upload stops in App Store Connect waiting for the question to be answered by hand before testers can install it.
+- Store versioning starts here: `1.0.7+1`. Build numbers are burned on acceptance and never reused.
+
+### Fixed
+- **Printing was absent from the first archive.** `env.json` was missing `APP_URL`, which is what `Env.canPrint` gates on — so the build came out with the printing toggle disabled and no error anywhere to say why. A missing Supabase key throws at startup and names the command; this one is silent. Copy every key from `env.example.json`, and verify what reached the binary by decoding `DART_DEFINES` out of `ios/Flutter/Generated.xcconfig` rather than trusting the flag.
 
 ### Changed
 - **Navigation moved to a drawer.** Dashboard, Store room, Manager log and Account were five icon buttons crowded into the top-right of the app bar; each now has a named row in a drawer, opened from the hamburger or an edge swipe. The restaurant — and switching between restaurants — sits at the top of it.
@@ -32,6 +46,8 @@ The app is not published to the App Store or Play Store yet; `pubspec.yaml` stay
 - The POS `TabController` moved to the shell and feeds `AppBar.bottom`; `PosScreen` takes it as a parameter.
 - `test/shell_chrome_test.dart` — 10 widget tests covering drawer permission gating, destination navigation, the header's one-vs-many restaurant behaviour, and every `SyncStrip` state.
 - New `data/local/cache_backed.dart` (`cacheBackedRead`) backs both identity providers: offline serves the cache without attempting the network, online caps the attempt at 6s before falling back, and the connectivity check itself is capped at 2s. Root cause: `supabase`'s `_getAccessToken` awaits a token refresh before every request once the session is expired, and gotrue retries that refresh until the next backoff would outrun its 10s tick — so each identity read paid ~10s offline before its `catch` reached the cache. Both providers now watch `isOnlineProvider`, so returning coverage refetches. 8 unit tests; 128 passing overall.
+
+- The release build must be produced with `flutter build ipa --dart-define-from-file=env.json`. `Env` has no fallback and `Env.assertConfigured()` is a real `StateError`, not a stripped `assert`, so a build made without it installs and then dies before the first frame. Archiving from the Xcode GUI reads the dart-defines from a base64 blob in `ios/Flutter/Generated.xcconfig` left by whatever the last build happened to be — stale by construction, so that path is not used.
 
 Verified on the Android emulator signed in as owner: drawer navigation and selected state, Back returning to the POS, the composer as a leaf with a back arrow, the strip under airplane mode, a greyscale crop of that band, and screenshots at text scale 1.0 and 1.5. Not run on iOS.
 </details>
@@ -204,3 +220,4 @@ First working build on both platforms: it signs a user in, resolves their restau
 ---
 
 [Unreleased]: #unreleased
+[1.0.7]: #107--2026-08-07--first-build-on-a-real-phone

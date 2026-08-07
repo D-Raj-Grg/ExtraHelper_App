@@ -2,7 +2,10 @@ name: extrahelper
 description: "ExtraHelper mobile — waiter ordering for the ExtraHelper restaurant SaaS"
 publish_to: 'none'
 
-version: 1.0.0+1
+# The build number after the + must strictly increase on every upload to App Store
+# Connect / Play — a number is burned the moment a build carrying it is accepted,
+# even if that build is later superseded.
+version: 1.0.7+1
 
 environment:
   sdk: ^3.10.7

@@ -55,5 +55,9 @@
 		<string>ExtraHelper uses Bluetooth to print kitchen tickets and receipts on a nearby thermal printer.</string>
 		<key>NSLocalNetworkUsageDescription</key>
 		<string>ExtraHelper sends kitchen tickets and receipts straight to a thermal printer on this WiFi network.</string>
+		<!-- HTTPS/TLS to Supabase only, which is exempt. Declared here so App Store Connect
+		     does not hold every upload waiting on the export-compliance question. -->
+		<key>ITSAppUsesNonExemptEncryption</key>
+		<false/>
 	</dict>
 </plist>
