@@ -56,6 +56,13 @@ void main() {
       for (final v in roles) {
         expect(roleLabel(v), isNot(contains('_')));
       }
+      // Every `payment_method` the DB can hold, including `online` — the phone
+      // never offers it, but a bill settled on the web can carry one and the
+      // payments list must not print the raw enum at the guest.
+      for (final v in ['cash', 'card', 'online', 'wallet', 'points']) {
+        expect(paymentMethodLabel(v), isNot(contains('_')));
+      }
+      expect(paymentMethodLabel('points'), 'Loyalty points');
     });
 
     test('an enum added server-side degrades readably', () {

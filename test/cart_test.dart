@@ -29,6 +29,8 @@ const _dalBhat = PosMenuItem(
 );
 
 void main() {
+  _customItemTests();
+
   group('priceRange', () {
     test('a variant dish spans its cheapest to dearest orderable price', () {
       final r = _sekuwa.priceRange;
@@ -242,6 +244,68 @@ void main() {
         );
         expect(o.isClosed, isFalse, reason: s);
       }
+    });
+  });
+}
+
+/// An off-menu line — the one place in the app where a price is typed.
+///
+/// The shape matters more than usual: `custom_name` is the branch both
+/// `place_staff_order` and `amend_order_add_custom_item` key on, and an
+/// `item_id` slipping into that payload is how a hand-typed price would come
+/// to stand in for a menu item's.
+void _customItemTests() {
+  group('custom item', () {
+    test('sends a name and a price, never an item_id', () {
+      final line = CartLine(
+        localId: 'l1',
+        item: PosMenuItem.custom(name: 'Cake plating', priceCents: 1200),
+        qty: 2,
+      );
+      final json = line.toRpcJson();
+
+      expect(json['custom_name'], 'Cake plating');
+      expect(json['unit_price_cents'], 1200);
+      expect(json['qty'], 2);
+      expect(json.containsKey('item_id'), isFalse);
+    });
+
+    test('a menu line still sends an item_id and no typed price', () {
+      final json = CartLine(localId: 'l2', item: _dalBhat, qty: 1).toRpcJson();
+      expect(json['item_id'], 'i2');
+      expect(json.containsKey('custom_name'), isFalse);
+      expect(json.containsKey('unit_price_cents'), isFalse);
+    });
+
+    test('the same charge twice merges; a different one does not', () {
+      final a = PosMenuItem.custom(name: 'Cake plating', priceCents: 1200);
+      final b = PosMenuItem.custom(name: 'Cake plating', priceCents: 1200);
+      final c = PosMenuItem.custom(name: 'Cake plating', priceCents: 1500);
+      final d = PosMenuItem.custom(name: 'Candle', priceCents: 1200);
+
+      String sig(PosMenuItem i) =>
+          CartLine(localId: 'x', item: i, qty: 1).signature;
+
+      expect(sig(a), sig(b));
+      expect(sig(a), isNot(sig(c)));
+      expect(sig(a), isNot(sig(d)));
+    });
+
+    test('its id can never be mistaken for a menu item uuid', () {
+      final item = PosMenuItem.custom(name: 'Cake plating', priceCents: 1200);
+      expect(item.id.startsWith('custom:'), isTrue);
+      expect(item.isCustom, isTrue);
+      expect(_dalBhat.isCustom, isFalse);
+    });
+
+    test('the price is the line price, so quantity multiplies it', () {
+      final line = CartLine(
+        localId: 'l3',
+        item: PosMenuItem.custom(name: 'Corkage', priceCents: 500),
+        qty: 3,
+      );
+      expect(line.unitPriceCents, 500);
+      expect(line.lineTotalCents, 1500);
     });
   });
 }

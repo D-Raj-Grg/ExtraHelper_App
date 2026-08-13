@@ -29,6 +29,10 @@ final posRepoProvider = Provider<PosRepository?>((ref) {
 /// [adoptTenant] runs first on every build, so a tenant switch wipes before a
 /// single row is read.
 abstract class _CachedList<T> extends AsyncNotifier<List<T>> {
+  /// Set once this notifier is torn down, so a refresh still in flight doesn't
+  /// assign to a dead element.
+  bool _disposed = false;
+
   Future<List<T>> readCache(PosCache cache, String tenantId);
 
   Future<List<T>> fetch(PosRepository repo);
@@ -41,12 +45,25 @@ abstract class _CachedList<T> extends AsyncNotifier<List<T>> {
     final tenant = ref.watch(activeTenantProvider);
     if (repo == null || tenant == null) return const [];
 
+    _disposed = false;
+    ref.onDispose(() => _disposed = true);
+
     final cache = ref.watch(posCacheProvider);
     await cache.adoptTenant(tenant.tenantId);
 
     final cached = await readCache(cache, tenant.tenantId);
     if (cached.isNotEmpty) {
-      unawaited(refresh());
+      // Refresh behind the cache with the values **this build already
+      // resolved** — never through `ref`.
+      //
+      // `refresh()` reads providers, and reading one while `build` is still on
+      // the stack trips riverpod's outdated-dependency assertion. Because the
+      // call is unawaited, that assertion surfaced as an unhandled error and
+      // the refresh silently died — so the cache was written once and never
+      // again. A phone then orders from a menu that is weeks old: it cost a
+      // real bill, where a dish whose price had moved to a variant was added
+      // at the stale flat price on screen and snapshotted server-side at zero.
+      unawaited(_refreshWith(repo, cache, tenant.tenantId));
       return cached;
     }
 
@@ -72,15 +89,28 @@ abstract class _CachedList<T> extends AsyncNotifier<List<T>> {
     return fresh;
   }
 
+  /// Pull-to-refresh, and anything else that asks from outside a build.
   Future<void> refresh() async {
     final repo = ref.read(posRepoProvider);
     final tenant = ref.read(activeTenantProvider);
     if (repo == null || tenant == null) return;
-    final cache = ref.read(posCacheProvider);
+    return _refreshWith(repo, ref.read(posCacheProvider), tenant.tenantId);
+  }
+
+  /// The refresh itself, touching no providers — so it is safe to start from
+  /// inside [build].
+  Future<void> _refreshWith(
+    PosRepository repo,
+    PosCache cache,
+    String tenantId,
+  ) async {
     try {
-      state = AsyncData(await _fetchAndSave(repo, cache, tenant.tenantId));
+      final fresh = await _fetchAndSave(repo, cache, tenantId);
+      if (_disposed) return;
+      state = AsyncData(fresh);
     } catch (e, st) {
       // Keep what we have. Only an empty screen becomes an error screen.
+      if (_disposed) return;
       if (state.valueOrNull?.isNotEmpty ?? false) return;
       state = AsyncError(e, st);
     }

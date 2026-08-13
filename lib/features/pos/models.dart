@@ -49,7 +49,25 @@ class PosMenuItem {
     this.isVeg,
     this.variants = const [],
     this.modifiers = const [],
+    this.isCustom = false,
   });
+
+  /// An off-menu line: a plating charge, a special the kitchen ran today.
+  ///
+  /// Not a menu row — it never came from the server and never goes back as an
+  /// `item_id`. The id is derived from the name and price so that adding the
+  /// same charge twice merges into one line of quantity two, exactly as a
+  /// real dish would, while two different charges stay apart. It is prefixed so
+  /// it can never be mistaken for a uuid.
+  factory PosMenuItem.custom({required String name, required int priceCents}) =>
+      PosMenuItem(
+        id: 'custom:$name:$priceCents',
+        name: name,
+        basePriceCents: priceCents,
+        categoryId: null,
+        is86: false,
+        isCustom: true,
+      );
 
   final String id;
   final String name;
@@ -67,6 +85,10 @@ class PosMenuItem {
   /// any modifier that isn't, so the picker must only ever offer these.
   final List<PosModifier> modifiers;
 
+  /// True for a hand-typed, off-menu line. It carries no `item_id`, so it can
+  /// never stand in for a menu item's price, and it deducts no stock.
+  final bool isCustom;
+
   /// Only the stock flag moves at runtime — a Realtime 86 must not rebuild the
   /// dish's price or options from a partial row.
   PosMenuItem copyWith({bool? is86}) => PosMenuItem(
@@ -79,6 +101,7 @@ class PosMenuItem {
     isVeg: isVeg,
     variants: variants,
     modifiers: modifiers,
+    isCustom: isCustom,
   );
 
   int get optionCount => variants.length + modifiers.length;
@@ -218,6 +241,7 @@ class PosOrder {
     this.tableId,
     this.tableLabel,
     this.guests,
+    this.billId,
     this.lines = const [],
   });
 
@@ -228,6 +252,12 @@ class PosOrder {
   final String? tableId;
   final String? tableLabel;
   final int? guests;
+
+  /// Set once checkout has opened a bill for this order. Non-null is what turns
+  /// the card's "Bill" into "Open bill" — `create_bill_for_order` is idempotent
+  /// either way, but the word should tell the truth.
+  final String? billId;
+
   final List<PosOrderLine> lines;
 
   /// Voided lines don't count — they were removed from the bill.
@@ -238,6 +268,12 @@ class PosOrder {
       lines.where((l) => !l.isVoid).fold(0, (sum, l) => sum + l.qty);
 
   bool get canFire => lines.any((l) => !l.isVoid && l.status == 'draft');
+
+  /// Ready to bill: something has actually gone to the kitchen.
+  ///
+  /// `create_bill_for_order` refuses an order with nothing fired, so offering
+  /// the button before then is offering a guaranteed error.
+  bool get canBill => lines.any((l) => !l.isVoid && l.isFired);
 
   /// Settled or abandoned — no further edits.
   bool get isClosed =>
@@ -258,6 +294,7 @@ class PosOrder {
       tableId: r['table_id'] as String?,
       tableLabel: table?['label'] as String?,
       guests: r['guests'] as int?,
+      billId: r['bill_id'] as String?,
       lines: lines,
     );
   }
@@ -314,8 +351,18 @@ class CartLine {
     notes: notes ?? this.notes,
   );
 
+  /// The shape both write paths take.
+  ///
+  /// A custom line sends `custom_name` and its price **instead of** an
+  /// `item_id` — that is the branch `place_staff_order` and
+  /// `amend_order_add_custom_item` both key on, and it is what keeps a
+  /// hand-typed price out of the menu's pricing rules.
   Map<String, dynamic> toRpcJson() => {
-    'item_id': item.id,
+    if (item.isCustom) ...{
+      'custom_name': item.name,
+      'unit_price_cents': unitPriceCents,
+    } else
+      'item_id': item.id,
     'qty': qty,
     if (variant != null) 'variant_id': variant!.id,
     if (modifiers.isNotEmpty)

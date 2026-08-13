@@ -239,8 +239,13 @@ Phases 0–2 are the scoped first build. Track granular work in `TASKS.md`.
 1. **Bundle id** — confirm `com.extrahelper.app` before the first signed build.
 2. **KDS on mobile?** The web KDS is a full-screen wall display; a phone-sized KDS may be
    pointless. Decide before phase 4.
-3. **Cashier/payments on mobile** — deliberately excluded from v1. Does a waiter ever need to take
-   payment tableside? That pulls in the whole `record_payment` + split + receipt surface.
+3. ~~**Cashier/payments on mobile**~~ — **answered 2026-08-13: yes, at parity with the web.** The
+   whole surface shipped: `create_bill_for_order` → checkout screen → `record_payment`, plus
+   discounts, coupons, charges, extras, complimentary, split, merge, loyalty and refunds. Online
+   only — `lib/data/sync/` is untouched, and `PaymentUncertainFailure` plus caller-owned
+   idempotency keys are the seam an offline payment queue would plug into. Two gaps are deliberate
+   and recorded in `TASKS.md`: card-online (no RPC behind the web's gateway adapter) and a
+   retry-safe refund (`refund_payment` takes no key).
 4. **Push notifications** — the web uses an in-app bell polling Realtime. Does mobile need real
    push (FCM/APNs) for new-order alerts, and if so, whose device gets them?
 5. **App distribution before store approval** — TestFlight and Play internal testing, or a direct

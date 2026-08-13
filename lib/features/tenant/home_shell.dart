@@ -24,7 +24,10 @@ class HomeShell extends ConsumerStatefulWidget {
 
 class _HomeShellState extends ConsumerState<HomeShell>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 2, vsync: this);
+  /// Three, always. The Bills tab renders a "no access" body rather than being
+  /// removed for a cashier-less role: permissions resolve *after* the first
+  /// build, and a `TabController` whose length changes under it throws.
+  late final TabController _tabs = TabController(length: 3, vsync: this);
 
   @override
   void dispose() {
@@ -58,6 +61,7 @@ class _HomeShellState extends ConsumerState<HomeShell>
               tabs: const [
                 Tab(text: 'Tables'),
                 Tab(text: 'Orders'),
+                Tab(text: 'Bills'),
               ],
             )
           : null,

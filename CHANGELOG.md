@@ -12,6 +12,29 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 ## [Unreleased]
 
+### Added
+- **Checkout on the phone.** A waiter or cashier can now settle a bill at the table instead of walking to the till. Tap **Bill** on an order (or a table that has asked for one) and the bill opens: the items, what they come to, and what is still owed. From there you can take cash, card or wallet in full or in part; split the check equally, by item, or across several tenders; discount the bill or a single line; add an extra charge; apply a coupon; add a tip or round the total off; attach a guest and spend their loyalty points; put another round onto the same tab; leave the bill unpaid on a guest's tab; and refund a settled one. A third **Bills** tab lists everything still owed, because opening a bill takes its order off the Orders board.
+- **The receipt prints itself.** Settling a bill on the phone queues the receipt exactly as settling one on the till does, and the phone's own printer picks it up. No new printing code was needed.
+
+### Fixed
+- **The menu on the phone could go stale and never recover — and it cost money.** The cached-list loader kicked off its background refresh while it was still building, which Riverpod refuses; the refresh died as an unhandled error every time, so whatever was saved on the first run was what the phone showed forever. On a real order this charged nothing: a dish whose price had moved onto size variants still showed the old flat price, was added without asking for a size, and the server snapshotted it at zero. The refresh now runs on the values the build already resolved and touches no providers, so it completes. Pull-to-refresh was never affected — this only ever hit the automatic one.
+- **Variants and add-ons appear again.** Same cause: the stale cache predated them, so dishes that should ask "which size?" were added straight to the order. A dish with options now shows its badge and price range and forces the choice, as it always should have.
+
+### Added
+- **Something off the menu.** A new button in the order screen adds a hand-typed line — a plating charge, today's special — with a name, a price, a quantity and a kitchen note. It matches the web: no `item_id`, so it can never stand in for a menu item's price; no stock comes off it; it prints on the expo ticket; and the typed price is clamped and recorded in the manager log. Works when composing a new order and when adding to one already with the kitchen.
+
+### Changed
+- **Coming back from an unpaid bill lands on the Bills tab.** Billing an order moves it off the Orders list by design, so backing out of a half-finished bill used to drop you on a list your order had just vanished from. The Orders empty state now says where billed orders go, too.
+- **Tapping a table that has asked for its bill opens the bill**, not a second order. Previously the app looked only at orders still on the floor, and a billed order is not one of them — so the tap would have started a fresh order on a table that was mid-payment.
+
+### Known gaps
+- **Checkout needs a connection.** Nothing is queued: an order taken with no coverage is safe and still syncs, but it cannot be billed until the phone is back on signal. Every entry point says so rather than hanging.
+- **Card (online) is web-only.** Charging a card through a payment gateway runs server-side on the web and has no RPC behind it, so the phone would record money it never collected. It offers cash, card (on a terminal), wallet and loyalty points. A settled bill that carries an online payment still shows it correctly.
+- **A refund cannot be retried safely.** `refund_payment` takes no idempotency key, so after a lost connection the app asks you to check the bill's payments rather than offering to try again.
+
+### Changed
+- **Taking an order sends it to the kitchen.** The order screen had a **Save draft** button beside **Send to kitchen**, and a saved draft never reached a kitchen screen or a printer. There is now one button. Orders taken with no coverage still queue and go to the kitchen by themselves the moment the phone is back on signal. Matches the same change on the web app.
+
 ---
 
 ## [1.0.7] — 2026-08-07 · First build on a real phone

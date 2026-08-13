@@ -10,6 +10,7 @@ import '../features/dashboard/dashboard_screen.dart';
 import '../features/dev/design_gallery.dart';
 import '../features/inventory/inventory_screen.dart';
 import '../features/kds/kds_screen.dart';
+import '../features/pos/checkout_screen.dart';
 import '../features/pos/manager_ops.dart';
 import '../features/settings/printing_screen.dart';
 import '../features/tenant/account_screen.dart';
@@ -28,6 +29,12 @@ abstract final class Routes {
   static const printing = '/printing';
   static const account = '/account';
   static const designGallery = '/dev/design';
+
+  /// Checkout. Pushed on top of the POS rather than replacing it — a cashier
+  /// backs out of a bill onto the board they came from.
+  static const bill = '/bill/:billId';
+
+  static String billPath(String billId) => '/bill/$billId';
 }
 
 /// The router, with **one** place that decides where a user belongs.
@@ -122,6 +129,16 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: Routes.account,
         builder: (context, state) => const AccountScreen(),
+      ),
+      // No permission branch in the redirect for this one. Someone without
+      // `checkout.view` is never shown a way in, and every RPC behind the
+      // screen refuses them anyway — whereas a redirect that reads permissions
+      // fires before they have loaded and bounces the cashier off their own
+      // bill (see the note on the listener above).
+      GoRoute(
+        path: Routes.bill,
+        builder: (context, state) =>
+            CheckoutScreen(billId: state.pathParameters['billId']!),
       ),
       // Debug-only: the greyscale check for "never colour alone" needs every
       // state on one screen, which real screens can't offer.

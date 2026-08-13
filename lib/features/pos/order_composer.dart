@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../app/app_scaffold.dart';
+import '../../app/router.dart';
 import '../../core/format/labels.dart';
 import '../../core/format/money.dart';
 import '../../core/theme/app_theme.dart';
@@ -14,7 +16,9 @@ import '../../core/widgets/table_glyph.dart';
 import '../../data/supabase/pos_repository.dart';
 import '../../data/sync/sync_providers.dart';
 import '../tenant/tenant_providers.dart';
+import 'bill_providers.dart';
 import 'cart_controller.dart';
+import 'custom_item_sheet.dart';
 import 'item_options_sheet.dart';
 import 'manager_ops.dart';
 import 'models.dart';
@@ -66,6 +70,37 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
           );
   }
 
+  /// Open this order's bill and leave the composer behind it.
+  ///
+  /// The write needs a connection: offline it would sit on a long HTTP timeout
+  /// and read as a dead tap, and there is nothing useful to queue — a bill with
+  /// no id is a screen nobody can open.
+  Future<void> _openBill() async {
+    if (_busy) return;
+    if (!(ref.read(isOnlineProvider).valueOrNull ?? true)) {
+      _toast(
+        "No coverage — a bill can't be opened yet. The order is safe; settle "
+        "it when you're back.",
+        error: true,
+      );
+      return;
+    }
+    final repo = ref.read(billRepoProvider);
+    if (repo == null) return;
+
+    setState(() => _busy = true);
+    try {
+      final billId = await repo.createBillForOrder(widget.existingOrder!.id);
+      if (!mounted) return;
+      await context.push(Routes.billPath(billId));
+    } on PosFailure catch (e) {
+      if (!mounted) return;
+      _toast(e.message, error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   void _toast(String message, {bool error = false}) {
     if (!mounted) return;
     final scheme = Theme.of(context).colorScheme;
@@ -89,6 +124,20 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
       );
   }
 
+  /// A line that isn't on the menu — a plating charge, today's special.
+  ///
+  /// The price is typed, so it goes through the same `add` as any dish and
+  /// lands on a server RPC that clamps it and audits it. Nothing here decides
+  /// what it costs beyond passing on what was typed.
+  Future<void> _addCustom(String currency) async {
+    final line = await showCustomItemSheet(
+      context: context,
+      currency: currency,
+    );
+    if (line == null || !mounted) return;
+    await _commitLine(line);
+  }
+
   Future<void> _addDish(PosMenuItem item, String currency) async {
     CartLine? line;
     if (item.optionCount > 0) {
@@ -105,10 +154,15 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
       );
     }
     if (line == null) return;
+    await _commitLine(line);
+  }
 
-    // Optimistic in create mode (it's local anyway). In amend mode the server
-    // is the source of truth, so we await it and surface a failure honestly
-    // rather than showing a line the kitchen never got.
+  /// Put a line into the cart, whether it came from the menu or was typed.
+  ///
+  /// Optimistic in create mode (it's local anyway). In amend mode the server is
+  /// the source of truth, so we await it and surface a failure honestly rather
+  /// than showing a line the kitchen never got.
+  Future<void> _commitLine(CartLine line) async {
     try {
       await _cart.add(line);
       if (_isAmend) await _refreshAmend();
@@ -180,10 +234,13 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
     }
   }
 
-  Future<void> _commitAndFire({required bool fire}) async {
+  /// Commit the order and send it to the kitchen. There is no save-without-
+  /// firing path: an order the kitchen can't see isn't an order anyone placed,
+  /// and the two-button version had waiters saving drafts that never cooked.
+  Future<void> _commitAndFire() async {
     setState(() => _busy = true);
     try {
-      final result = await _cart.commit(fire: fire);
+      final result = await _cart.commit(fire: true);
       ref.invalidate(activeOrdersProvider);
       ref.invalidate(outboxStatusProvider);
       // NOT awaited: the write is already durable, and with no coverage this
@@ -197,12 +254,9 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
       // leave a waiter wondering whether the kitchen has it.
       _toast(
         result.synced
-            ? (fire ? 'Sent to the kitchen.' : 'Order saved.')
-            : (fire
-                  ? "Saved. It goes to the kitchen the moment you're back on "
-                        'coverage.'
-                  : "Saved on this phone. It syncs when you're back on "
-                        'coverage.'),
+            ? 'Sent to the kitchen.'
+            : "Saved. It goes to the kitchen the moment you're back on "
+                  'coverage.',
       );
     } on PosFailure catch (e) {
       _toast(e.message, error: true);
@@ -234,6 +288,26 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
       // someone raises their text size.
       subtitle: destination,
       showDrawer: false,
+      // Only in amend mode, and only once something has been fired: this is the
+      // waiter who has just been asked for the bill, and `create_bill_for_order`
+      // refuses an order the kitchen never saw.
+      actions: [
+        if (_isAmend &&
+            widget.existingOrder!.canBill &&
+            ref.watch(hasPermissionProvider('checkout.view')))
+          IconButton(
+            onPressed: _busy ? null : _openBill,
+            icon: const Icon(Icons.point_of_sale),
+            tooltip: 'Bill this order',
+          ),
+        // Beside the search box, because "it isn't on the menu" is what a
+        // waiter concludes after searching for it and not finding it.
+        IconButton(
+          onPressed: _busy ? null : () => _addCustom(currency),
+          icon: const Icon(Icons.post_add),
+          tooltip: 'Something off the menu',
+        ),
+      ],
       body: Column(
         children: [
           Padding(
@@ -349,8 +423,7 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
             isAmend: _isAmend,
             onSetQty: _setQty,
             onRemove: _removeLine,
-            onSave: () => _commitAndFire(fire: false),
-            onFire: () => _commitAndFire(fire: true),
+            onFire: _commitAndFire,
           ),
         ],
       ),
@@ -378,7 +451,6 @@ class _CartPanel extends StatefulWidget {
     required this.isAmend,
     required this.onSetQty,
     required this.onRemove,
-    required this.onSave,
     required this.onFire,
   });
 
@@ -388,7 +460,6 @@ class _CartPanel extends StatefulWidget {
   final bool isAmend;
   final void Function(CartDisplayLine, int) onSetQty;
   final void Function(CartDisplayLine) onRemove;
-  final VoidCallback onSave;
   final VoidCallback onFire;
 
   @override
@@ -467,33 +538,23 @@ class _CartPanelState extends State<_CartPanel> {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-              child: Row(
-                children: [
-                  if (!widget.isAmend)
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: empty || widget.busy ? null : widget.onSave,
-                        child: const Text('Save draft'),
-                      ),
-                    ),
-                  if (!widget.isAmend) const SizedBox(width: 10),
-                  Expanded(
-                    flex: 2,
-                    child: FilledButton.icon(
-                      onPressed: empty || widget.busy ? null : widget.onFire,
-                      icon: widget.busy
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.local_fire_department),
-                      label: Text(
-                        widget.isAmend ? 'Send new items' : 'Send to kitchen',
-                      ),
-                    ),
+              // One button. Confirming an order is sending it — there is no
+              // save-that-doesn't-cook.
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: empty || widget.busy ? null : widget.onFire,
+                  icon: widget.busy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.local_fire_department),
+                  label: Text(
+                    widget.isAmend ? 'Send new items' : 'Send to kitchen',
                   ),
-                ],
+                ),
               ),
             ),
           ],

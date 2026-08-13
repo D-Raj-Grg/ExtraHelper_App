@@ -830,6 +830,93 @@ device permanently.
       a counter-mounted printer it is the better one anyway: every phone reaches it, no pairing, no
       10m range, no single device holding the link.
 
+## Milestone N — Checkout on the phone (2026-08-13)
+
+Answers `PLANNING.md` §7.3. The whole money layer was already in Postgres and client-agnostic —
+around fifteen permission-gated RPCs with `recompute_bill` running inside each one — so this
+milestone is **client-side only**: no migration, no RPC change, and no new printing code. Settling a
+bill fires `trg_bills_enqueue_print`, and the print stack shipped in Milestone M claims the `bill`
+job and prints it.
+
+- [x] `lib/features/pos/bill_models.dart` + `bill_math.dart` — the models, and the five figures the
+      client computes locally. The maths is pure and separate **because it is the parity surface**:
+      `test/bill_math_test.dart` pins each one to the integer the web produces, so the phone and the
+      counter can never quote a guest different numbers.
+- [x] `lib/data/supabase/bill_repository.dart` — every checkout RPC, plus `PaymentUncertainFailure`.
+      That type exists because "couldn't reach the server" is the wrong sentence for a payment:
+      `record_payment` may have committed before the socket died, and telling a cashier money wasn't
+      taken when it might have been is how a guest gets charged twice.
+- [x] `bill_providers.dart` — `BillSnapshotNotifier` with a `mutate()` that every lever goes through
+      (write, then re-read), a `bills`/`payments` realtime channel, and a settled-cascade that
+      refreshes the board, the tables and the Bills tab. **Not cached**: everywhere else in this app
+      stale beats absent; a total from ten minutes ago is a figure someone gets charged.
+- [x] The checkout screen and its five sheets — payment, adjustments, per-line, split, guest.
+- [x] **Three latent bugs closed on the way.** A billed order drops out of `activeOrders()`, so
+      without the new **Bills** tab a part-paid bill was unreachable from the phone. Tapping a
+      `bill_requested` table would have started a *second* order, because the lookup only ever saw
+      orders still on the floor. And `PosOrder` carried no `bill_id`, so a button could not tell
+      "Bill" from "Open bill".
+- [x] Online-only, in exactly three places: the snapshot's build, the entry points, and the due bar.
+      **`lib/data/sync/` is untouched.**
+
+**Found on the emulator run, 2026-08-13, and fixed:**
+
+- [x] **`_CachedList` never refreshed after the first save.** `build()` started `refresh()` while it
+      was still on the stack, `refresh()` called `ref.read`, and riverpod's `_assertNotOutdated`
+      threw — into an unawaited future, so it surfaced as an unhandled error and nothing else. The
+      cache was therefore written once per install and never again. **This is a money bug, and it
+      was caught in the act**: a bill on the device carried `Pork Seukwa 1 × NPR 0.00`, because the
+      phone was showing a menu from before the dish moved to size variants, added it with no size
+      forced, and `place_staff_order` snapshotted the real row — base 0, no variant. The background
+      refresh now takes the repo, cache and tenant that `build` already resolved and touches no
+      providers; `refresh()` is the outside-a-build entry point and delegates to the same body. A
+      `_disposed` flag guards the late `state =`.
+- [x] **Custom items on mobile** — new `amend_order_add_custom_item` RPC (see `../extrahelper`),
+      `PosMenuItem.custom` whose id is derived from name+price so identical charges merge and
+      different ones don't, `toRpcJson` emitting `custom_name` instead of `item_id`, and
+      `custom_item_sheet.dart`. Offline replay is free: the outbox already persists the RPC payload,
+      and `addItemJson` branches on `custom_name`.
+- [x] **A billed order looked lost.** It leaves the Orders tab by design (`activeOrders` filters
+      `billed`), so backing out of a bill dropped the waiter on a list their order had just
+      vanished from. Returning from a bill that is still owed money now lands on the Bills tab, and
+      the Orders empty state names where billed orders go.
+
+**Deliberate gaps, both recorded rather than hidden:**
+
+- [ ] **Card-online from the phone.** The web's `payByCard` runs a server-side gateway adapter
+      (`lib/integrations`) with no RPC behind it. An app offering "Card (online)" would record a
+      payment it never collected, so the method is omitted from the chips — a bill settled on the
+      web that carries one still displays correctly. Needs an Edge Function wrapping `getGateway`,
+      or a `charge_card` RPC.
+- [ ] **A retry-safe refund.** `refund_payment` takes no idempotency key, so it is the one write on
+      this screen a blind retry can double. The confirm dialog and the busy guard are the whole
+      protection, and after a lost answer the UI says to check the payments rather than offering to
+      try again. A key on the RPC is the real fix.
+- [ ] **Offline payments.** Out of scope by decision. The seam is already there: `record_payment` is
+      keyed and clamped, `PaymentUncertainFailure` carries the key it used, and the split scheme is
+      deterministic per slot — so a future `OutboxKind` for payments is five files and no redesign.
+      `apply_bill_discount` is **not** keyed and must never be queued.
+- [ ] **Cash sessions / day-close.** Web-only. Not touched here.
+
+## Receipt branding — logo + payment QR (2026-08-13, web-side change, no Dart change)
+
+- [x] Receipts now carry the tenant's **logo** and an uploaded **payment QR** (FonePay/eSewa/bank),
+      set in the web app under Settings → Receipt & branding. **This app needed no code change**,
+      and that is the point of the design: images are rasterised to 1-bit `GS v 0` bitmaps **once,
+      at upload, in the browser**, and stored in `tenant_settings.receipt_template.print_assets` —
+      one bitmap per paper width, since the printer will not scale a raster image. `/api/print/render`
+      already returns finished ESC/POS, so `RenderClient` → `NetworkTransport`/`BluetoothTransport`
+      carry the QR to paper as ordinary bytes. Rasterising at print time instead would have made this
+      a browser-only feature and left every phone-printed slip blank where the QR belongs.
+- [x] **Bluetooth payload size checked, not assumed.** A receipt grows by roughly 30–40KB of raster.
+      `PrintBluetoothThermal.writeBytes` already chunks at 16KB with a flush per chunk
+      (`PrintBluetoothThermalPlugin.kt`), so no chunking is needed in `bluetooth_transport.dart`.
+      Watch the 15s `_slow` write timeout on a real device — a slow SPP link plus head time is the
+      one thing that could brush it.
+- [ ] **Device test outstanding**: settle a bill from `checkout_screen.dart` with printing enabled and
+      confirm the QR **scans off the paper**, over both network and Bluetooth, at 58mm and 80mm.
+      Image-mode printers are still refused by `print_service.dart` as before — unchanged and correct.
+
 ## Backlog / Later phases
 
 - [ ] **Offline on a physical iPhone, in airplane mode.** The one verification `CLAUDE.md` asks for
@@ -881,7 +968,7 @@ device permanently.
       1.0.7 — it is now the App Store Connect record's identifier and cannot change.
 - [ ] KDS on mobile — is a phone-sized kitchen display useful at all, or is it a wall-display-only
       surface? Decide before the manager-ops phase.
-- [ ] Cashier/payments on mobile — excluded from v1. Does a waiter ever take payment tableside? That
-      pulls in `record_payment`, splits, refunds and receipts.
+- [x] Cashier/payments on mobile — **answered 2026-08-13: yes, at full parity with the web.** Shipped
+      as the Checkout milestone below.
 - [ ] Push notifications (FCM/APNs) for new orders — needed, and on whose device?
 - [ ] Pilot distribution — TestFlight + Play internal track, or a direct `.apk`?

@@ -53,6 +53,21 @@ const _billStatusLabels = {
 String billStatusLabel(String status) =>
     _billStatusLabels[status] ?? _humanize(status);
 
+const _paymentMethodLabels = {
+  'cash': 'Cash',
+  'card': 'Card',
+  // Taken through a payment gateway on the web. The phone records it but never
+  // offers it — there is no RPC behind the charge, only the web's server-side
+  // adapter, so an app that offered "Card (online)" would log money it never
+  // collected. See `TASKS.md`.
+  'online': 'Card (online)',
+  'wallet': 'Wallet',
+  'points': 'Loyalty points',
+};
+
+String paymentMethodLabel(String method) =>
+    _paymentMethodLabels[method] ?? _humanize(method);
+
 const _roleLabels = {
   'owner': 'Owner',
   'manager': 'Manager',

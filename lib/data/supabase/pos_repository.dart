@@ -136,7 +136,7 @@ class PosRepository {
   // --- Orders --------------------------------------------------------------
 
   static const _orderSelect =
-      'id, status, order_type, created_at, table_id, guests, '
+      'id, status, order_type, created_at, table_id, guests, bill_id, '
       'restaurant_tables!orders_table_id_fkey(label), '
       'order_items(id, name_snapshot, qty, unit_price_cents, status, is_void, notes, '
       'order_item_modifiers(name_snapshot))';
@@ -230,18 +230,33 @@ class PosRepository {
     required String orderId,
     required Map<String, dynamic> item,
   }) async {
+    // An off-menu line has no `item_id` to look a price up by, so it goes to
+    // its own RPC — which clamps the hand-typed price and writes the
+    // `custom_price` audit row in the same transaction as the line.
+    final customName = item['custom_name'] as String?;
     try {
-      final id = await _client.rpc(
-        'amend_order_add_item',
-        params: {
-          '_order_id': orderId,
-          '_item_id': item['item_id'],
-          '_qty': item['qty'],
-          '_variant_id': ?item['variant_id'],
-          '_modifier_ids': ?item['modifier_ids'],
-          '_notes': ?item['notes'],
-        },
-      );
+      final id = customName == null
+          ? await _client.rpc(
+              'amend_order_add_item',
+              params: {
+                '_order_id': orderId,
+                '_item_id': item['item_id'],
+                '_qty': item['qty'],
+                '_variant_id': ?item['variant_id'],
+                '_modifier_ids': ?item['modifier_ids'],
+                '_notes': ?item['notes'],
+              },
+            )
+          : await _client.rpc(
+              'amend_order_add_custom_item',
+              params: {
+                '_order_id': orderId,
+                '_name': customName,
+                '_unit_price_cents': item['unit_price_cents'],
+                '_qty': item['qty'],
+                '_notes': ?item['notes'],
+              },
+            );
       return id as String;
     } on PostgrestException catch (e) {
       throw PosFailure(_friendly(e.message));

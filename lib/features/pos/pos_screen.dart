@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../app/router.dart';
 import '../../core/format/labels.dart';
 import '../../core/format/money.dart';
 import '../../core/theme/app_theme.dart';
@@ -10,16 +12,22 @@ import '../../core/theme/tokens.dart';
 import '../../data/supabase/pos_repository.dart';
 import '../../data/sync/sync_providers.dart';
 import '../tenant/tenant_providers.dart';
+import 'bill_models.dart';
+import 'bill_providers.dart';
 import 'manager_ops.dart';
 import 'models.dart';
 import 'order_composer.dart';
 import 'pos_providers.dart';
 
-/// The POS: a **Tables** board and an **Orders** list.
+/// The POS: a **Tables** board, an **Orders** list and a **Bills** list.
 ///
-/// Tapping a table opens its live order if one is open, or starts a new order
-/// seeded to that table. One decision, made here, so the composer never has to
-/// ask which it is.
+/// Tapping a table opens its bill if one is waiting to be settled, then its live
+/// order if one is open, and otherwise starts a new order seeded to that table.
+/// One decision, made here, so the composer never has to ask which it is.
+///
+/// Bills need their own tab because opening one moves the order to `billed`,
+/// which is exactly the status [PosRepository.activeOrders] filters out — a
+/// part-paid bill would otherwise have no route back to it at all.
 ///
 /// The `TabBar` itself belongs to the shell's app bar — the tabs and the bar
 /// are one band — so the controller is passed in rather than owned here.
@@ -32,7 +40,13 @@ class PosScreen extends ConsumerStatefulWidget {
   ConsumerState<PosScreen> createState() => _PosScreenState();
 }
 
+/// Tab order in the shell: Tables, Orders, Bills.
+const _billsTab = 2;
+
 class _PosScreenState extends ConsumerState<PosScreen> {
+  /// True while `create_bill_for_order` is in flight — see [_billOrder].
+  bool _billing = false;
+
   @override
   void initState() {
     super.initState();
@@ -47,7 +61,96 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     });
   }
 
+  /// Open the checkout screen for a bill, and refresh the board on the way back.
+  ///
+  /// Billing an order moves it to `billed`, which takes it off the Orders tab by
+  /// design — so someone who backs out of a half-finished bill lands on a list
+  /// their order just vanished from. Coming back to a bill that is still owed
+  /// money therefore lands on **Bills**, which is where it now lives.
+  Future<void> _openBill(String billId) async {
+    await context.push(Routes.billPath(billId));
+    if (!mounted) return;
+    ref
+      ..invalidate(activeOrdersProvider)
+      ..invalidate(openBillsProvider);
+
+    final stillOwed = await ref
+        .read(openBillsProvider.future)
+        .then(
+          (bills) => bills.any((b) => b.id == billId),
+          onError: (_, _) => false,
+        );
+    if (!mounted) return;
+    if (stillOwed && widget.tabs.index != _billsTab) {
+      widget.tabs.animateTo(_billsTab);
+    }
+    await ref.read(tablesProvider.notifier).refresh();
+  }
+
+  /// Open (or re-open) the bill for an order.
+  ///
+  /// `create_bill_for_order` is idempotent, so this is the same call whether the
+  /// order has a bill already or not — but it is a *write*, and offline it would
+  /// sit on a long HTTP timeout and read as a dead tap.
+  ///
+  /// Guarded synchronously: `setState` lands a frame later and a double-tap gets
+  /// between, and because the RPC is idempotent both calls return the *same*
+  /// bill — so the second push stacks an identical checkout screen, and backing
+  /// out of one lands on a copy of it mid-service.
+  Future<void> _billOrder(PosOrder order) async {
+    if (_billing) return;
+    final online = ref.read(isOnlineProvider).valueOrNull ?? true;
+    if (!online) {
+      _say(
+        "No coverage — a bill can't be opened yet. The order is safe; settle "
+        "it when you're back.",
+      );
+      return;
+    }
+
+    final repo = ref.read(billRepoProvider);
+    if (repo == null) return;
+    _billing = true;
+    try {
+      final billId = await repo.createBillForOrder(order.id);
+      if (!mounted) return;
+      await _openBill(billId);
+    } on PosFailure catch (e) {
+      if (!mounted) return;
+      _say(e.message);
+    } finally {
+      _billing = false;
+    }
+  }
+
+  void _say(String message) {
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _openTable(PosTable table) async {
+    // A table waiting on its bill has an order that is no longer *on* the
+    // orders list — `create_bill_for_order` set it to `billed`. Ask about the
+    // bill first, or the lookup below finds nothing and starts a second order
+    // on a table that is mid-payment.
+    if (table.state == 'bill_requested' &&
+        (ref.read(isOnlineProvider).valueOrNull ?? true)) {
+      final repo = ref.read(billRepoProvider);
+      if (repo != null) {
+        try {
+          final billId = await repo
+              .openBillIdForTable(table.id)
+              .timeout(const Duration(seconds: 6));
+          if (!mounted) return;
+          if (billId != null) return _openBill(billId);
+        } on Object {
+          // Fall through to the order path. A slow lookup must not strand the
+          // tap; the Bills tab is still a way in.
+        }
+      }
+    }
+
     // AWAIT the orders, don't read them.
     //
     // The Tables tab never watches this provider, so on a fresh launch it is
@@ -133,6 +236,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   @override
   Widget build(BuildContext context) {
     final canOrder = ref.watch(hasPermissionProvider('order.create'));
+    final canCheckout = ref.watch(hasPermissionProvider('checkout.view'));
 
     return TabBarView(
       controller: widget.tabs,
@@ -141,7 +245,9 @@ class _PosScreenState extends ConsumerState<PosScreen> {
         _OrdersTab(
           onOpen: _openOrder,
           onNewTakeaway: canOrder ? _newTakeaway : null,
+          onBill: canCheckout ? _billOrder : null,
         ),
+        _BillsTab(onOpen: canCheckout ? _openBill : null),
       ],
     );
   }
@@ -247,10 +353,18 @@ class _TablesTab extends ConsumerWidget {
 }
 
 class _OrdersTab extends ConsumerWidget {
-  const _OrdersTab({required this.onOpen, required this.onNewTakeaway});
+  const _OrdersTab({
+    required this.onOpen,
+    required this.onNewTakeaway,
+    required this.onBill,
+  });
 
   final void Function(PosOrder) onOpen;
   final VoidCallback? onNewTakeaway;
+
+  /// Null without `checkout.view` — the card stays readable, the action doesn't
+  /// exist. The RPC enforces the same thing.
+  final void Function(PosOrder)? onBill;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -291,7 +405,8 @@ class _OrdersTab extends ConsumerWidget {
                     title: 'No orders on the floor',
                     body:
                         'Tap a table to start one, or use Takeaway for a '
-                        'walk-in.',
+                        'walk-in. An order that has been billed moves to the '
+                        'Bills tab until it is paid.',
                   ),
                 ],
               );
@@ -305,6 +420,9 @@ class _OrdersTab extends ConsumerWidget {
                 currency: currency,
                 onTap: () => onOpen(list[i]),
                 onDelivered: () => _markDelivered(context, ref, list[i]),
+                onBill: onBill == null || !list[i].canBill
+                    ? null
+                    : () => onBill!(list[i]),
               ),
             );
           },
@@ -355,12 +473,17 @@ class _OrderCard extends StatelessWidget {
     required this.currency,
     required this.onTap,
     required this.onDelivered,
+    required this.onBill,
   });
 
   final PosOrder order;
   final String currency;
   final VoidCallback onTap;
   final VoidCallback onDelivered;
+
+  /// Null when the user can't check out, or when nothing has been fired yet —
+  /// `create_bill_for_order` refuses an order the kitchen never saw.
+  final VoidCallback? onBill;
 
   @override
   Widget build(BuildContext context) {
@@ -489,6 +612,175 @@ class _OrderCard extends StatelessWidget {
                   ),
                 ),
               ],
+              if (onBill != null) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.tonalIcon(
+                    onPressed: onBill,
+                    icon: const Icon(Icons.point_of_sale, size: 18),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, Tokens.tapTarget),
+                    ),
+                    label: Text(order.billId == null ? 'Bill' : 'Open bill'),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Bills still owed money.
+///
+/// Not a convenience: opening a bill takes its order off the Orders tab, so
+/// without this list a part-paid bill on a table nobody remembers is
+/// unreachable from the phone.
+class _BillsTab extends ConsumerWidget {
+  const _BillsTab({required this.onOpen});
+
+  /// Null without `checkout.view`. The tab still exists — a permission-shaped
+  /// tab count would have to change after the permissions load, and a
+  /// `TabController` whose length moves under it throws.
+  final void Function(String billId)? onOpen;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (onOpen == null) {
+      return ListView(
+        children: const [
+          SizedBox(height: 60),
+          PosEmptyState(
+            icon: Icons.lock_outline,
+            title: 'No checkout access',
+            body:
+                "Your role doesn't include taking payment. An owner or manager "
+                'can change that on the web app under Team.',
+          ),
+        ],
+      );
+    }
+
+    final bills = ref.watch(openBillsProvider);
+    final currency = ref.watch(activeTenantProvider)?.currency ?? 'USD';
+
+    return RefreshIndicator(
+      onRefresh: () async => ref.invalidate(openBillsProvider),
+      child: bills.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => ListView(
+          children: [
+            const SizedBox(height: 80),
+            _ErrorBlock(
+              message: "Couldn't load the bills.",
+              detail: '$e',
+              onRetry: () => ref.invalidate(openBillsProvider),
+            ),
+          ],
+        ),
+        data: (list) {
+          if (list.isEmpty) {
+            return ListView(
+              children: const [
+                SizedBox(height: 60),
+                PosEmptyState(
+                  icon: Icons.receipt_long,
+                  title: 'Nothing to settle',
+                  body:
+                      'Bills appear here once an order is billed, and drop off '
+                      'when they are paid in full.',
+                ),
+              ],
+            );
+          }
+          return ListView.separated(
+            padding: const EdgeInsets.all(12),
+            itemCount: list.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 10),
+            itemBuilder: (context, i) =>
+                _BillCard(bill: list[i], currency: currency, onTap: onOpen!),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _BillCard extends StatelessWidget {
+  const _BillCard({
+    required this.bill,
+    required this.currency,
+    required this.onTap,
+  });
+
+  final OpenBillRow bill;
+  final String currency;
+  final void Function(String billId) onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final semantic = context.semantic;
+    // Part paid is the one a cashier must not walk past. Colour plus the word.
+    final statusColor = bill.status == 'partial'
+        ? semantic.attentionText
+        : semantic.infoText;
+
+    return Material(
+      color: scheme.surfaceContainerLow,
+      borderRadius: BorderRadius.circular(Tokens.radiusLg),
+      child: InkWell(
+        onTap: () => onTap(bill.id),
+        borderRadius: BorderRadius.circular(Tokens.radiusLg),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            border: Border.all(color: scheme.outline),
+            borderRadius: BorderRadius.circular(Tokens.radiusLg),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                bill.tableLabel != null
+                    ? Icons.table_restaurant
+                    : Icons.shopping_bag_outlined,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      bill.tableLabel != null
+                          ? 'Table ${bill.tableLabel}'
+                          : 'Takeaway',
+                      style: theme.textTheme.titleMedium,
+                    ),
+                    Row(
+                      children: [
+                        Icon(Icons.circle, size: 9, color: statusColor),
+                        const SizedBox(width: 6),
+                        Text(
+                          billStatusLabel(bill.status),
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: statusColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                money(bill.totalCents, currency),
+                style:
+                    (theme.textTheme.titleMedium ?? const TextStyle()).tabular,
+              ),
             ],
           ),
         ),
