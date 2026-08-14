@@ -33,6 +33,14 @@ class DiscountAdjustment extends BillAdjustment {
   final String? orderItemId;
 }
 
+/// Take a discount back off. Null [orderItemId] means the bill's staff
+/// discount; a coupon is never removed this way.
+class RemoveDiscountAdjustment extends BillAdjustment {
+  const RemoveDiscountAdjustment({this.orderItemId});
+
+  final String? orderItemId;
+}
+
 class CouponAdjustment extends BillAdjustment {
   const CouponAdjustment(this.code);
 
@@ -162,6 +170,12 @@ class _AdjustSheetState extends State<_AdjustSheet> {
 
   void _fail(String message) => setState(() => _error = message);
 
+  /// "20%" or "NPR 150" — [DiscountRow.value] is percentage points for
+  /// `percent` and whole currency units for `flat`, never cents.
+  String _discountLabel(DiscountRow d) => d.isPercent
+      ? '${d.value}%'
+      : money((d.value * 100).round(), widget.currency);
+
   void _submitDiscount() {
     final value = num.tryParse(_discount.text.trim());
     if (value == null || value <= 0) {
@@ -222,6 +236,7 @@ class _AdjustSheetState extends State<_AdjustSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final existingDiscount = widget.snapshot.staffBillDiscount;
     final bill = widget.snapshot.bill;
     final roundOff = roundOffCents(
       totalCents: bill.totalCents,
@@ -256,6 +271,29 @@ class _AdjustSheetState extends State<_AdjustSheet> {
             if (widget.canDiscount) ...[
               const SizedBox(height: 18),
               SheetLabel('Discount the whole bill'),
+              // Applying replaces whatever is on the bill, so say so rather than
+              // letting a cashier assume the new one stacks on the old.
+              if (existingDiscount != null) ...[
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Now: ${_discountLabel(existingDiscount)}'
+                        '${existingDiscount.reason == null ? '' : ' — ${existingDiscount.reason}'}',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton.icon(
+                      icon: const Icon(Icons.close, size: 18),
+                      label: const Text('Remove'),
+                      onPressed: () =>
+                          _finish(const RemoveDiscountAdjustment()),
+                    ),
+                  ],
+                ),
+              ],
               Row(
                 children: [
                   AppChoiceChip(
@@ -297,7 +335,12 @@ class _AdjustSheetState extends State<_AdjustSheet> {
                 ),
               ),
               const SizedBox(height: 8),
-              SheetAction(label: 'Apply discount', onPressed: _submitDiscount),
+              SheetAction(
+                label: existingDiscount == null
+                    ? 'Apply discount'
+                    : 'Replace discount',
+                onPressed: _submitDiscount,
+              ),
             ],
 
             if (widget.canTakePayment) ...[

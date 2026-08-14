@@ -24,6 +24,8 @@ class Bill {
     required this.totalCents,
     this.note,
     this.tableLabel,
+    this.printedAt,
+    this.printedTotalCents,
   });
 
   final String id;
@@ -55,8 +57,27 @@ class Bill {
   /// Null for takeaway and delivery.
   final String? tableLabel;
 
+  /// When an estimate was last queued for this bill. Null until one is.
+  ///
+  /// Stamped by `enqueue_print_job` itself, so it is the same fact on every
+  /// device — the phone that printed it and the counter that settles it agree.
+  final DateTime? printedAt;
+
+  /// The total on that estimate.
+  final int? printedTotalCents;
+
   bool get isPaid => status == 'paid';
   bool get isVoid => status == 'void';
+
+  /// A slip has gone out for this bill.
+  bool get wasPrinted => printedAt != null;
+
+  /// …and the bill has moved on since it did.
+  ///
+  /// Printing locks nothing: a table that orders another round after asking for
+  /// the bill is ordinary. Charging a guest a total they never read is not, so
+  /// the screen says so and offers the reprint.
+  bool get printedTotalIsStale => wasPrinted && printedTotalCents != totalCents;
 
   /// Money can still move. Anything else is history.
   bool get isSettleable => status == 'open' || status == 'partial';
@@ -78,6 +99,10 @@ class Bill {
       totalCents: (r['total_cents'] as int?) ?? 0,
       note: r['note'] as String?,
       tableLabel: table?['label'] as String?,
+      printedAt: DateTime.tryParse(
+        (r['bill_printed_at'] as String?) ?? '',
+      )?.toLocal(),
+      printedTotalCents: r['bill_printed_total_cents'] as int?,
     );
   }
 }
@@ -371,6 +396,21 @@ class BillSnapshot {
   /// Bill-level discounts only. Per-line ones are shown against their line.
   Iterable<DiscountRow> get billDiscounts =>
       discounts.where((d) => d.orderItemId == null);
+
+  /// The one discount staff put on the whole bill — a typed one or a comp.
+  ///
+  /// Mirrors the predicate in `apply_bill_discount` / `remove_bill_discount`:
+  /// bill-level and not a coupon. The server keeps this to a single row, so the
+  /// first match is the only match; a coupon is deliberately excluded, since
+  /// removing a staff discount must not take the guest's redeemed code with it.
+  DiscountRow? get staffBillDiscount {
+    for (final d in discounts) {
+      if (d.orderItemId == null && d.couponCode == null) return d;
+    }
+    return null;
+  }
+
+  bool get hasStaffBillDiscount => staffBillDiscount != null;
 
   int get chargesCents => charges.fold(0, (n, c) => n + c.amountCents);
 

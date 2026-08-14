@@ -1001,6 +1001,67 @@ plan; none of them changed.
       simulator; the new controls need a live order on the floor to exercise, and a greyscale
       screenshot of the Completed tab and the four-tab bar at max text scale.
 
+## Print the bill before taking payment (2026-08-14, both clients)
+
+- [x] **The due bar now presents the bill, then takes the money — in that order.** Paper for a bill
+      only ever came out *after* `record_payment` landed (the `enqueue_bill_print` trigger fires on
+      `status → paid`), so the slip a guest reads and checks before paying did not exist on the
+      phone. `_DueBar` gained a **Print bill** button beside the due figure, with payment full-width
+      beneath it; `printBillEstimate` in `data/print/reprint_actions.dart` queues the same `bill`
+      doc, which `buildBill` already heads "ESTIMATE" and prints without tender lines. No new doc
+      type, no permission of its own — `enqueue_print_job` wants `checkout.view` for a bill, which is
+      what opened the screen, so a waiter can hand a table its slip without holding the key to charge
+      for it. A voided bill prints nothing; a settled one offers **Print receipt**.
+- [x] **"The bill changed after it was printed."** Printing locks nothing — a table that orders
+      another round after asking for the bill is ordinary — so `enqueue_print_job` stamps
+      `bills.bill_printed_at` + `bill_printed_total_cents` as it queues (web migration
+      `20260814140000`), `Bill.printedTotalIsStale` compares it, and the bar says so and flips the
+      button to **Reprint bill**. A warning, not a gate: payment stays enabled.
+- [x] **Layout trap, caught by the tests.** Stacking both buttons full-width made the bottom bar tall
+      enough to cover the body controls it sits under — on a 600px test surface the adjustments sheet
+      stopped opening at all, which is exactly what would happen on a small phone. Print moved up
+      beside the due figure; top-to-bottom order (print, then pay) is preserved.
+- [x] Six widget tests in `test/checkout_screen_test.dart` cover: print offered before payment and
+      above it, offered on `checkout.view` alone, receipt-not-bill once settled, reprint label after
+      a first print, the stale warning after another round, and dead-not-absent when offline. Full
+      suite green, `flutter analyze` clean.
+- [ ] **Device pass outstanding** for this one too: a real slip out of a real printer, before payment
+      and after a change, plus a greyscale check on the amber stale warning.
+
+## QR orders reach the kitchen (2026-08-14, both clients)
+
+- [x] **A guest's QR order was invisible to the cooks.** `place_qr_order` wrote `orders` +
+      `order_items` and never a `kot`, and both kitchen boards read `kots` — so a table's order sat
+      at `placed` on the POS list and the kitchen never saw it. Server-side fix in the web repo
+      (`20260814150000_qr_auto_fire`, remote `20260814074527`): `fire_order`'s ticket builder moved
+      into `fire_order_kots(_order_id, _tenant)`, new per-tenant `tenant_settings.qr_auto_fire`
+      (**default true**) makes `place_qr_order` build the tickets itself, and new `accept_qr_order`
+      lets a waiter send one by hand when a tenant turns auto-fire off. No Dart business logic —
+      rule 1 holds.
+- [x] **`PosRepository.acceptQrOrder`** calls the RPC and returns the ticket count; zero is a no-op,
+      not an error, because the RPC is idempotent. `PosOrder.awaitingQrAccept` (`orderType == 'qr'`
+      and `status == 'placed'`) is what the card keys off — the lines are `placed`, never `draft`, so
+      `canFire` is false for them and this is its own gate rather than the composer's.
+- [x] **The card says who is waiting.** A band in the attention colour with a QR icon and a **Send to
+      kitchen** button, same shape as "Ready to run" but a different icon so the two don't read alike
+      in greyscale. Not queued offline: `accept_qr_order` is a kitchen action, and a ticket that
+      syncs half an hour later is worse than one the waiter re-sends on coverage — offline says so
+      and does nothing.
+- [x] The toggle itself stays on the web (Settings → General → Operations); this app has no
+      `tenant_settings` editor, the same way the printer registry is edited there.
+- [x] Model test in `test/cart_test.dart` covers all three cases: a QR order at `placed` waits, one
+      already `in_kitchen` (auto-fire) does not, and a staff order at `placed` is the composer's
+      business. Full suite green (250), `flutter analyze` clean.
+- [ ] **Device pass outstanding**: place a real QR order with auto-fire on and confirm the ticket
+      prints unattended, then off and confirm the band appears and the button sends it.
+
+- [x] **Two fixes on review** (2026-08-14). The **Send to kitchen** band is now gated on
+      `hasPermissionProvider('order.fire')` — Kitchen reaches the POS board on `order.view` alone and
+      the RPC would refuse it, and a control nobody can use is worse than no control. Server side,
+      auto-fire inside `place_qr_order` is wrapped so a fire-time guard (`block_negative_stock`
+      raising `23514`) can no longer roll back the guest's whole order; it lands at `placed` and this
+      band is the recovery path, showing the real error when tapped.
+
 ## Backlog / Later phases
 
 - [ ] **Offline on a physical iPhone, in airplane mode.** The one verification `CLAUDE.md` asks for
@@ -1045,6 +1106,31 @@ plan; none of them changed.
       files, so it lands with a real bundle id and a hosted domain.
 - [ ] Widget/integration tests for the composer beyond the unit-tested sync layer.
 - [ ] Crash + error reporting.
+
+- [x] **Discounts replace rather than stack, and can be cancelled** (2026-08-14). Checkout's adjust
+      sheet and line sheet now show the discount already on the bill with a **Remove** control, and
+      the apply button reads "Replace discount" when one is there. All of the rule lives in Postgres
+      (`20260814093000` in `../extrahelper/`) — `BillRepository` only calls `remove_bill_discount` /
+      `remove_item_discount`, per rule 1. `BillSnapshot.staffBillDiscount` mirrors the SQL predicate
+      (bill-level, not a coupon) so the sheet never offers to remove a guest's coupon; it is unit
+      tested against that exact case. Review also caught the manager log rendering the raw
+      `discount_removed` string — the action switch in `manager_ops.dart` falls back to
+      `entry.action`, so a new audit action reaches staff as an enum unless it is added there.
+      Added, with `complimentary`, which had the same gap. Suite green (249), analyze clean.
+
+- [x] **Appearance is a choice, and it defaults to light** (2026-08-14). `MaterialApp.router` set no
+      `themeMode`, so the app silently followed the OS — a phone on scheduled dark mode repainted the
+      till at dusk, mid-service. Now `themeModeProvider` (`core/theme/theme_mode_provider.dart`)
+      holds Light / Dark / Follow system per device in SharedPreferences, defaulting to **light**
+      rather than system, with the control under Account → Appearance. Palettes untouched; both were
+      already first-class. **Two traps paid for:** the notifier starts at light *synchronously*
+      because SharedPreferences resolves a frame or two after launch — starting at `system` would
+      paint the first frame dark on a dark phone and then snap; and it carries the same `_settled`
+      guard as `PrintEnabled`, or a choice made while storage is still opening is overwritten when it
+      lands and the setting appears to change itself. An unrecognised stored value falls back to
+      light rather than throwing, since this runs during startup. 5 unit tests cover exactly those
+      cases. Note for anyone updating: existing installs follow the OS today, so a staff member on a
+      dark phone sees the app turn light once, until they choose. Suite green (255), analyze clean.
 
 ## Open Questions
 

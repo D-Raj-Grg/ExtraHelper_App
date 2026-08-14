@@ -35,6 +35,8 @@ BillSnapshot _snapshot({
   int totalCents = 1000,
   int paidCents = 0,
   BillCustomer? customer,
+  DateTime? printedAt,
+  int? printedTotalCents,
 }) => BillSnapshot(
   bill: Bill(
     id: _billId,
@@ -48,6 +50,8 @@ BillSnapshot _snapshot({
     roundingCents: 0,
     totalCents: totalCents,
     tableLabel: 'A1',
+    printedAt: printedAt,
+    printedTotalCents: printedTotalCents,
   ),
   lines: const [
     BillLine(
@@ -119,6 +123,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Take payment'), findsOneWidget);
+    // Down the page, and the body is lazy: on a short screen the split button
+    // has not been built until it is scrolled to.
+    await tester.scrollUntilVisible(find.text('Split the check'), 200);
     expect(find.text('Split the check'), findsOneWidget);
   });
 
@@ -297,5 +304,110 @@ void main() {
     expect(find.text('Due'), findsOneWidget);
     expect(find.text('NPR 6.00'), findsOneWidget);
     expect(find.text('Part paid'), findsOneWidget);
+  });
+
+  // --- presenting the bill -------------------------------------------------
+  //
+  // The guest reads the slip, then pays it. Until this existed the only paper a
+  // bill produced came *after* the money had already moved, which is the wrong
+  // way round at every table in the world.
+
+  testWidgets('the bill can be printed before a rupee moves', (tester) async {
+    await tester.pumpWidget(_app(permissions: cashier, snapshot: _snapshot()));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Print bill'), findsOneWidget);
+    // Above payment, not beside it: the order of the buttons is the order of
+    // the transaction.
+    final print = tester.getCenter(find.text('Print bill'));
+    final pay = tester.getCenter(find.text('Take payment'));
+    expect(print.dy, lessThan(pay.dy));
+  });
+
+  testWidgets('reading the bill needs no key to charge for it', (tester) async {
+    // A waiter can hand a table its slip. Taking the money is another matter,
+    // and `enqueue_print_job` only wants `checkout.view` for a bill.
+    await tester.pumpWidget(
+      _app(permissions: const {'checkout.view'}, snapshot: _snapshot()),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Print bill'), findsOneWidget);
+    expect(find.text('Take payment'), findsNothing);
+  });
+
+  testWidgets('a settled bill offers the receipt, not the bill', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        permissions: cashier,
+        snapshot: _snapshot(status: 'paid', paidCents: 1000),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Print bill'), findsNothing);
+    expect(find.text('Print receipt'), findsOneWidget);
+  });
+
+  testWidgets('a bill printed once offers a reprint, not a first print', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        permissions: cashier,
+        snapshot: _snapshot(
+          printedAt: DateTime(2026, 8, 13, 20, 15),
+          printedTotalCents: 1000,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Reprint bill'), findsOneWidget);
+    expect(find.text('Print bill'), findsNothing);
+    // Nothing has changed since, so nothing to warn about.
+    expect(find.textContaining('changed after it was printed'), findsNothing);
+  });
+
+  testWidgets('another round after the slip went out is said out loud', (
+    tester,
+  ) async {
+    // Nothing is locked by printing — a table that orders again is normal. What
+    // is not normal is charging a guest a total they never saw.
+    await tester.pumpWidget(
+      _app(
+        permissions: cashier,
+        snapshot: _snapshot(
+          totalCents: 1600,
+          printedAt: DateTime(2026, 8, 13, 20, 15),
+          printedTotalCents: 1000,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('changed after it was printed'), findsOneWidget);
+    expect(find.text('Reprint bill'), findsOneWidget);
+    // Still payable: this is a warning, not a gate.
+    final button = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Take payment'),
+    );
+    expect(button.onPressed, isNotNull);
+  });
+
+  testWidgets('offline, printing is dead rather than absent', (tester) async {
+    // Same reasoning as the payment button: a missing one reads as "this bill
+    // cannot be printed", which is a different and wronger thing.
+    await tester.pumpWidget(
+      _app(permissions: cashier, snapshot: _snapshot(), online: false),
+    );
+    await tester.pumpAndSettle();
+
+    final button = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, 'Print bill'),
+    );
+    expect(button.onPressed, isNull);
   });
 }

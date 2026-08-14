@@ -42,6 +42,7 @@ class BillRepository {
   static const _billSelect =
       'id, status, created_at, subtotal_cents, tax_cents, service_charge_cents, '
       'discount_cents, tip_cents, rounding_cents, total_cents, note, '
+      'bill_printed_at, bill_printed_total_cents, '
       'restaurant_tables(label)';
 
   /// Everything the checkout screen needs, in two passes.
@@ -378,6 +379,23 @@ class BillRepository {
       '_value': value,
       '_reason': reason?.trim(),
     }, "Couldn't apply that discount.");
+  }
+
+  /// Take the staff discount back off the bill.
+  ///
+  /// Only the typed discount or the comp comes off — a coupon the guest redeemed
+  /// stays, because `remove_bill_discount` matches on a null `coupon_code`.
+  Future<void> removeBillDiscount({required String billId}) {
+    return _write('remove_bill_discount', {
+      '_bill_id': billId,
+    }, "Couldn't remove that discount.");
+  }
+
+  /// Take the discount back off one line. Other lines keep theirs.
+  Future<void> removeItemDiscount({required String orderItemId}) {
+    return _write('remove_item_discount', {
+      '_order_item_id': orderItemId,
+    }, "Couldn't remove that discount.");
   }
 
   /// Redeem a coupon code. Existence, expiry and the usage cap are all checked

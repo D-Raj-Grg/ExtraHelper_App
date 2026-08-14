@@ -392,6 +392,28 @@ class PosRepository {
     }
   }
 
+  /// Accept a guest's QR order and send it to the kitchen.
+  ///
+  /// Only reachable when the tenant turned off `qr_auto_fire` — with it on (the
+  /// default) `place_qr_order` builds the tickets itself and the order arrives
+  /// on the board already `in_kitchen`. Returns how many tickets it made; zero
+  /// means the lines were already ticketed, which is a no-op, not an error.
+  Future<int> acceptQrOrder(String orderId) async {
+    try {
+      final res = await _client.rpc(
+        'accept_qr_order',
+        params: {'_order_id': orderId},
+      );
+      return (res as num?)?.toInt() ?? 0;
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    } catch (_) {
+      throw const PosTransientFailure(
+        "Couldn't reach the kitchen. Check the order before sending it again.",
+      );
+    }
+  }
+
   /// Keep an order at the top of the board, or let it go.
   ///
   /// A direct column write rather than an RPC, and deliberately: `pinned_at`

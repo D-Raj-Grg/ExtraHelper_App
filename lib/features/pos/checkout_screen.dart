@@ -9,6 +9,7 @@ import '../../core/format/labels.dart';
 import '../../core/format/money.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/tokens.dart';
+import '../../data/print/reprint_actions.dart';
 import '../../data/supabase/pos_repository.dart' show PosFailure;
 import '../../data/sync/sync_providers.dart';
 import '../tenant/tenant_providers.dart';
@@ -128,6 +129,44 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     }
   }
 
+  /// Put the bill in front of the guest, before a rupee moves.
+  ///
+  /// The step this screen used to skip: paper only ever came out *after* the
+  /// payment landed, which is the wrong way round at every table in the world.
+  /// `enqueue_print_job` stamps what the slip said as it queues, so the refresh
+  /// afterwards is what lets the bar know if the bill moves on from here.
+  Future<void> _printBill() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final message = await printBillEstimate(ref, widget.billId);
+      if (!mounted) return;
+      _say(message);
+      // Unawaited: a read must never hold up the person at the table, and the
+      // bar renders fine from what it already has until this lands.
+      unawaited(
+        ref.read(billSnapshotProvider(widget.billId).notifier).refresh(),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// A second copy of a settled bill. History, so nothing is stamped.
+  Future<void> _printReceipt() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final message = await reprintBill(ref, widget.billId);
+      if (mounted) _say(message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   void _say(String message) {
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
@@ -161,6 +200,11 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                 type: adjustment.type,
                 value: adjustment.value,
                 reason: adjustment.reason,
+              ),
+              RemoveDiscountAdjustment(:final orderItemId?) =>
+                repo.removeItemDiscount(orderItemId: orderItemId),
+              RemoveDiscountAdjustment() => repo.removeBillDiscount(
+                billId: widget.billId,
               ),
               CouponAdjustment(:final code) => repo.applyCoupon(
                 billId: widget.billId,
@@ -386,6 +430,16 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
               onTake: !canPay || !snapshot.value!.canTakePayment
                   ? null
                   : () => _takePayment(snapshot.value!, currency),
+              // No permission of its own: `enqueue_print_job` wants
+              // `checkout.view` for a bill, which is what opened this screen. A
+              // waiter can hand a table its slip without holding the key to
+              // charge for it. A voided bill is the one that prints nothing —
+              // there is no document to give anybody.
+              onPrint: snapshot.value!.bill.isVoid
+                  ? null
+                  : snapshot.value!.bill.isPaid
+                  ? _printReceipt
+                  : _printBill,
             ),
       body: RefreshIndicator(
         onRefresh: () =>
@@ -878,6 +932,7 @@ class _DueBar extends StatelessWidget {
     required this.online,
     required this.busy,
     required this.onTake,
+    required this.onPrint,
   });
 
   final BillSnapshot snapshot;
@@ -887,6 +942,9 @@ class _DueBar extends StatelessWidget {
 
   /// Null without `payment.take`, or when there is nothing left to take.
   final VoidCallback? onTake;
+
+  /// Null only for a voided bill — there is no document to hand anybody.
+  final VoidCallback? onPrint;
 
   @override
   Widget build(BuildContext context) {
@@ -935,6 +993,31 @@ class _DueBar extends StatelessWidget {
               ),
               const SizedBox(height: 8),
             ],
+            // The bill changed after the guest was handed it. Not a gate — a
+            // table that orders another round is ordinary — but charging
+            // someone a total they never read is not.
+            if (snapshot.bill.printedTotalIsStale && !settled) ...[
+              Row(
+                children: [
+                  Icon(
+                    Icons.warning_amber_rounded,
+                    size: 16,
+                    color: semantic.warningText,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'The bill changed after it was printed — the guest has '
+                      'an old total.',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: semantic.warningText,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+            ],
             Row(
               children: [
                 Expanded(
@@ -960,22 +1043,47 @@ class _DueBar extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (onTake != null)
-                  FilledButton(
-                    onPressed: busy || !online ? null : onTake,
-                    style: FilledButton.styleFrom(
+                // Print sits beside the figure it prints, and payment goes
+                // full-width beneath: top to bottom that is the order of the
+                // real transaction — the guest reads the bill, then pays it.
+                // Stacking both would push the bar over the controls it sits
+                // under, on exactly the small phones this bar exists for.
+                if (onPrint != null)
+                  OutlinedButton.icon(
+                    onPressed: busy || !online ? null : onPrint,
+                    style: OutlinedButton.styleFrom(
                       minimumSize: const Size(0, Tokens.tapTarget),
                     ),
-                    child: busy
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Take payment'),
+                    icon: const Icon(Icons.print_outlined, size: 18),
+                    label: Text(
+                      snapshot.bill.isPaid
+                          ? 'Print receipt'
+                          : snapshot.bill.wasPrinted
+                          ? 'Reprint bill'
+                          : 'Print bill',
+                    ),
                   ),
               ],
             ),
+            if (onTake != null) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: busy || !online ? null : onTake,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, Tokens.tapTarget),
+                  ),
+                  child: busy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Take payment'),
+                ),
+              ),
+            ],
           ],
         ),
       ),

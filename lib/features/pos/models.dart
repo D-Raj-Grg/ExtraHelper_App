@@ -355,6 +355,14 @@ class PosOrder {
 
   bool get canFire => lines.any((l) => !l.isVoid && l.status == 'draft');
 
+  /// A guest's QR order nobody has accepted yet.
+  ///
+  /// Only happens where the tenant turned `qr_auto_fire` off; with it on the
+  /// order is already `in_kitchen` when it reaches this board. The lines stay
+  /// `placed` (never `draft`) so [canFire] is false for them — this is the
+  /// waiter's own "send it" gate, not the composer's.
+  bool get awaitingQrAccept => orderType == 'qr' && status == 'placed';
+
   /// Ready to bill: something has actually gone to the kitchen.
   ///
   /// `create_bill_for_order` refuses an order with nothing fired, so offering

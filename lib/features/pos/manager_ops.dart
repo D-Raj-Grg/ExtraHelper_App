@@ -684,6 +684,16 @@ class _LogRow extends StatelessWidget {
     final (icon, color, label) = switch (entry.action) {
       'void' => (Icons.block, semantic.dangerText, 'Void'),
       'discount' => (Icons.percent, semantic.warningText, 'Discount'),
+      'discount_removed' => (
+        Icons.percent,
+        semantic.neutral,
+        'Discount removed',
+      ),
+      'complimentary' => (
+        Icons.card_giftcard,
+        semantic.warningText,
+        'On the house',
+      ),
       'item_86' => (
         Icons.remove_shopping_cart,
         semantic.attentionText,
