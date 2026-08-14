@@ -1106,6 +1106,16 @@ class $CachedVariantsTable extends CachedVariants
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _sortMeta = const VerificationMeta('sort');
+  @override
+  late final GeneratedColumn<int> sort = GeneratedColumn<int>(
+    'sort',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     tenantId,
@@ -1113,6 +1123,7 @@ class $CachedVariantsTable extends CachedVariants
     itemId,
     name,
     priceDeltaCents,
+    sort,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1166,6 +1177,12 @@ class $CachedVariantsTable extends CachedVariants
     } else if (isInserting) {
       context.missing(_priceDeltaCentsMeta);
     }
+    if (data.containsKey('sort')) {
+      context.handle(
+        _sortMeta,
+        sort.isAcceptableOrUnknown(data['sort']!, _sortMeta),
+      );
+    }
     return context;
   }
 
@@ -1195,6 +1212,10 @@ class $CachedVariantsTable extends CachedVariants
         DriftSqlType.int,
         data['${effectivePrefix}price_delta_cents'],
       )!,
+      sort: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sort'],
+      )!,
     );
   }
 
@@ -1210,12 +1231,17 @@ class CachedVariant extends DataClass implements Insertable<CachedVariant> {
   final String itemId;
   final String name;
   final int priceDeltaCents;
+
+  /// Owner-chosen display order. Defaulted so a phone upgrading from v3 keeps
+  /// its cached menu instead of losing the column and the rows with it.
+  final int sort;
   const CachedVariant({
     required this.tenantId,
     required this.id,
     required this.itemId,
     required this.name,
     required this.priceDeltaCents,
+    required this.sort,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1225,6 +1251,7 @@ class CachedVariant extends DataClass implements Insertable<CachedVariant> {
     map['item_id'] = Variable<String>(itemId);
     map['name'] = Variable<String>(name);
     map['price_delta_cents'] = Variable<int>(priceDeltaCents);
+    map['sort'] = Variable<int>(sort);
     return map;
   }
 
@@ -1235,6 +1262,7 @@ class CachedVariant extends DataClass implements Insertable<CachedVariant> {
       itemId: Value(itemId),
       name: Value(name),
       priceDeltaCents: Value(priceDeltaCents),
+      sort: Value(sort),
     );
   }
 
@@ -1249,6 +1277,7 @@ class CachedVariant extends DataClass implements Insertable<CachedVariant> {
       itemId: serializer.fromJson<String>(json['itemId']),
       name: serializer.fromJson<String>(json['name']),
       priceDeltaCents: serializer.fromJson<int>(json['priceDeltaCents']),
+      sort: serializer.fromJson<int>(json['sort']),
     );
   }
   @override
@@ -1260,6 +1289,7 @@ class CachedVariant extends DataClass implements Insertable<CachedVariant> {
       'itemId': serializer.toJson<String>(itemId),
       'name': serializer.toJson<String>(name),
       'priceDeltaCents': serializer.toJson<int>(priceDeltaCents),
+      'sort': serializer.toJson<int>(sort),
     };
   }
 
@@ -1269,12 +1299,14 @@ class CachedVariant extends DataClass implements Insertable<CachedVariant> {
     String? itemId,
     String? name,
     int? priceDeltaCents,
+    int? sort,
   }) => CachedVariant(
     tenantId: tenantId ?? this.tenantId,
     id: id ?? this.id,
     itemId: itemId ?? this.itemId,
     name: name ?? this.name,
     priceDeltaCents: priceDeltaCents ?? this.priceDeltaCents,
+    sort: sort ?? this.sort,
   );
   CachedVariant copyWithCompanion(CachedVariantsCompanion data) {
     return CachedVariant(
@@ -1285,6 +1317,7 @@ class CachedVariant extends DataClass implements Insertable<CachedVariant> {
       priceDeltaCents: data.priceDeltaCents.present
           ? data.priceDeltaCents.value
           : this.priceDeltaCents,
+      sort: data.sort.present ? data.sort.value : this.sort,
     );
   }
 
@@ -1295,13 +1328,15 @@ class CachedVariant extends DataClass implements Insertable<CachedVariant> {
           ..write('id: $id, ')
           ..write('itemId: $itemId, ')
           ..write('name: $name, ')
-          ..write('priceDeltaCents: $priceDeltaCents')
+          ..write('priceDeltaCents: $priceDeltaCents, ')
+          ..write('sort: $sort')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(tenantId, id, itemId, name, priceDeltaCents);
+  int get hashCode =>
+      Object.hash(tenantId, id, itemId, name, priceDeltaCents, sort);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1310,7 +1345,8 @@ class CachedVariant extends DataClass implements Insertable<CachedVariant> {
           other.id == this.id &&
           other.itemId == this.itemId &&
           other.name == this.name &&
-          other.priceDeltaCents == this.priceDeltaCents);
+          other.priceDeltaCents == this.priceDeltaCents &&
+          other.sort == this.sort);
 }
 
 class CachedVariantsCompanion extends UpdateCompanion<CachedVariant> {
@@ -1319,6 +1355,7 @@ class CachedVariantsCompanion extends UpdateCompanion<CachedVariant> {
   final Value<String> itemId;
   final Value<String> name;
   final Value<int> priceDeltaCents;
+  final Value<int> sort;
   final Value<int> rowid;
   const CachedVariantsCompanion({
     this.tenantId = const Value.absent(),
@@ -1326,6 +1363,7 @@ class CachedVariantsCompanion extends UpdateCompanion<CachedVariant> {
     this.itemId = const Value.absent(),
     this.name = const Value.absent(),
     this.priceDeltaCents = const Value.absent(),
+    this.sort = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   CachedVariantsCompanion.insert({
@@ -1334,6 +1372,7 @@ class CachedVariantsCompanion extends UpdateCompanion<CachedVariant> {
     required String itemId,
     required String name,
     required int priceDeltaCents,
+    this.sort = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : tenantId = Value(tenantId),
        id = Value(id),
@@ -1346,6 +1385,7 @@ class CachedVariantsCompanion extends UpdateCompanion<CachedVariant> {
     Expression<String>? itemId,
     Expression<String>? name,
     Expression<int>? priceDeltaCents,
+    Expression<int>? sort,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1354,6 +1394,7 @@ class CachedVariantsCompanion extends UpdateCompanion<CachedVariant> {
       if (itemId != null) 'item_id': itemId,
       if (name != null) 'name': name,
       if (priceDeltaCents != null) 'price_delta_cents': priceDeltaCents,
+      if (sort != null) 'sort': sort,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1364,6 +1405,7 @@ class CachedVariantsCompanion extends UpdateCompanion<CachedVariant> {
     Value<String>? itemId,
     Value<String>? name,
     Value<int>? priceDeltaCents,
+    Value<int>? sort,
     Value<int>? rowid,
   }) {
     return CachedVariantsCompanion(
@@ -1372,6 +1414,7 @@ class CachedVariantsCompanion extends UpdateCompanion<CachedVariant> {
       itemId: itemId ?? this.itemId,
       name: name ?? this.name,
       priceDeltaCents: priceDeltaCents ?? this.priceDeltaCents,
+      sort: sort ?? this.sort,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1394,6 +1437,9 @@ class CachedVariantsCompanion extends UpdateCompanion<CachedVariant> {
     if (priceDeltaCents.present) {
       map['price_delta_cents'] = Variable<int>(priceDeltaCents.value);
     }
+    if (sort.present) {
+      map['sort'] = Variable<int>(sort.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1408,6 +1454,7 @@ class CachedVariantsCompanion extends UpdateCompanion<CachedVariant> {
           ..write('itemId: $itemId, ')
           ..write('name: $name, ')
           ..write('priceDeltaCents: $priceDeltaCents, ')
+          ..write('sort: $sort, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -5268,6 +5315,7 @@ typedef $$CachedVariantsTableCreateCompanionBuilder =
       required String itemId,
       required String name,
       required int priceDeltaCents,
+      Value<int> sort,
       Value<int> rowid,
     });
 typedef $$CachedVariantsTableUpdateCompanionBuilder =
@@ -5277,6 +5325,7 @@ typedef $$CachedVariantsTableUpdateCompanionBuilder =
       Value<String> itemId,
       Value<String> name,
       Value<int> priceDeltaCents,
+      Value<int> sort,
       Value<int> rowid,
     });
 
@@ -5311,6 +5360,11 @@ class $$CachedVariantsTableFilterComposer
 
   ColumnFilters<int> get priceDeltaCents => $composableBuilder(
     column: $table.priceDeltaCents,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sort => $composableBuilder(
+    column: $table.sort,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -5348,6 +5402,11 @@ class $$CachedVariantsTableOrderingComposer
     column: $table.priceDeltaCents,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get sort => $composableBuilder(
+    column: $table.sort,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$CachedVariantsTableAnnotationComposer
@@ -5375,6 +5434,9 @@ class $$CachedVariantsTableAnnotationComposer
     column: $table.priceDeltaCents,
     builder: (column) => column,
   );
+
+  GeneratedColumn<int> get sort =>
+      $composableBuilder(column: $table.sort, builder: (column) => column);
 }
 
 class $$CachedVariantsTableTableManager
@@ -5415,6 +5477,7 @@ class $$CachedVariantsTableTableManager
                 Value<String> itemId = const Value.absent(),
                 Value<String> name = const Value.absent(),
                 Value<int> priceDeltaCents = const Value.absent(),
+                Value<int> sort = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CachedVariantsCompanion(
                 tenantId: tenantId,
@@ -5422,6 +5485,7 @@ class $$CachedVariantsTableTableManager
                 itemId: itemId,
                 name: name,
                 priceDeltaCents: priceDeltaCents,
+                sort: sort,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -5431,6 +5495,7 @@ class $$CachedVariantsTableTableManager
                 required String itemId,
                 required String name,
                 required int priceDeltaCents,
+                Value<int> sort = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CachedVariantsCompanion.insert(
                 tenantId: tenantId,
@@ -5438,6 +5503,7 @@ class $$CachedVariantsTableTableManager
                 itemId: itemId,
                 name: name,
                 priceDeltaCents: priceDeltaCents,
+                sort: sort,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

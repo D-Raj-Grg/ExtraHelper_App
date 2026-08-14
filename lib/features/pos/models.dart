@@ -7,16 +7,22 @@ class PosVariant {
     required this.id,
     required this.name,
     required this.priceDeltaCents,
+    this.sort = 0,
   });
 
   final String id;
   final String name;
   final int priceDeltaCents;
 
+  /// Owner-chosen display order, set on the web menu editor. Price order is
+  /// not the same thing — a Half is cheaper but may still belong last.
+  final int sort;
+
   static PosVariant fromRow(Map<String, dynamic> r) => PosVariant(
     id: r['id'] as String,
     name: (r['name'] as String?) ?? '',
     priceDeltaCents: (r['price_delta_cents'] as int?) ?? 0,
+    sort: (r['sort'] as int?) ?? 0,
   );
 }
 

@@ -71,7 +71,7 @@ class PosRepository {
         .from('menu_items')
         .select(
           'id, name, base_price_cents, category_id, is_86, is_veg, image_url, '
-          'item_variants(id, name, price_delta_cents), '
+          'item_variants(id, name, price_delta_cents, sort), '
           'item_modifiers(modifiers(id, name, price_cents))',
         )
         .eq('tenant_id', _tenantId)
@@ -83,7 +83,12 @@ class PosRepository {
           (r['item_variants'] as List<dynamic>? ?? const [])
               .map((v) => PosVariant.fromRow(v as Map<String, dynamic>))
               .toList()
-            ..sort((a, b) => a.priceDeltaCents.compareTo(b.priceDeltaCents));
+            ..sort((a, b) {
+              final bySort = a.sort.compareTo(b.sort);
+              return bySort != 0
+                  ? bySort
+                  : a.priceDeltaCents.compareTo(b.priceDeltaCents);
+            });
 
       final modifiers = (r['item_modifiers'] as List<dynamic>? ?? const [])
           .map((l) => (l as Map<String, dynamic>)['modifiers'])
