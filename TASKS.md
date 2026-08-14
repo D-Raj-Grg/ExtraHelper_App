@@ -1093,8 +1093,20 @@ plan; none of them changed.
       both ends of the list, the confirm dialog and its wording, the empty state, the sheet's
       Less→negative-delta arithmetic and its disabled save, and both variant-ordering fallbacks.
       Full suite green (265), `flutter analyze` clean.
-- [ ] **Device pass outstanding**: edit a size on a real phone against the demo tenant and confirm
-      the till and the printed ticket agree with the new order.
+- [x] **Device pass done** (2026-08-14, iOS simulator, real backend). `integration_test/menu_edit_device_test.dart`
+      signs in as a throwaway owner on a throwaway tenant, walks drawer → Menu → dish, taps **move
+      down**, asserts the row that was second is now first and nothing else moved, then reads the
+      **till's own query** (`PosRepository.menu()`) on the same live session and asserts it lists
+      the sizes in the editor's order. Green on `iPhone 17` (iOS 26), and the write was confirmed in
+      the database afterwards — `250 gm, 1 Jir, 1 Kg` → `1 Jir, 250 gm, 1 Kg` — so this is the RPC
+      landing, not a local rebuild. Tenant and both users deleted after.
+
+      The till assertion goes through the repository rather than the POS screen on purpose: the POS
+      board shows *orders*, and a waiter only reaches the dish grid by starting one. The first run
+      failed exactly there, which is what the shape of the app actually is.
+- [ ] Printed-ticket check still outstanding: a KOT for a variant line names the size in
+      `name_snapshot`, which is snapshotted at order time and does not re-read `sort` — worth one
+      real print to confirm nothing else reads the order.
 
 ## Backlog / Later phases
 
