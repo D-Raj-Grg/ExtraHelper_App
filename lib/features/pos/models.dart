@@ -49,7 +49,25 @@ class PosMenuItem {
     this.isVeg,
     this.variants = const [],
     this.modifiers = const [],
+    this.isCustom = false,
   });
+
+  /// An off-menu line: a plating charge, a special the kitchen ran today.
+  ///
+  /// Not a menu row — it never came from the server and never goes back as an
+  /// `item_id`. The id is derived from the name and price so that adding the
+  /// same charge twice merges into one line of quantity two, exactly as a
+  /// real dish would, while two different charges stay apart. It is prefixed so
+  /// it can never be mistaken for a uuid.
+  factory PosMenuItem.custom({required String name, required int priceCents}) =>
+      PosMenuItem(
+        id: 'custom:$name:$priceCents',
+        name: name,
+        basePriceCents: priceCents,
+        categoryId: null,
+        is86: false,
+        isCustom: true,
+      );
 
   final String id;
   final String name;
@@ -66,6 +84,25 @@ class PosMenuItem {
   /// Add-ons **linked to this item** via `item_modifiers`. The server rejects
   /// any modifier that isn't, so the picker must only ever offer these.
   final List<PosModifier> modifiers;
+
+  /// True for a hand-typed, off-menu line. It carries no `item_id`, so it can
+  /// never stand in for a menu item's price, and it deducts no stock.
+  final bool isCustom;
+
+  /// Only the stock flag moves at runtime — a Realtime 86 must not rebuild the
+  /// dish's price or options from a partial row.
+  PosMenuItem copyWith({bool? is86}) => PosMenuItem(
+    id: id,
+    name: name,
+    basePriceCents: basePriceCents,
+    categoryId: categoryId,
+    is86: is86 ?? this.is86,
+    imageUrl: imageUrl,
+    isVeg: isVeg,
+    variants: variants,
+    modifiers: modifiers,
+    isCustom: isCustom,
+  );
 
   int get optionCount => variants.length + modifiers.length;
 
@@ -195,6 +232,85 @@ class PosOrderLine {
   }
 }
 
+/// A finished order, as the Completed tab lists it.
+///
+/// Separate from [PosOrder] because the two answer different questions: an
+/// active order is something to work on, and this is a record of one that is
+/// over. It carries its bill's status and total, which an active order has no
+/// use for, and it deliberately does **not** carry the fields that only mean
+/// something mid-service.
+class PosCompletedOrder {
+  const PosCompletedOrder({
+    required this.id,
+    required this.status,
+    required this.orderType,
+    required this.createdAt,
+    this.tableLabel,
+    this.guests,
+    this.billId,
+    this.billStatus,
+    this.billTotalCents,
+    this.lines = const [],
+  });
+
+  final String id;
+  final String status;
+  final String orderType;
+  final DateTime createdAt;
+  final String? tableLabel;
+  final int? guests;
+  final String? billId;
+  final String? billStatus;
+
+  /// The bill's own total. **Not** what this order contributed: two orders
+  /// merged onto one bill both report the whole figure, which is why the
+  /// takings line is summed from the lines instead.
+  final int? billTotalCents;
+
+  final List<PosOrderLine> lines;
+
+  /// This order's own money, void lines excluded — they were taken off the
+  /// bill and charging for them would be wrong.
+  int get lineTotalCents =>
+      lines.where((l) => !l.isVoid).fold(0, (sum, l) => sum + l.lineTotalCents);
+
+  int get lineCount =>
+      lines.where((l) => !l.isVoid).fold(0, (sum, l) => sum + l.qty);
+
+  /// A cancelled order took no money, so it must not be counted in takings —
+  /// and its figures are shown as a dash rather than a zero, because zero looks
+  /// like a bill that was rung up for nothing.
+  bool get isCancelled => status == 'cancelled';
+
+  /// The short form staff read off a card: the first block of the uuid, which
+  /// is what the web prints too.
+  String get shortId =>
+      id.length >= 8 ? id.substring(0, 8).toUpperCase() : id.toUpperCase();
+
+  static PosCompletedOrder fromRow(Map<String, dynamic> r) {
+    final table = r['restaurant_tables'] as Map<String, dynamic>?;
+    final bill = r['bills'] as Map<String, dynamic>?;
+    final lines = (r['order_items'] as List<dynamic>? ?? const [])
+        .map((l) => PosOrderLine.fromRow(l as Map<String, dynamic>))
+        .toList();
+
+    return PosCompletedOrder(
+      id: r['id'] as String,
+      status: (r['status'] as String?) ?? 'closed',
+      orderType: (r['order_type'] as String?) ?? 'dine_in',
+      createdAt:
+          DateTime.tryParse((r['created_at'] as String?) ?? '')?.toLocal() ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      tableLabel: table?['label'] as String?,
+      guests: (r['guests'] as num?)?.toInt(),
+      billId: (r['bill_id'] as String?) ?? bill?['id'] as String?,
+      billStatus: bill?['status'] as String?,
+      billTotalCents: (bill?['total_cents'] as num?)?.toInt(),
+      lines: lines,
+    );
+  }
+}
+
 class PosOrder {
   const PosOrder({
     required this.id,
@@ -204,6 +320,8 @@ class PosOrder {
     this.tableId,
     this.tableLabel,
     this.guests,
+    this.billId,
+    this.pinnedAt,
     this.lines = const [],
   });
 
@@ -214,6 +332,18 @@ class PosOrder {
   final String? tableId;
   final String? tableLabel;
   final int? guests;
+
+  /// Set once checkout has opened a bill for this order. Non-null is what turns
+  /// the card's "Bill" into "Open bill" — `create_bill_for_order` is idempotent
+  /// either way, but the word should tell the truth.
+  final String? billId;
+
+  /// Set while a waiter is holding this order at the top of the board. A
+  /// display preference and nothing more — see `PosRepository.setPinned`.
+  final DateTime? pinnedAt;
+
+  bool get isPinned => pinnedAt != null;
+
   final List<PosOrderLine> lines;
 
   /// Voided lines don't count — they were removed from the bill.
@@ -224,6 +354,12 @@ class PosOrder {
       lines.where((l) => !l.isVoid).fold(0, (sum, l) => sum + l.qty);
 
   bool get canFire => lines.any((l) => !l.isVoid && l.status == 'draft');
+
+  /// Ready to bill: something has actually gone to the kitchen.
+  ///
+  /// `create_bill_for_order` refuses an order with nothing fired, so offering
+  /// the button before then is offering a guaranteed error.
+  bool get canBill => lines.any((l) => !l.isVoid && l.isFired);
 
   /// Settled or abandoned — no further edits.
   bool get isClosed =>
@@ -244,6 +380,8 @@ class PosOrder {
       tableId: r['table_id'] as String?,
       tableLabel: table?['label'] as String?,
       guests: r['guests'] as int?,
+      billId: r['bill_id'] as String?,
+      pinnedAt: DateTime.tryParse((r['pinned_at'] as String?) ?? '')?.toLocal(),
       lines: lines,
     );
   }
@@ -300,12 +438,91 @@ class CartLine {
     notes: notes ?? this.notes,
   );
 
+  /// The shape both write paths take.
+  ///
+  /// A custom line sends `custom_name` and its price **instead of** an
+  /// `item_id` — that is the branch `place_staff_order` and
+  /// `amend_order_add_custom_item` both key on, and it is what keeps a
+  /// hand-typed price out of the menu's pricing rules.
   Map<String, dynamic> toRpcJson() => {
-    'item_id': item.id,
+    if (item.isCustom) ...{
+      'custom_name': item.name,
+      'unit_price_cents': unitPriceCents,
+    } else
+      'item_id': item.id,
     'qty': qty,
     if (variant != null) 'variant_id': variant!.id,
     if (modifiers.isNotEmpty)
       'modifier_ids': modifiers.map((m) => m.id).toList(),
     if (notes != null && notes!.trim().isNotEmpty) 'notes': notes!.trim(),
   };
+}
+
+/// One line of the manager's log: who did a thing, to what, and why.
+///
+/// Read straight from `audit_logs`, whose RLS already restricts SELECT to
+/// owners and managers — so this list cannot leak to a waiter even if the app
+/// asked for it.
+class PosAuditEntry {
+  const PosAuditEntry({
+    required this.id,
+    required this.action,
+    required this.createdAt,
+    required this.metadata,
+    this.actorName,
+  });
+
+  final String id;
+
+  /// `void`, `discount`, `item_86`, `table_state`, ...
+  final String action;
+
+  final DateTime createdAt;
+  final Map<String, dynamic> metadata;
+
+  /// Null when the actor has no profile row — the log outlives the person.
+  final String? actorName;
+
+  /// The reason someone typed, when the action demanded one.
+  String? get reason {
+    final r = metadata['reason'];
+    return (r is String && r.trim().isNotEmpty) ? r.trim() : null;
+  }
+
+  /// What the action was done to, in words a manager recognises.
+  ///
+  /// A void's audit row carries only the reason, so the dish name is looked up
+  /// and merged in by the repository — "Void —" tells a manager nothing.
+  String get subject {
+    for (final key in ['name', 'label', 'name_snapshot']) {
+      final v = metadata[key];
+      if (v is String && v.isNotEmpty) return v;
+    }
+    // A discount describes itself by its size when there's nothing else.
+    final type = metadata['type'];
+    final value = metadata['value'];
+    if (type == 'percent' && value is num) return '${_trim(value)}% off';
+    if (type == 'flat' && value is num) return '${_trim(value)} off';
+    return '—';
+  }
+
+  static String _trim(num v) =>
+      v == v.roundToDouble() ? v.toInt().toString() : v.toString();
+
+  static PosAuditEntry fromRow(Map<String, dynamic> r) {
+    final meta = r['metadata'];
+    final actor = r['actor'] as Map<String, dynamic>?;
+    return PosAuditEntry(
+      id: r['id'] as String,
+      action: (r['action'] as String?) ?? '',
+      createdAt:
+          DateTime.tryParse((r['created_at'] as String?) ?? '')?.toLocal() ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      metadata: meta is Map<String, dynamic> ? meta : const {},
+      // `full_name` is often unset; the username is what the person actually
+      // has. Either beats "someone".
+      actorName:
+          (actor?['full_name'] as String?) ?? (actor?['username'] as String?),
+    );
+  }
 }

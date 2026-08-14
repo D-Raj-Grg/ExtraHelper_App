@@ -1,6 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../app/app_scaffold.dart';
+import '../../app/router.dart';
 import '../../core/format/labels.dart';
 import '../../core/format/money.dart';
 import '../../core/theme/app_theme.dart';
@@ -9,11 +14,17 @@ import '../../core/widgets/choice_chip.dart';
 import '../../core/widgets/menu_tile.dart';
 import '../../core/widgets/table_glyph.dart';
 import '../../data/supabase/pos_repository.dart';
+import '../../data/sync/sync_providers.dart';
 import '../tenant/tenant_providers.dart';
+import 'bill_providers.dart';
 import 'cart_controller.dart';
+import 'custom_item_sheet.dart';
+import 'guests_dialog.dart';
 import 'item_options_sheet.dart';
+import 'manager_ops.dart';
 import 'models.dart';
 import 'pos_providers.dart';
+import 'void_reason_dialog.dart';
 
 /// The order composer — **one surface for create and amend**.
 ///
@@ -46,13 +57,144 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
   void initState() {
     super.initState();
     final repo = ref.read(posRepoProvider)!;
+    final queue = ref.read(orderQueueProvider)!;
     _cart = _isAmend
-        ? AmendCart(repository: repo, order: widget.existingOrder!)
-        : CreateCart(
+        ? AmendCart(
+            queue: queue,
             repository: repo,
+            order: widget.existingOrder!,
+          )
+        : CreateCart(
+            queue: queue,
             orderType: widget.seedTable == null ? 'pickup' : 'dine_in',
             tableId: widget.seedTable?.id,
           );
+  }
+
+  bool get _isDineIn => _isAmend
+      ? widget.existingOrder!.orderType == 'dine_in'
+      : widget.seedTable != null;
+
+  int? get _guests => _isAmend
+      ? (_guestsOverride ?? widget.existingOrder!.guests)
+      : (_cart as CreateCart).guests;
+
+  /// The amended order is a snapshot taken when the composer opened, so a
+  /// guest count saved here has to be remembered locally too — otherwise the
+  /// badge reverts the moment the dialog closes.
+  int? _guestsOverride;
+
+  /// How many people are eating.
+  ///
+  /// On create it rides along in `place_staff_order`, which is why nothing is
+  /// written here. On amend it is a direct column update: covers decide no
+  /// money and no access, and the web action does exactly the same.
+  Future<void> _editGuests() async {
+    final chosen = await showGuestsDialog(context: context, current: _guests);
+    if (chosen == null || !mounted) return;
+
+    if (!_isAmend) {
+      setState(() => (_cart as CreateCart).guests = chosen);
+      return;
+    }
+
+    final repo = ref.read(posRepoProvider);
+    if (repo == null) return;
+    if (!(ref.read(isOnlineProvider).valueOrNull ?? true)) {
+      _toast(
+        "No coverage — the guest count can't be saved yet. The order is safe.",
+        error: true,
+      );
+      return;
+    }
+    try {
+      await repo.setGuests(orderId: widget.existingOrder!.id, guests: chosen);
+      if (!mounted) return;
+      setState(() => _guestsOverride = chosen);
+      ref.invalidate(activeOrdersProvider);
+    } on PosFailure catch (e) {
+      _toast(e.message, error: true);
+    }
+  }
+
+  /// Clear the whole order and leave the composer.
+  ///
+  /// Manager-gated on role by `cancel_order`, reason required, audited. Not
+  /// queued offline — the RPC refuses an order that has since been billed, so a
+  /// replay would fail with the composer long gone.
+  Future<void> _cancelOrder() async {
+    final order = widget.existingOrder!;
+    final repo = ref.read(posRepoProvider);
+    if (repo == null) return;
+
+    final dishes = order.itemCount;
+    final reason = await showVoidReasonDialog(
+      context: context,
+      title: 'Cancel this order?',
+      body:
+          '${dishes == 1 ? 'The one dish' : 'All $dishes dishes'} on this order '
+          'will be voided and the order cancelled. Any stock it deducted is '
+          'returned, the table is freed, and this is recorded against your '
+          'name.',
+      confirmLabel: 'Cancel order',
+      keepLabel: 'Keep order',
+      hint: 'e.g. guests left before ordering',
+    );
+    if (reason == null || !mounted) return;
+
+    if (!(ref.read(isOnlineProvider).valueOrNull ?? true)) {
+      _toast(
+        "No coverage — an order can't be cancelled yet. Try again when you're "
+        'back.',
+        error: true,
+      );
+      return;
+    }
+
+    setState(() => _busy = true);
+    try {
+      await repo.cancelOrder(orderId: order.id, reason: reason);
+      if (!mounted) return;
+      ref.invalidate(activeOrdersProvider);
+      unawaited(ref.read(tablesProvider.notifier).refresh());
+      Navigator.of(context).pop();
+    } on PosFailure catch (e) {
+      if (!mounted) return;
+      _toast(e.message, error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Open this order's bill and leave the composer behind it.
+  ///
+  /// The write needs a connection: offline it would sit on a long HTTP timeout
+  /// and read as a dead tap, and there is nothing useful to queue — a bill with
+  /// no id is a screen nobody can open.
+  Future<void> _openBill() async {
+    if (_busy) return;
+    if (!(ref.read(isOnlineProvider).valueOrNull ?? true)) {
+      _toast(
+        "No coverage — a bill can't be opened yet. The order is safe; settle "
+        "it when you're back.",
+        error: true,
+      );
+      return;
+    }
+    final repo = ref.read(billRepoProvider);
+    if (repo == null) return;
+
+    setState(() => _busy = true);
+    try {
+      final billId = await repo.createBillForOrder(widget.existingOrder!.id);
+      if (!mounted) return;
+      await context.push(Routes.billPath(billId));
+    } on PosFailure catch (e) {
+      if (!mounted) return;
+      _toast(e.message, error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   void _toast(String message, {bool error = false}) {
@@ -78,6 +220,20 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
       );
   }
 
+  /// A line that isn't on the menu — a plating charge, today's special.
+  ///
+  /// The price is typed, so it goes through the same `add` as any dish and
+  /// lands on a server RPC that clamps it and audits it. Nothing here decides
+  /// what it costs beyond passing on what was typed.
+  Future<void> _addCustom(String currency) async {
+    final line = await showCustomItemSheet(
+      context: context,
+      currency: currency,
+    );
+    if (line == null || !mounted) return;
+    await _commitLine(line);
+  }
+
   Future<void> _addDish(PosMenuItem item, String currency) async {
     CartLine? line;
     if (item.optionCount > 0) {
@@ -94,10 +250,15 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
       );
     }
     if (line == null) return;
+    await _commitLine(line);
+  }
 
-    // Optimistic in create mode (it's local anyway). In amend mode the server
-    // is the source of truth, so we await it and surface a failure honestly
-    // rather than showing a line the kitchen never got.
+  /// Put a line into the cart, whether it came from the menu or was typed.
+  ///
+  /// Optimistic in create mode (it's local anyway). In amend mode the server is
+  /// the source of truth, so we await it and surface a failure honestly rather
+  /// than showing a line the kitchen never got.
+  Future<void> _commitLine(CartLine line) async {
     try {
       await _cart.add(line);
       if (_isAmend) await _refreshAmend();
@@ -107,12 +268,24 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
     }
   }
 
+  /// Pull server truth back into the cart after an amend.
+  ///
+  /// Offline this simply fails, and that is fine: the queued line is already
+  /// drawn from the outbox, so the waiter sees their dish either way. Never let
+  /// a failed *read* undo a durable *write*.
   Future<void> _refreshAmend() async {
     final cart = _cart;
     if (cart is! AmendCart) return;
-    final fresh = await ref.read(posRepoProvider)!.order(cart.order.id);
-    if (fresh != null) cart.update(fresh);
-    ref.invalidate(activeOrdersProvider);
+    await cart.reconcilePending();
+    try {
+      final fresh = await ref.read(posRepoProvider)!.order(cart.order.id);
+      if (fresh != null) cart.update(fresh);
+    } on Object {
+      return;
+    } finally {
+      ref.invalidate(activeOrdersProvider);
+      ref.invalidate(outboxStatusProvider);
+    }
   }
 
   Future<void> _removeLine(CartDisplayLine line) async {
@@ -133,50 +306,14 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
   /// A fired line is on a kitchen ticket. The server demands a reason and
   /// audits it — this dialog exists so the waiter supplies one, and it names
   /// the real consequence rather than asking "are you sure?".
-  Future<String?> _askVoidReason(CartDisplayLine line) async {
-    final controller = TextEditingController();
-    final reason = await showDialog<String>(
+  Future<String?> _askVoidReason(CartDisplayLine line) {
+    return showVoidReasonDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Void this line?'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '${line.qty} × ${line.title} is already with the kitchen. '
-              'Voiding it removes it from the bill and records who did it and why.',
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                labelText: 'Reason',
-                hintText: 'e.g. guest changed their mind',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Keep it'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final text = controller.text.trim();
-              if (text.isEmpty) return;
-              Navigator.of(context).pop(text);
-            },
-            child: const Text('Void line'),
-          ),
-        ],
-      ),
+      title: 'Void this line?',
+      body:
+          '${line.qty} × ${line.title} is already with the kitchen. '
+          'Voiding it removes it from the bill and records who did it and why.',
     );
-    controller.dispose();
-    return reason;
   }
 
   Future<void> _setQty(CartDisplayLine line, int qty) async {
@@ -193,16 +330,30 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
     }
   }
 
-  Future<void> _commitAndFire({required bool fire}) async {
+  /// Commit the order and send it to the kitchen. There is no save-without-
+  /// firing path: an order the kitchen can't see isn't an order anyone placed,
+  /// and the two-button version had waiters saving drafts that never cooked.
+  Future<void> _commitAndFire() async {
     setState(() => _busy = true);
     try {
-      final orderId = await _cart.commit();
-      if (fire) await ref.read(posRepoProvider)!.fireOrder(orderId);
+      final result = await _cart.commit(fire: true);
       ref.invalidate(activeOrdersProvider);
-      await ref.read(tablesProvider.notifier).refresh();
+      ref.invalidate(outboxStatusProvider);
+      // NOT awaited: the write is already durable, and with no coverage this
+      // read sits on a long HTTP timeout. Making a saved order wait on a
+      // refresh is how a queue that works looks broken.
+      unawaited(ref.read(tablesProvider.notifier).refresh());
       if (!mounted) return;
       Navigator.of(context).pop();
-      _toast(fire ? 'Sent to the kitchen.' : 'Order saved.');
+
+      // Queued-but-not-sent is a success. Say what happened plainly, and never
+      // leave a waiter wondering whether the kitchen has it.
+      _toast(
+        result.synced
+            ? 'Sent to the kitchen.'
+            : "Saved. It goes to the kitchen the moment you're back on "
+                  'coverage.',
+      );
     } on PosFailure catch (e) {
       _toast(e.message, error: true);
     } finally {
@@ -212,10 +363,10 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final tenant = ref.watch(activeTenantProvider);
     final currency = tenant?.currency ?? 'USD';
     final menu = ref.watch(menuProvider);
+    final can86 = ref.watch(hasPermissionProvider('menu.edit'));
     final categories = ref.watch(categoriesProvider).valueOrNull ?? const [];
 
     final destination = _isAmend
@@ -226,16 +377,73 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
               ? 'Table ${widget.seedTable!.label}'
               : 'Takeaway');
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(_isAmend ? 'Add to order' : 'New order'),
-            Text(destination, style: theme.textTheme.labelSmall),
-          ],
+    return AppScaffold(
+      title: _isAmend ? 'Add to order' : 'New order',
+      // Which table this lands on is the one fact worth carrying in the frame.
+      // It used to be a second line inside the title, which clips as soon as
+      // someone raises their text size.
+      subtitle: destination,
+      showDrawer: false,
+      // Only in amend mode, and only once something has been fired: this is the
+      // waiter who has just been asked for the bill, and `create_bill_for_order`
+      // refuses an order the kitchen never saw.
+      actions: [
+        // Covers are a dine-in fact: a takeaway bag has no guests, and asking
+        // would be a field nobody can answer.
+        if (_isDineIn)
+          IconButton(
+            onPressed: _busy ? null : _editGuests,
+            icon: Badge(
+              isLabelVisible: _guests != null,
+              label: Text('$_guests'),
+              child: const Icon(Icons.group_outlined),
+            ),
+            tooltip: _guests == null
+                ? 'How many guests?'
+                : '$_guests guest${_guests == 1 ? '' : 's'}',
+          ),
+        if (_isAmend &&
+            widget.existingOrder!.canBill &&
+            ref.watch(hasPermissionProvider('checkout.view')))
+          IconButton(
+            onPressed: _busy ? null : _openBill,
+            icon: const Icon(Icons.point_of_sale),
+            tooltip: 'Bill this order',
+          ),
+        // Beside the search box, because "it isn't on the menu" is what a
+        // waiter concludes after searching for it and not finding it.
+        IconButton(
+          onPressed: _busy ? null : () => _addCustom(currency),
+          icon: const Icon(Icons.post_add),
+          tooltip: 'Something off the menu',
         ),
-      ),
+        // Only in amend mode: a create-mode order has nothing on the server to
+        // cancel — backing out is what discards it.
+        if (_isAmend &&
+            !widget.existingOrder!.isClosed &&
+            ref.watch(canCancelOrderProvider))
+          PopupMenuButton<void>(
+            tooltip: 'Order actions',
+            itemBuilder: (_) => [
+              PopupMenuItem<void>(
+                onTap: _busy ? null : _cancelOrder,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    Icons.cancel_outlined,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                  title: Text(
+                    'Cancel order',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+      ],
       body: Column(
         children: [
           Padding(
@@ -329,6 +537,15 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
                       optionCount: item.optionCount,
                       qtyInOrder: _qtyInCart(item),
                       onTap: () => _addDish(item, currency),
+                      // Long-press is the manager's way in — discoverable to
+                      // whoever needs it, invisible to everyone else.
+                      onLongPress: can86
+                          ? () => showItem86Sheet(
+                              context: context,
+                              ref: ref,
+                              item: item,
+                            )
+                          : null,
                     );
                   },
                 );
@@ -342,8 +559,7 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
             isAmend: _isAmend,
             onSetQty: _setQty,
             onRemove: _removeLine,
-            onSave: () => _commitAndFire(fire: false),
-            onFire: () => _commitAndFire(fire: true),
+            onFire: _commitAndFire,
           ),
         ],
       ),
@@ -371,7 +587,6 @@ class _CartPanel extends StatefulWidget {
     required this.isAmend,
     required this.onSetQty,
     required this.onRemove,
-    required this.onSave,
     required this.onFire,
   });
 
@@ -381,7 +596,6 @@ class _CartPanel extends StatefulWidget {
   final bool isAmend;
   final void Function(CartDisplayLine, int) onSetQty;
   final void Function(CartDisplayLine) onRemove;
-  final VoidCallback onSave;
   final VoidCallback onFire;
 
   @override
@@ -460,33 +674,23 @@ class _CartPanelState extends State<_CartPanel> {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-              child: Row(
-                children: [
-                  if (!widget.isAmend)
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: empty || widget.busy ? null : widget.onSave,
-                        child: const Text('Save draft'),
-                      ),
-                    ),
-                  if (!widget.isAmend) const SizedBox(width: 10),
-                  Expanded(
-                    flex: 2,
-                    child: FilledButton.icon(
-                      onPressed: empty || widget.busy ? null : widget.onFire,
-                      icon: widget.busy
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.local_fire_department),
-                      label: Text(
-                        widget.isAmend ? 'Send new items' : 'Send to kitchen',
-                      ),
-                    ),
+              // One button. Confirming an order is sending it — there is no
+              // save-that-doesn't-cook.
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: empty || widget.busy ? null : widget.onFire,
+                  icon: widget.busy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.local_fire_department),
+                  label: Text(
+                    widget.isAmend ? 'Send new items' : 'Send to kitchen',
                   ),
-                ],
+                ),
               ),
             ),
           ],
@@ -545,6 +749,25 @@ class _CartRow extends StatelessWidget {
                         'With the kitchen',
                         style: theme.textTheme.labelSmall?.copyWith(
                           color: semantic.warningText,
+                        ),
+                      ),
+                    ],
+                  ),
+                // Never colour alone: the cloud icon and the words carry it.
+                if (line.isPending)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.cloud_upload_outlined,
+                        size: 13,
+                        color: semantic.infoText,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Waiting to send',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: semantic.infoText,
                         ),
                       ),
                     ],
@@ -718,10 +941,18 @@ Color tableStateColor(BuildContext context, String state) {
 
 /// A table card for the board.
 class TableCard extends StatelessWidget {
-  const TableCard({super.key, required this.table, required this.onTap});
+  const TableCard({
+    super.key,
+    required this.table,
+    required this.onTap,
+    this.onLongPress,
+  });
 
   final PosTable table;
   final VoidCallback onTap;
+
+  /// Manager ops (set the table's state). Null when the user can't.
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -741,6 +972,7 @@ class TableCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(Tokens.radiusLg),
           child: InkWell(
             onTap: onTap,
+            onLongPress: onLongPress,
             borderRadius: BorderRadius.circular(Tokens.radiusLg),
             child: Container(
               padding: const EdgeInsets.all(10),

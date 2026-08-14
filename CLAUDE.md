@@ -101,6 +101,15 @@ Mobile-specific ones, plus the shared ones that will bite again:
   limbo otherwise. Persisted + same idempotency key makes restart-retry safe.
 - **A transient failure must not burn the retry cap.** Separate server-reject (→ dead, surface the
   error) from network-transient (→ retry). Conflating them silently drops real orders.
+- **A dialog owns its controllers.** Never create a `TextEditingController` beside a `showDialog`
+  call and dispose it after the `await` — the future resolves a frame before the field unmounts, and
+  the field's `dispose()` then hits a dead controller. The element never finishes deactivating and
+  the app dies on `'_dependents.isEmpty': is not true`. Put the field in a `StatefulWidget` and
+  dispose in its `State`.
+- **A role check inside a server action is not a guard.** RLS on `menu_items` and
+  `restaurant_tables` is tenant-scoped only, so `requireRole(...)` in a TypeScript action stopped
+  nobody from doing the same update through the API. Anything a role should gate belongs in a
+  `security definer` RPC that both clients call — which is also where the audit row gets written.
 - **Never key a list row by its content.** A signature key that changes on every keystroke rebuilds
   the row and loses the caret mid-word. Key on a stable id; use the signature only to decide merges.
 - **`create or replace function` cannot change a function's arity** — it silently creates an
@@ -108,7 +117,26 @@ Mobile-specific ones, plus the shared ones that will bite again:
   re-issuing `revoke`/`grant` **naming the full new signature**: `public` holds EXECUTE by default.
 - **Every new `security definer` function needs `revoke execute from public` + an explicit grant to
   `authenticated`.** `revoke from anon` alone does nothing.
-- **Don't hand-edit generated code** (`*.g.dart`, drift output) — run the generator.
+- **Don't hand-edit generated code** (`*.g.dart`, drift output) — run the generator, and run it as
+  **`dart run build_runner build --force-jit`**. Plain `build_runner build` dies with "Failed to
+  compile build script": sqlite3 3.x uses Dart build hooks, and `dart compile exe` refuses to
+  AOT-compile a build script in that package graph.
+- **Never let a read block a write, and never `await` a network read on a tap.** Offline, an HTTP
+  call sits on a long timeout, so an awaited refresh turns a durable queued order into a spinner
+  that never resolves. Ask connectivity first, cap the wait, and leave post-write refreshes
+  unawaited. Every offline bug found on the airplane-mode run was this one shape.
+- **Cache the shell, not just the board.** Memberships and permissions are network reads; without
+  them a cold start with no coverage renders "No ordering access" and the app is useless. They are
+  cached for rendering only — the RPCs still enforce every key.
+- **A missing key in `env.json` can disable a feature in silence.** `SUPABASE_*` throws at startup
+  naming the command, but `APP_URL` only gates `Env.canPrint` — omit it and the app builds, runs,
+  and simply has no printing: no toggle, no error, no tickets. The first signed iOS archive shipped
+  that way and it was caught by reading, not by anything failing. Copy **all** the keys from
+  `env.example.json`, and check what actually reached the binary rather than trusting the flag:
+  decode `DART_DEFINES` out of `ios/Flutter/Generated.xcconfig`.
+- **iPhone cannot print over Bluetooth, and no amount of code changes that.** iOS blocks classic
+  Bluetooth SPP without an MFi chip in the printer. Network (port 9100) is the iOS path; classic BT
+  stays Android-only. Don't re-open it — the reasoning is in `TASKS.md` under Milestone M.
 - **iOS plugins need CocoaPods.** Without it `supabase_flutter` simply won't build on iOS, and the
   error doesn't say so plainly.
 - **Test offline on a real device in airplane mode.** A simulator's network stubbing is not the

@@ -1,8 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../data/local/cache_backed.dart';
+import '../../data/local/identity_cache.dart';
 import '../../data/supabase/supabase_providers.dart';
 import '../../data/supabase/tenant_repository.dart';
+import '../../data/sync/sync_providers.dart';
 
 /// Which restaurant the user is working in right now.
 ///
@@ -15,14 +18,53 @@ final _prefsProvider = FutureProvider<SharedPreferences>(
   (ref) => SharedPreferences.getInstance(),
 );
 
+final identityCacheProvider = Provider<IdentityCache>(
+  (ref) => IdentityCache(ref.watch(appDatabaseProvider)),
+);
+
 /// Restaurants the user can work in. Refetched whenever auth changes, so a
-/// sign-out can't leave another user's memberships in the cache.
+/// sign-out can't leave another user's memberships in the cache, and again
+/// when coverage returns, so a shift started offline picks up the real answer.
+///
+/// **Cache first**: a cold start with no coverage must still land the waiter in
+/// their restaurant. A failed refresh keeps the cached answer rather than
+/// signing them out of a shift.
 final membershipsProvider = FutureProvider<List<Membership>>((ref) async {
   ref.watch(authStateProvider);
   final user = ref.watch(currentUserProvider);
-  if (user == null) return const [];
-  return ref.watch(tenantRepositoryProvider).activeMemberships();
+  final cache = ref.watch(identityCacheProvider);
+  if (user == null) {
+    await cache.clear();
+    return const [];
+  }
+  final isOnline = _connectivity(ref);
+  return cacheBackedRead<List<Membership>>(
+    isOnline: isOnline,
+    fetch: () async {
+      final fresh = await ref
+          .watch(tenantRepositoryProvider)
+          .activeMemberships();
+      await cache.saveMemberships(fresh);
+      return fresh;
+    },
+    cached: () async {
+      final rows = await cache.memberships();
+      return rows.isEmpty ? null : rows;
+    },
+  );
 });
+
+/// Connectivity for the identity reads, resolved **before** the first await so
+/// the dependency is registered at build time rather than across an async gap.
+///
+/// Watched, not read: when coverage returns the provider re-runs and the shell
+/// stops living on the cache. The direct check is the fallback for the first
+/// frame, before the stream has produced anything.
+Future<bool> Function() _connectivity(Ref ref) {
+  final known = ref.watch(isOnlineProvider).valueOrNull;
+  final watcher = ref.watch(connectivityProvider);
+  return () async => known ?? await watcher.isOnline();
+}
 
 /// Memberships awaiting owner approval — the difference between "ask for a
 /// code" and "wait for approval".
@@ -85,11 +127,28 @@ final activeTenantProvider = Provider<Membership?>((ref) {
   return memberships.first;
 });
 
-/// Granular permissions for the active tenant, straight from the server.
+/// Granular permissions for the active tenant, straight from the server —
+/// cached only so the app still draws the right surfaces with no coverage. The
+/// RPCs enforce the same keys, so this is never the boundary.
 final permissionsProvider = FutureProvider<Set<String>>((ref) async {
   final tenant = ref.watch(activeTenantProvider);
   if (tenant == null) return const {};
-  return ref.watch(tenantRepositoryProvider).permissions(tenant.tenantId);
+  final cache = ref.watch(identityCacheProvider);
+  final isOnline = _connectivity(ref);
+  return cacheBackedRead<Set<String>>(
+    isOnline: isOnline,
+    fetch: () async {
+      final fresh = await ref
+          .watch(tenantRepositoryProvider)
+          .permissions(tenant.tenantId);
+      await cache.savePermissions(tenant.tenantId, fresh);
+      return fresh;
+    },
+    cached: () async {
+      final keys = await cache.permissions(tenant.tenantId);
+      return keys.isEmpty ? null : keys;
+    },
+  );
 });
 
 /// Whether the user holds a permission key in the active tenant.
@@ -100,4 +159,20 @@ final permissionsProvider = FutureProvider<Set<String>>((ref) async {
 final hasPermissionProvider = Provider.family<bool, String>((ref, key) {
   final perms = ref.watch(permissionsProvider).valueOrNull;
   return perms?.contains(key) ?? false;
+});
+
+/// Owner or manager in the active restaurant.
+///
+/// Several RPCs gate on the **role** rather than on a permission key —
+/// `cancel_order` and `transfer_order` check `has_tenant_role(...)` outright,
+/// and checkout's discount, void and refund calls want the role *as well as*
+/// their key. The seeded roles only ever hand those keys to owners and
+/// managers, which is why the two look interchangeable; permissions are
+/// editable per restaurant, so they are not.
+///
+/// `user_tenants.role` is what `has_tenant_role` reads and `Membership.role` is
+/// that same column, so this asks exactly what the server will.
+final isManagerProvider = Provider<bool>((ref) {
+  final role = ref.watch(activeTenantProvider)?.role;
+  return role == 'owner' || role == 'manager';
 });

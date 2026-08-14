@@ -16,6 +16,16 @@ class PosFailure implements Exception {
   String toString() => message;
 }
 
+/// The write never got an answer — socket, timeout, airplane mode.
+///
+/// Separate from a plain [PosFailure] because the outbox must treat the two
+/// differently (`PLANNING.md` §2, rule 3): a server *reject* is final, a
+/// transient failure is still owed. Conflating them is how a real order gets
+/// silently dropped.
+class PosTransientFailure extends PosFailure {
+  const PosTransientFailure(super.message);
+}
+
 /// Reads and writes for the POS.
 ///
 /// Trusted logic stays in SQL and is called by RPC — `place_staff_order` to
@@ -126,20 +136,83 @@ class PosRepository {
   // --- Orders --------------------------------------------------------------
 
   static const _orderSelect =
-      'id, status, order_type, created_at, table_id, guests, '
+      'id, status, order_type, created_at, table_id, guests, bill_id, '
+      'pinned_at, '
       'restaurant_tables!orders_table_id_fkey(label), '
       'order_items(id, name_snapshot, qty, unit_price_cents, status, is_void, notes, '
       'order_item_modifiers(name_snapshot))';
 
   /// Orders still on the floor. Closed and cancelled ones are history.
+  ///
+  /// Pinned first, then newest — the same order the web board uses. A pin is
+  /// how a waiter keeps the table they are mid-service on from sliding down a
+  /// list that reorders itself every time anyone else fires an order.
   Future<List<PosOrder>> activeOrders() async {
     final rows = await _client
         .from('orders')
         .select(_orderSelect)
         .eq('tenant_id', _tenantId)
         .not('status', 'in', '("closed","cancelled","billed")')
+        .order('pinned_at', ascending: false, nullsFirst: false)
         .order('created_at', ascending: false);
     return rows.map((r) => PosOrder.fromRow(r)).toList();
+  }
+
+  /// The same select the web's Completed tab uses, down to the FK hints.
+  ///
+  /// The hints are load-bearing: `orders` reaches `restaurant_tables` and
+  /// `bills` by more than one path, and without naming the constraint PostgREST
+  /// refuses the embed rather than guessing.
+  static const _completedSelect =
+      'id, order_type, status, created_at, guests, table_id, bill_id, '
+      'restaurant_tables!orders_table_id_fkey(label), '
+      'order_items(id, name_snapshot, qty, unit_price_cents, is_void), '
+      'bills!orders_bill_id_fkey(id, status, total_cents)';
+
+  /// Where this restaurant's trading day began, in its own timezone.
+  ///
+  /// Asked of the server rather than computed here — `package:intl` has no IANA
+  /// timezone database, and a boundary that decides which orders a waiter can
+  /// see must not be a second implementation. See the `tenant_day_start`
+  /// migration.
+  Future<DateTime> tenantDayStart() async {
+    try {
+      final at = await _client.rpc<dynamic>(
+        'tenant_day_start',
+        params: {'_tenant': _tenantId},
+      );
+      final parsed = DateTime.tryParse(at as String? ?? '');
+      if (parsed != null) return parsed;
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    } catch (_) {
+      throw const PosTransientFailure("Couldn't load today's orders.");
+    }
+    throw const PosTransientFailure("Couldn't work out when today began.");
+  }
+
+  /// Today's finished orders — billed, closed and cancelled.
+  ///
+  /// Today only, and capped: a busy till closes a few hundred orders a day, and
+  /// a tenant that hits the cap wants the reports on the web app, not a bigger
+  /// query on a phone.
+  Future<List<PosCompletedOrder>> completedOrders({int limit = 300}) async {
+    final dayStart = await tenantDayStart();
+    try {
+      final rows = await _client
+          .from('orders')
+          .select(_completedSelect)
+          .eq('tenant_id', _tenantId)
+          .inFilter('status', const ['billed', 'closed', 'cancelled'])
+          .gte('created_at', dayStart.toUtc().toIso8601String())
+          .order('created_at', ascending: false)
+          .limit(limit);
+      return rows.map(PosCompletedOrder.fromRow).toList();
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    } catch (_) {
+      throw const PosTransientFailure("Couldn't load today's orders.");
+    }
   }
 
   Future<PosOrder?> order(String orderId) async {
@@ -164,19 +237,38 @@ class PosRepository {
     String? tableId,
     int? guests,
     String? idempotencyKey,
-  }) async {
+  }) {
     if (lines.isEmpty) throw const PosFailure('Add something first.');
-    final key = idempotencyKey ?? _uuid.v4();
+    return placeOrderJson(
+      items: lines.map((l) => l.toRpcJson()).toList(),
+      orderType: orderType,
+      tableId: tableId,
+      guests: guests,
+      idempotencyKey: idempotencyKey ?? _uuid.v4(),
+    );
+  }
 
+  /// The same call, taking the JSON the outbox persisted.
+  ///
+  /// A queued order must survive a restart, and a [CartLine] holds a live
+  /// [PosMenuItem]; only the RPC shape is storable. Both entry points share
+  /// this body so a replayed order can't be priced differently from a live one.
+  Future<String> placeOrderJson({
+    required List<Map<String, dynamic>> items,
+    required String orderType,
+    String? tableId,
+    int? guests,
+    required String idempotencyKey,
+  }) async {
     try {
       final id = await _client.rpc(
         'place_staff_order',
         params: {
           '_tenant': _tenantId,
-          '_idempotency_key': key,
+          '_idempotency_key': idempotencyKey,
           '_table_id': tableId,
           '_order_type': orderType,
-          '_items': lines.map((l) => l.toRpcJson()).toList(),
+          '_items': items,
           '_guests': ?guests,
         },
       );
@@ -184,7 +276,7 @@ class PosRepository {
     } on PostgrestException catch (e) {
       throw PosFailure(_friendly(e.message));
     } catch (_) {
-      throw const PosFailure(
+      throw const PosTransientFailure(
         "Couldn't reach the server. The order was not placed.",
       );
     }
@@ -192,29 +284,49 @@ class PosRepository {
 
   /// Add a line to an existing order — the shared RPC, same one the web uses,
   /// so pricing can't drift between the two clients.
-  Future<String> addItem({
+  Future<String> addItem({required String orderId, required CartLine line}) =>
+      addItemJson(orderId: orderId, item: line.toRpcJson());
+
+  /// The same call, taking the JSON the outbox persisted. Keys match
+  /// [CartLine.toRpcJson] exactly, so a queued amend replays as itself.
+  Future<String> addItemJson({
     required String orderId,
-    required CartLine line,
+    required Map<String, dynamic> item,
   }) async {
+    // An off-menu line has no `item_id` to look a price up by, so it goes to
+    // its own RPC — which clamps the hand-typed price and writes the
+    // `custom_price` audit row in the same transaction as the line.
+    final customName = item['custom_name'] as String?;
     try {
-      final id = await _client.rpc(
-        'amend_order_add_item',
-        params: {
-          '_order_id': orderId,
-          '_item_id': line.item.id,
-          '_qty': line.qty,
-          if (line.variant != null) '_variant_id': line.variant!.id,
-          if (line.modifiers.isNotEmpty)
-            '_modifier_ids': line.modifiers.map((m) => m.id).toList(),
-          if (line.notes != null && line.notes!.trim().isNotEmpty)
-            '_notes': line.notes!.trim(),
-        },
-      );
+      final id = customName == null
+          ? await _client.rpc(
+              'amend_order_add_item',
+              params: {
+                '_order_id': orderId,
+                '_item_id': item['item_id'],
+                '_qty': item['qty'],
+                '_variant_id': ?item['variant_id'],
+                '_modifier_ids': ?item['modifier_ids'],
+                '_notes': ?item['notes'],
+              },
+            )
+          : await _client.rpc(
+              'amend_order_add_custom_item',
+              params: {
+                '_order_id': orderId,
+                '_name': customName,
+                '_unit_price_cents': item['unit_price_cents'],
+                '_qty': item['qty'],
+                '_notes': ?item['notes'],
+              },
+            );
       return id as String;
     } on PostgrestException catch (e) {
       throw PosFailure(_friendly(e.message));
     } catch (_) {
-      throw const PosFailure("Couldn't reach the server. Nothing was added.");
+      throw const PosTransientFailure(
+        "Couldn't reach the server. Nothing was added.",
+      );
     }
   }
 
@@ -229,7 +341,7 @@ class PosRepository {
           .eq('tenant_id', _tenantId)
           .eq('status', 'draft');
     } catch (_) {
-      throw const PosFailure("Couldn't remove that line.");
+      throw const PosTransientFailure("Couldn't remove that line.");
     }
   }
 
@@ -262,7 +374,7 @@ class PosRepository {
           .eq('tenant_id', _tenantId)
           .eq('status', 'draft');
     } catch (_) {
-      throw const PosFailure("Couldn't change the quantity.");
+      throw const PosTransientFailure("Couldn't change the quantity.");
     }
   }
 
@@ -274,9 +386,54 @@ class PosRepository {
     } on PostgrestException catch (e) {
       throw PosFailure(_friendly(e.message));
     } catch (_) {
-      throw const PosFailure(
+      throw const PosTransientFailure(
         "Couldn't reach the kitchen. Check the order before re-firing.",
       );
+    }
+  }
+
+  /// Keep an order at the top of the board, or let it go.
+  ///
+  /// A direct column write rather than an RPC, and deliberately: `pinned_at`
+  /// decides no money, no stock and no access, RLS on `orders` is tenant-scoped,
+  /// and the web does exactly the same thing. Anything a *role* should gate
+  /// belongs in a `security definer` function — this is a display preference.
+  Future<void> setPinned({
+    required String orderId,
+    required bool pinned,
+  }) async {
+    try {
+      await _client
+          .from('orders')
+          .update({
+            'pinned_at': pinned
+                ? DateTime.now().toUtc().toIso8601String()
+                : null,
+          })
+          .eq('id', orderId)
+          .eq('tenant_id', _tenantId);
+    } on PostgrestException catch (e) {
+      // A refusal is final and a timeout is not — conflating them is the
+      // classification bug `PLANNING.md` §2 rule 3 exists to prevent.
+      throw PosFailure(_friendly(e.message));
+    } catch (_) {
+      throw const PosTransientFailure("Couldn't pin that order.");
+    }
+  }
+
+  /// How many people are eating, which is what turns covers into a real average
+  /// spend on the reports. Clamped the same way the web action clamps it.
+  Future<void> setGuests({required String orderId, required int guests}) async {
+    try {
+      await _client
+          .from('orders')
+          .update({'guests': guests.clamp(1, 200)})
+          .eq('id', orderId)
+          .eq('tenant_id', _tenantId);
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    } catch (_) {
+      throw const PosTransientFailure("Couldn't save the guest count.");
     }
   }
 
@@ -291,7 +448,217 @@ class PosRepository {
       );
     } on PostgrestException catch (e) {
       throw PosFailure(_friendly(e.message));
+    } catch (_) {
+      // A cancel that timed out may or may not have landed, and the two look
+      // identical from here. Say so rather than reporting a cancel that didn't
+      // happen — the board refreshes and shows the truth.
+      throw const PosTransientFailure(
+        "Couldn't reach the server. Check the order before cancelling again.",
+      );
     }
+  }
+
+  // --- Table operations ----------------------------------------------------
+
+  /// The order sitting on a table, for the table-actions sheet.
+  ///
+  /// **Deliberately not [activeOrders]'s filter.** That one hides `billed`
+  /// orders because they belong to the Bills tab; a billed order can still be
+  /// transferred, and refusing to find it would strand a table whose guests
+  /// moved after asking for the bill. Only `closed` and `cancelled` are history.
+  Future<String?> activeOrderIdForTable(String tableId) async {
+    try {
+      final row = await _client
+          .from('orders')
+          .select('id')
+          .eq('tenant_id', _tenantId)
+          .eq('table_id', tableId)
+          .not('status', 'in', '("closed","cancelled")')
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+      return row?['id'] as String?;
+    } catch (_) {
+      throw const PosTransientFailure("Couldn't check that table's order.");
+    }
+  }
+
+  /// Move a whole order to another table.
+  ///
+  /// The RPC frees the old table, occupies the new one and writes the audit
+  /// row. Same-table is a no-op server-side, but the sheet refuses it first so
+  /// nobody watches a spinner to achieve nothing.
+  Future<void> transferOrder({
+    required String orderId,
+    required String toTableId,
+  }) async {
+    try {
+      await _client.rpc(
+        'transfer_order',
+        params: {'_order_id': orderId, '_to_table': toTableId},
+      );
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    } catch (_) {
+      throw const PosTransientFailure(
+        "Couldn't reach the server. Check both tables before trying again.",
+      );
+    }
+  }
+
+  /// Move some lines onto a new order at another table, and return its id.
+  ///
+  /// The new order is minted server-side, which is why this can never be
+  /// queued: there is no id to show until the server answers.
+  Future<String> splitOrderItems({
+    required String orderId,
+    required String toTableId,
+    required List<String> itemIds,
+  }) async {
+    if (itemIds.isEmpty) {
+      throw const PosFailure('Pick at least one dish to move.');
+    }
+    try {
+      final id = await _client.rpc<dynamic>(
+        'split_order_items',
+        params: {
+          '_order_id': orderId,
+          '_to_table': toTableId,
+          '_item_ids': itemIds,
+        },
+      );
+      if (id is! String) {
+        throw const PosFailure("Those dishes couldn't be moved.");
+      }
+      return id;
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    } on PosFailure {
+      rethrow;
+    } catch (_) {
+      throw const PosTransientFailure(
+        "Couldn't reach the server. Check the order before trying again.",
+      );
+    }
+  }
+
+  // --- Manager ops ---------------------------------------------------------
+
+  /// Mark a dish sold out, or put it back.
+  ///
+  /// Goes through `set_item_86`, not a column update: RLS on `menu_items` is
+  /// tenant-scoped only, so a direct update would let any member of the
+  /// restaurant 86 a dish. The RPC holds the role rule and writes the audit row.
+  Future<void> setItem86({required String itemId, required bool is86}) async {
+    try {
+      await _client.rpc(
+        'set_item_86',
+        params: {'_item_id': itemId, '_is_86': is86},
+      );
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    } catch (_) {
+      throw const PosTransientFailure(
+        "Couldn't reach the server. The menu wasn't changed.",
+      );
+    }
+  }
+
+  /// Set a table's state. The RPC refuses to free a table that still has a
+  /// live order, so the board can't hide an order the kitchen is cooking.
+  Future<void> setTableState({
+    required String tableId,
+    required String state,
+  }) async {
+    try {
+      await _client.rpc(
+        'set_table_state',
+        params: {'_table_id': tableId, '_state': state},
+      );
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    } catch (_) {
+      throw const PosTransientFailure(
+        "Couldn't reach the server. The table wasn't changed.",
+      );
+    }
+  }
+
+  /// The manager's log: what was voided, discounted, 86'd or re-stated, by whom.
+  ///
+  /// `audit_logs` RLS already restricts SELECT to owners and managers, so this
+  /// cannot leak to a waiter even if the app asked. The actor's name needs a
+  /// second query — the FK points at `auth.users`, which PostgREST cannot embed
+  /// through to `profiles`.
+  Future<List<PosAuditEntry>> auditLog({
+    Set<String> actions = const {
+      'void',
+      'discount',
+      'item_86',
+      'item_unset_86',
+      'table_state',
+    },
+    int limit = 100,
+  }) async {
+    final rows = await _client
+        .from('audit_logs')
+        .select('id, action, created_at, metadata, actor_id')
+        .eq('tenant_id', _tenantId)
+        .inFilter('action', actions.toList())
+        .order('created_at', ascending: false)
+        .limit(limit);
+
+    final actorIds = rows
+        .map((r) => r['actor_id'] as String?)
+        .nonNulls
+        .toSet()
+        .toList();
+
+    var actors = <String, Map<String, dynamic>>{};
+    if (actorIds.isNotEmpty) {
+      final profiles = await _client
+          .from('profiles')
+          .select('id, full_name, username')
+          .inFilter('id', actorIds);
+      actors = {for (final p in profiles) p['id'] as String: p};
+    }
+
+    // A void's audit row carries the reason but not the dish. Look the lines up
+    // in one query — "Void —" is a log entry nobody can act on.
+    final lineIds = rows
+        .where((r) => r['entity_type'] == 'order_item')
+        .map((r) => r['entity_id'] as String?)
+        .nonNulls
+        .toSet()
+        .toList();
+
+    var lineNames = <String, String>{};
+    if (lineIds.isNotEmpty) {
+      final lines = await _client
+          .from('order_items')
+          .select('id, name_snapshot')
+          .eq('tenant_id', _tenantId)
+          .inFilter('id', lineIds);
+      lineNames = {
+        for (final l in lines)
+          if (l['name_snapshot'] != null)
+            l['id'] as String: l['name_snapshot'] as String,
+      };
+    }
+
+    return rows.map((r) {
+      final meta = r['metadata'];
+      final name = lineNames[r['entity_id']];
+      return PosAuditEntry.fromRow({
+        ...r,
+        if (name != null)
+          'metadata': {
+            ...(meta is Map<String, dynamic> ? meta : const {}),
+            'name_snapshot': name,
+          },
+        'actor': actors[r['actor_id']],
+      });
+    }).toList();
   }
 
   /// Turn the RPCs' SQL prose into something a waiter can act on. Anything

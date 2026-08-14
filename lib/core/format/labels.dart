@@ -53,6 +53,21 @@ const _billStatusLabels = {
 String billStatusLabel(String status) =>
     _billStatusLabels[status] ?? _humanize(status);
 
+const _paymentMethodLabels = {
+  'cash': 'Cash',
+  'card': 'Card',
+  // Taken through a payment gateway on the web. The phone records it but never
+  // offers it — there is no RPC behind the charge, only the web's server-side
+  // adapter, so an app that offered "Card (online)" would log money it never
+  // collected. See `TASKS.md`.
+  'online': 'Card (online)',
+  'wallet': 'Wallet',
+  'points': 'Loyalty points',
+};
+
+String paymentMethodLabel(String method) =>
+    _paymentMethodLabels[method] ?? _humanize(method);
+
 const _roleLabels = {
   'owner': 'Owner',
   'manager': 'Manager',
@@ -64,6 +79,17 @@ const _roleLabels = {
 };
 
 String roleLabel(String role) => _roleLabels[role] ?? _humanize(role);
+
+const _reservationStatusLabels = {
+  'pending': 'Not confirmed',
+  'confirmed': 'Confirmed',
+  'seated': 'Seated',
+  'cancelled': 'Cancelled',
+  'no_show': 'No show',
+};
+
+String reservationStatusLabel(String status) =>
+    _reservationStatusLabels[status] ?? _humanize(status);
 
 /// Last resort for an enum this build doesn't know: "bill_requested" →
 /// "Bill requested". Better than showing the raw value, worse than a real

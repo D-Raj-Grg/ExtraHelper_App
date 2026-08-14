@@ -116,6 +116,17 @@ Five rules, each mirroring a bug the web queue had to be hardened against
 5. **Replay is serial per order and re-checks connectivity between entries.** An amend must not
    land before the create it belongs to.
 
+**Built with a fourth kind, `fire`** (2026-07-27). Sending to the kitchen is its own idempotent
+RPC, and an offline session is normally *N* adds then one fire; folding it into another entry's
+payload would either fire too early or lose the fire when nothing new was added. On an order that
+has not synced yet, `fire` flips the pending create's `fire` flag so both land together.
+
+**Manager ops queue too** (Milestone G, 2026-07-27). `menu86` and `tableState` are outbox kinds for
+the same reason orders are: an 86 is something *other* staff need to see, and a table freed is too.
+Both are last-write-wins on a single row, so replay is safe. Voids stay queued as before. Discounts
+are not on mobile at all — `apply_item_discount` requires a bill, and bills come from checkout,
+which is web-only in v1.
+
 **Offline-created orders have no server id yet.** The composer holds a local `draft_id`; amends
 against a not-yet-synced order are merged into that pending create's payload rather than enqueued
 as separate ops. This matches how create mode already batches locally on the web, and avoids
@@ -211,8 +222,10 @@ add manager ops, inventory, and the owner dashboard.
 1. **Waiter ordering (online)** — tables board with live states, order composer (destination →
    dishes → variants/modifiers/notes → cart → fire), amend a fired order, void with reason.
 2. **Offline** — menu/table cache, outbox, replay engine, pending badge, dead-entry surfacing.
-3. **Owner dashboard** — KPI tiles + revenue chart, read-only (`../extrahelper/TASKS.md` line 77
-   wants this).
+3. **Owner dashboard** — KPI tiles + revenue chart, read-only. **Done 2026-07-30** (Milestone I):
+   one shared `dashboard_summary` RPC aggregates in the tenant's timezone and the web dashboard was
+   refactored onto it, because `package:intl` has no IANA timezone database and day bucketing in
+   Dart would have forked the definition of "today".
 4. **Manager ops** — 86 toggle, table state control, void/discount approval.
 5. **Inventory** — stock counts and adjustments in the store room; barcode scan via camera.
 6. **Store release** — signing, icons/splash, TestFlight + Play internal track, then production.
@@ -226,8 +239,13 @@ Phases 0–2 are the scoped first build. Track granular work in `TASKS.md`.
 1. **Bundle id** — confirm `com.extrahelper.app` before the first signed build.
 2. **KDS on mobile?** The web KDS is a full-screen wall display; a phone-sized KDS may be
    pointless. Decide before phase 4.
-3. **Cashier/payments on mobile** — deliberately excluded from v1. Does a waiter ever need to take
-   payment tableside? That pulls in the whole `record_payment` + split + receipt surface.
+3. ~~**Cashier/payments on mobile**~~ — **answered 2026-08-13: yes, at parity with the web.** The
+   whole surface shipped: `create_bill_for_order` → checkout screen → `record_payment`, plus
+   discounts, coupons, charges, extras, complimentary, split, merge, loyalty and refunds. Online
+   only — `lib/data/sync/` is untouched, and `PaymentUncertainFailure` plus caller-owned
+   idempotency keys are the seam an offline payment queue would plug into. Two gaps are deliberate
+   and recorded in `TASKS.md`: card-online (no RPC behind the web's gateway adapter) and a
+   retry-safe refund (`refund_payment` takes no key).
 4. **Push notifications** — the web uses an in-app bell polling Realtime. Does mobile need real
    push (FCM/APNs) for new-order alerts, and if so, whose device gets them?
 5. **App distribution before store approval** — TestFlight and Play internal testing, or a direct

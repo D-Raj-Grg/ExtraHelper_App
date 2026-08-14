@@ -16,6 +16,10 @@ flutter pub get
 `env.json` is gitignored. It holds the Supabase URL and the **publishable** key only — RLS is the
 gate, and the service role key must never reach a client.
 
+Copy **all three** keys from `env.example.json`. A missing `SUPABASE_*` throws at startup and says
+so, but a missing `APP_URL` fails silently: it is what `Env.canPrint` gates on, so the app builds
+and runs with printing quietly absent — no toggle, no error, no tickets.
+
 ## Run
 
 Config is passed at build time, so **every** run/build command needs the define file:
@@ -25,7 +29,11 @@ flutter run   --dart-define-from-file=env.json                 # attached device
 flutter run   --dart-define-from-file=env.json -d <device-id>  # pick a device
 flutter build apk    --dart-define-from-file=env.json
 flutter build ios    --dart-define-from-file=env.json
+flutter build ipa    --dart-define-from-file=env.json   # iOS release → TestFlight / App Store
 ```
+
+Never archive from the Xcode GUI instead: that path reads the defines from a base64 blob in
+`ios/Flutter/Generated.xcconfig` left behind by whatever the last build happened to be.
 
 Omit it and the app throws at startup naming the command it wanted — deliberate, so a missing
 config never surfaces later as an opaque network error.

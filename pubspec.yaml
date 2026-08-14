@@ -2,7 +2,10 @@ name: extrahelper
 description: "ExtraHelper mobile — waiter ordering for the ExtraHelper restaurant SaaS"
 publish_to: 'none'
 
-version: 1.0.0+1
+# The build number after the + must strictly increase on every upload to App Store
+# Connect / Play — a number is burned the moment a build carrying it is accepted,
+# even if that build is later superseded.
+version: 1.0.7+3
 
 environment:
   sdk: ^3.10.7
@@ -35,6 +38,18 @@ dependencies:
   uuid: ^4.6.0
   intl: ^0.20.3
   shared_preferences: ^2.5.5
+  mobile_scanner: ^7.4.0
+  # Bluetooth thermal printing (Android). Its own permission request is
+  # commented out in the plugin source, and it returns from the method handler
+  # without completing the result when the permission is missing — so every call
+  # is wrapped in a timeout and the permission is asked for by permission_handler
+  # instead. See lib/data/print/transports/bluetooth_transport.dart.
+  print_bluetooth_thermal: ^1.2.1
+  # Pinned to 12.x deliberately: permission_handler_android 14 ships a
+  # build.gradle.kts that does not compile against this project's Kotlin 2.2.20 /
+  # AGP 8.11.1. Bumping the Android toolchain to suit one permission is not worth
+  # the blast radius.
+  permission_handler: ^12.0.1
 
 dev_dependencies:
   flutter_test:
@@ -42,6 +57,8 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   drift_dev: ^2.34.0
   build_runner: ^2.15.1
+  flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.7
 
 flutter:
   uses-material-design: true
@@ -53,3 +70,38 @@ flutter:
     - family: Figtree
       fonts:
         - asset: assets/fonts/Figtree.ttf
+
+# --- Branding ---------------------------------------------------------------
+# The mark is the web app's own fork-and-knife (`extrahelper/public/icon.svg`),
+# re-rendered rather than re-drawn, so the two clients are recognisably one
+# product. Regenerate after changing anything in `assets/branding/`:
+#
+#   dart run flutter_launcher_icons
+#   dart run flutter_native_splash:create
+#
+flutter_launcher_icons:
+  android: true
+  ios: true
+  # Full-bleed square, no baked corners: iOS masks its own, and a rounded PNG
+  # would show its corners again inside the mask.
+  image_path: "assets/branding/icon_ios.png"
+  # The App Store rejects an icon with an alpha channel.
+  remove_alpha_ios: true
+  # Android's launcher masks the icon to whatever shape the phone uses, so the
+  # glyph sits inside the 66% safe zone on its own background layer.
+  adaptive_icon_background: "#0A0A0A"
+  adaptive_icon_foreground: "assets/branding/icon_android_foreground.png"
+
+flutter_native_splash:
+  # Light and dark both first-class (CLAUDE.md). The mark is purple on white
+  # and white on the app's tinted near-black — never a white mark on white.
+  color: "#FFFFFF"
+  image: "assets/branding/splash_light.png"
+  color_dark: "#0C090C"
+  image_dark: "assets/branding/splash_dark.png"
+  android_12:
+    # Android 12+ clips the splash icon to a 768px circle on a 1152px canvas.
+    image: "assets/branding/splash_android12_light.png"
+    icon_background_color: "#FFFFFF"
+    image_dark: "assets/branding/splash_android12_dark.png"
+    icon_background_color_dark: "#0C090C"
