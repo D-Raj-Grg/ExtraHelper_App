@@ -160,3 +160,19 @@ final hasPermissionProvider = Provider.family<bool, String>((ref, key) {
   final perms = ref.watch(permissionsProvider).valueOrNull;
   return perms?.contains(key) ?? false;
 });
+
+/// Owner or manager in the active restaurant.
+///
+/// Several RPCs gate on the **role** rather than on a permission key —
+/// `cancel_order` and `transfer_order` check `has_tenant_role(...)` outright,
+/// and checkout's discount, void and refund calls want the role *as well as*
+/// their key. The seeded roles only ever hand those keys to owners and
+/// managers, which is why the two look interchangeable; permissions are
+/// editable per restaurant, so they are not.
+///
+/// `user_tenants.role` is what `has_tenant_role` reads and `Membership.role` is
+/// that same column, so this asks exactly what the server will.
+final isManagerProvider = Provider<bool>((ref) {
+  final role = ref.watch(activeTenantProvider)?.role;
+  return role == 'owner' || role == 'manager';
+});

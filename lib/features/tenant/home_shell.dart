@@ -24,10 +24,12 @@ class HomeShell extends ConsumerStatefulWidget {
 
 class _HomeShellState extends ConsumerState<HomeShell>
     with SingleTickerProviderStateMixin {
-  /// Three, always. The Bills tab renders a "no access" body rather than being
-  /// removed for a cashier-less role: permissions resolve *after* the first
-  /// build, and a `TabController` whose length changes under it throws.
-  late final TabController _tabs = TabController(length: 3, vsync: this);
+  /// Four, always. The Bills and Completed tabs render a "no access" body
+  /// rather than being removed for a cashier-less role: permissions resolve
+  /// *after* the first build, and a `TabController` whose length changes under
+  /// it throws. A fixed four is fine; a length that moves with permissions is
+  /// not.
+  late final TabController _tabs = TabController(length: 4, vsync: this);
 
   @override
   void dispose() {
@@ -58,10 +60,14 @@ class _HomeShellState extends ConsumerState<HomeShell>
       bottom: showPos
           ? TabBar(
               controller: _tabs,
+              // Four labels on a phone bar: "Done" rather than "Completed", so
+              // the row still fits at a raised text size instead of clipping or
+              // turning into something you have to scroll to discover.
               tabs: const [
                 Tab(text: 'Tables'),
                 Tab(text: 'Orders'),
                 Tab(text: 'Bills'),
+                Tab(text: 'Done'),
               ],
             )
           : null,

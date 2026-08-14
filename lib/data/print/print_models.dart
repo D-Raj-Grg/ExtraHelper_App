@@ -138,6 +138,35 @@ class PrintJob {
   );
 }
 
+/// A printer a document is bound for, and how many copies that printer is
+/// configured to run. A manual reprint has to honour "two copies of every bill"
+/// exactly as auto-print does, so the count travels with the target.
+class PrintTarget {
+  const PrintTarget({required this.printerId, required this.copies});
+
+  final String printerId;
+  final int copies;
+}
+
+/// What asking for paper produced.
+///
+/// `noPrinter` is not a failure: nothing is *set up* to print this document,
+/// which the web answers with a browser fallback page. A phone has no such
+/// page, so the caller says so and stops.
+sealed class EnqueueOutcome {
+  const EnqueueOutcome();
+}
+
+class PrintQueued extends EnqueueOutcome {
+  const PrintQueued(this.jobIds);
+
+  final List<String> jobIds;
+}
+
+class PrintNoPrinter extends EnqueueOutcome {
+  const PrintNoPrinter();
+}
+
 /// A job this device has taken off the queue and now owes paper for.
 class ClaimedPrintJob {
   const ClaimedPrintJob({required this.id, required this.doc, this.printerId});

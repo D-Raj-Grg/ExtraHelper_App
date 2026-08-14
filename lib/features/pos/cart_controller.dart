@@ -106,7 +106,12 @@ class CreateCart implements CartController {
   final OrderQueue _queue;
   final String orderType;
   final String? tableId;
-  final int? guests;
+
+  /// How many people are eating. Mutable because the waiter is told it at the
+  /// table, often after the first dish has been chosen — and it travels to
+  /// `place_staff_order` in the same call as the lines, so it only has to be
+  /// right at commit.
+  int? guests;
 
   /// This order's identity before the server has one. Held from the start so a
   /// retry, or an amend made before the create lands, addresses the same order.

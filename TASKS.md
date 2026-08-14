@@ -917,6 +917,90 @@ job and prints it.
       confirm the QR **scans off the paper**, over both network and Bluetooth, at 58mm and 80mm.
       Image-mode printers are still refused by `print_service.dart` as before — unchanged and correct.
 
+## Milestone O — POS parity with the web (2026-08-14)
+
+Six shippable steps, each a surface the phone lacked and the web already had. Every business rule
+was already a Postgres RPC; one new migration was needed, for a timezone boundary Dart cannot
+compute.
+
+**O1 — Reprint infrastructure** (`lib/data/print/`)
+- [x] `PrintRepository.enqueue()` + `orderKotIds()`, with routing ported from the web's
+      `enqueuePrint`: the **station** decides KOT vs BOT (a bar station's ticket reprinted from the
+      pass must not come out with a kitchen header), a station's own printer beats the
+      `printer_documents` assignment, and a branch-scoped printer is skipped for another branch's
+      document. Rules live in `print_routing.dart`, pure, so they are testable without a network.
+- [x] `reprint_actions.dart` — `reprintBill` / `reprintOrderSlip` / `reprintKot` /
+      `reprintOrderKots`, each returning the sentence to show.
+- [x] **Not gated on `Env.canPrint`.** That flag says whether *this device drains the queue*; a
+      waiter's phone with no printer is exactly the device that needs to ask the counter's printer
+      for a receipt. Gating enqueue would have silently removed the feature from every phone.
+- [x] Not queued through the outbox — a reprint asked for ten minutes ago is not one anyone wants.
+
+**O3 — Orders tab** (`pos_screen.dart`, `order_composer.dart`)
+- [x] **Cancel order** wired to `PosRepository.cancelOrder`, which existed with zero call sites.
+      Gated on `isManagerProvider` — `cancel_order` checks `has_tenant_role(owner, manager)` and
+      **not** a permission key, so gating on `order.void` would have shown a custom role a button
+      that fails every time. Reason required, consequence named, audited. On the card and in the
+      composer's overflow, as on the web.
+- [x] Pin / unpin (`orders.pinned_at`, direct column write — a display preference, no money or
+      access), `activeOrders()` now orders `pinned_at desc nulls last, created_at desc`.
+- [x] Order-type chips, client-side over the list already in hand; a type that empties falls back
+      to All.
+- [x] Guests stepper, feeding the already-plumbed `CreateCart.guests` on create and `setGuests` on
+      amend. Clamped 1..200 where the server clamps.
+
+**O2 — Completed tab** (`completed_tab.dart`, new migration)
+- [x] `tenant_day_start(uuid, timestamptz)` — the only new SQL in the sweep. `package:intl` has no
+      IANA timezone database, so a boundary deciding which orders a waiter can see must not be a
+      second implementation; the same argument `dashboard_summary` already made. Applied and
+      verified against the tenant's zone (local midnight → 04:00Z).
+- [x] Fourth tab, labelled **Done** so four labels still fit at a raised text size. `TabController`
+      length is a fixed 4 — the old comment forbids a length that *changes with permissions*, not a
+      length of four.
+- [x] Today's `billed` / `closed` / `cancelled`, limit 300, status chips, and a takings line
+      **summed from each order's own lines** — two orders merged onto one bill both carry the whole
+      bill total, and adding those would report nearly double the money taken. Cancelled orders
+      contribute nothing and render "—", not a zero.
+- [x] Row actions: view bill, reprint receipt, reprint order slip, reprint kitchen tickets. No
+      permission means no control, never a disabled one.
+- [x] Live off the existing orders channel — an order billed at the till appears here without a pull.
+
+**O4 — Bills tab**
+- [x] `BillFilter` — Owed / Paid / Void / All today. **Owed is never day-bound**: a debt from last
+      night is still a debt this morning. Settled bills are capped to today, the same boundary.
+- [x] **`refunded` is not a `bill_status`.** The enum is open/partial/paid/void; it exists only as a
+      label. Filtering on it would have been a runtime 22P02 — checked against the live enum before
+      writing the filter, and there is a test that keeps it out.
+
+**O5 — Kitchen board** (`kds_repository.dart`, `kds_providers.dart`, `ticket_card.dart`)
+- [x] **Live defect fixed.** `KdsTicket.isCompleted` now means *the kitchen bumped it OR its order
+      has been billed, closed or cancelled*. A `ready` ticket on an order paid at the till sat on
+      the board forever, and a board with permanent residents is one cooks stop reading. The web
+      settled this in `isKotCompleted`; mobile had only half of it.
+- [x] Reprint on each ticket, gated `order.view`.
+- [x] **No fifth POS tab.** `/kitchen` is already a superset of the web's KOT tab (per-station
+      filter, per-line status, recall); a fifth tab on a bar that just gained a fourth is a worse
+      trade than a drawer destination that already exists.
+
+**O6 — Table operations** (`table_ops_sheets.dart`, `manager_ops.dart`)
+- [x] Transfer / merge / split, hung off the existing table long-press, which becomes a table-actions
+      sheet. All three RPCs already existed and were granted; mobile simply had no route to them.
+- [x] `activeOrderIdForTable` deliberately does **not** reuse `activeOrders()`'s filter: that one
+      hides `billed` orders, and a billed order can still be transferred — refusing to find it would
+      strand a table whose guests moved after asking for the bill.
+- [x] Merge is composed the way the web composes it (`create_bill_for_order` then
+      `add_order_to_bill`), not a third function that does the same thing slightly differently.
+- [x] All three online-only, no new `OutboxKind`: each writes a destination table's state, and
+      `split_order_items` mints an order id the screen has to have.
+
+**Deliberately not ported** — online/card-gateway payment (no RPC behind the charge, only the web's
+server-side adapter), reports, cash sessions, the online-orders manager, table setup. Reasons in the
+plan; none of them changed.
+
+- [ ] **Device pass outstanding.** Verified by `flutter analyze`, 240 tests and a launch on the iOS
+      simulator; the new controls need a live order on the floor to exercise, and a greyscale
+      screenshot of the Completed tab and the four-tab bar at max text scale.
+
 ## Backlog / Later phases
 
 - [ ] **Offline on a physical iPhone, in airplane mode.** The one verification `CLAUDE.md` asks for

@@ -389,7 +389,13 @@ class ActiveOrdersNotifier extends AsyncNotifier<List<PosOrder>> {
 
   void _scheduleRefresh() {
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 350), refresh);
+    _debounce = Timer(const Duration(milliseconds: 350), () {
+      refresh();
+      // An order billed at the till leaves this list and joins the other one.
+      // Sharing the socket means the Completed tab is live without a second
+      // subscription — and without a waiter having to pull to find out.
+      ref.invalidate(completedOrdersProvider);
+    });
   }
 
   Future<void> refresh() async {
@@ -409,6 +415,67 @@ final activeOrdersProvider =
     AsyncNotifierProvider<ActiveOrdersNotifier, List<PosOrder>>(
       ActiveOrdersNotifier.new,
     );
+
+/// Today's finished orders.
+///
+/// **Not cached**, for the same reason the active list isn't and more so: a
+/// completed list from ten minutes ago invites reprinting the wrong receipt.
+/// Offline it says so and offers a retry.
+///
+/// `autoDispose` because it is a tab someone visits, not a board they live on —
+/// leaving it should stop holding a few hundred orders in memory.
+final completedOrdersProvider =
+    FutureProvider.autoDispose<List<PosCompletedOrder>>((ref) async {
+      final repo = ref.watch(posRepoProvider);
+      if (repo == null) return const [];
+
+      if (!await ref.read(connectivityProvider).isOnline()) {
+        throw const PosFailure(
+          "No coverage — today's finished orders need a connection. The "
+          'tables board and new orders still work.',
+        );
+      }
+      return repo.completedOrders();
+    });
+
+/// Which finished status the Completed tab is showing, or null for all.
+final completedFilterProvider = NotifierProvider<CompletedFilter, String?>(
+  CompletedFilter.new,
+);
+
+class CompletedFilter extends Notifier<String?> {
+  @override
+  String? build() => null;
+
+  void select(String? status) => state = status;
+}
+
+/// Clearing an order is manager work.
+///
+/// `cancel_order` gates on `has_tenant_role(owner, manager)` and **not** on a
+/// permission key, so this asks the role rather than `order.void` — a custom
+/// role granted `order.void` would otherwise be shown a button that fails every
+/// time with "only a manager can cancel an order".
+final canCancelOrderProvider = Provider<bool>(
+  (ref) => ref.watch(isManagerProvider),
+);
+
+/// Which order type the Orders tab is showing, or null for all of them.
+///
+/// Client-side, over the list already in hand: a phone's board is small enough
+/// that refetching per filter would cost a network round trip to hide four
+/// cards. Reset to null whenever the chosen type empties, so a waiter is never
+/// left staring at a board filtered to nothing.
+final orderTypeFilterProvider = NotifierProvider<OrderTypeFilter, String?>(
+  OrderTypeFilter.new,
+);
+
+class OrderTypeFilter extends Notifier<String?> {
+  @override
+  String? build() => null;
+
+  void select(String? orderType) => state = orderType;
+}
 
 /// A single order, refetched on demand — what the composer edits in amend mode.
 final orderProvider = FutureProvider.family<PosOrder?, String>((

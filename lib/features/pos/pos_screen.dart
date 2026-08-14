@@ -9,15 +9,19 @@ import '../../core/format/labels.dart';
 import '../../core/format/money.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/widgets/choice_chip.dart';
+import '../../data/print/reprint_actions.dart';
 import '../../data/supabase/pos_repository.dart';
 import '../../data/sync/sync_providers.dart';
 import '../tenant/tenant_providers.dart';
 import 'bill_models.dart';
 import 'bill_providers.dart';
+import 'completed_tab.dart';
 import 'manager_ops.dart';
 import 'models.dart';
 import 'order_composer.dart';
 import 'pos_providers.dart';
+import 'void_reason_dialog.dart';
 
 /// The POS: a **Tables** board, an **Orders** list and a **Bills** list.
 ///
@@ -40,7 +44,7 @@ class PosScreen extends ConsumerStatefulWidget {
   ConsumerState<PosScreen> createState() => _PosScreenState();
 }
 
-/// Tab order in the shell: Tables, Orders, Bills.
+/// Tab order in the shell: Tables, Orders, Bills, Done.
 const _billsTab = 2;
 
 class _PosScreenState extends ConsumerState<PosScreen> {
@@ -72,7 +76,9 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     if (!mounted) return;
     ref
       ..invalidate(activeOrdersProvider)
-      ..invalidate(openBillsProvider);
+      ..invalidate(openBillsProvider)
+      ..invalidate(filteredBillsProvider)
+      ..invalidate(completedOrdersProvider);
 
     final stillOwed = await ref
         .read(openBillsProvider.future)
@@ -248,6 +254,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
           onBill: canCheckout ? _billOrder : null,
         ),
         _BillsTab(onOpen: canCheckout ? _openBill : null),
+        CompletedTab(onOpenBill: canCheckout ? _openBill : null),
       ],
     );
   }
@@ -334,7 +341,7 @@ class _TablesTab extends ConsumerWidget {
                       table: table,
                       onTap: () => onOpen?.call(table),
                       onLongPress: canSetState
-                          ? () => showTableStateSheet(
+                          ? () => showTableActionsSheet(
                               context: context,
                               ref: ref,
                               table: table,
@@ -371,6 +378,8 @@ class _OrdersTab extends ConsumerWidget {
     final orders = ref.watch(activeOrdersProvider);
     final tenant = ref.watch(activeTenantProvider);
     final currency = tenant?.currency ?? 'USD';
+    final canCancel = ref.watch(canCancelOrderProvider);
+    final canPrintSlip = ref.watch(hasPermissionProvider('order.view'));
 
     return Scaffold(
       floatingActionButton: onNewTakeaway == null
@@ -411,25 +420,201 @@ class _OrdersTab extends ConsumerWidget {
                 ],
               );
             }
-            return ListView.separated(
-              padding: const EdgeInsets.all(12),
-              itemCount: list.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 10),
-              itemBuilder: (context, i) => _OrderCard(
-                order: list[i],
-                currency: currency,
-                onTap: () => onOpen(list[i]),
-                onDelivered: () => _markDelivered(context, ref, list[i]),
-                onBill: onBill == null || !list[i].canBill
-                    ? null
-                    : () => onBill!(list[i]),
-              ),
+
+            // Chips are derived from what is actually on the board, so a
+            // restaurant that never takes delivery never sees a Delivery chip
+            // — and a chosen type that has just emptied falls back to All
+            // rather than showing a board filtered to nothing.
+            final types = <String>{for (final o in list) o.orderType}.toList()
+              ..sort();
+            final chosen = ref.watch(orderTypeFilterProvider);
+            final active = types.contains(chosen) ? chosen : null;
+            final shown = active == null
+                ? list
+                : list.where((o) => o.orderType == active).toList();
+
+            return Column(
+              children: [
+                if (types.length > 1)
+                  _OrderTypeChips(
+                    types: types,
+                    counts: {
+                      for (final t in types)
+                        t: list.where((o) => o.orderType == t).length,
+                    },
+                    total: list.length,
+                    selected: active,
+                    onSelect: (t) =>
+                        ref.read(orderTypeFilterProvider.notifier).select(t),
+                  ),
+                Expanded(
+                  child: ListView.separated(
+                    padding: const EdgeInsets.all(12),
+                    itemCount: shown.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 10),
+                    itemBuilder: (context, i) => _OrderCard(
+                      order: shown[i],
+                      currency: currency,
+                      onTap: () => onOpen(shown[i]),
+                      onDelivered: () => _markDelivered(context, ref, shown[i]),
+                      onBill: onBill == null || !shown[i].canBill
+                          ? null
+                          : () => onBill!(shown[i]),
+                      onPin: () => _togglePin(context, ref, shown[i]),
+                      onPrintSlip: canPrintSlip
+                          ? () => _printSlip(context, ref, shown[i])
+                          : null,
+                      onCancel: canCancel
+                          ? () => _cancelOrder(context, ref, shown[i])
+                          : null,
+                    ),
+                  ),
+                ),
+              ],
             );
           },
         ),
       ),
     );
   }
+}
+
+/// The chip row over the Orders board — All, then one chip per order type that
+/// is actually on the floor.
+class _OrderTypeChips extends StatelessWidget {
+  const _OrderTypeChips({
+    required this.types,
+    required this.counts,
+    required this.total,
+    required this.selected,
+    required this.onSelect,
+  });
+
+  final List<String> types;
+  final Map<String, int> counts;
+  final int total;
+  final String? selected;
+  final ValueChanged<String?> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      child: Row(
+        children: [
+          AppChoiceChip(
+            label: 'All',
+            detail: '$total',
+            selected: selected == null,
+            showCheck: true,
+            onSelect: () => onSelect(null),
+          ),
+          for (final type in types) ...[
+            const SizedBox(width: 8),
+            AppChoiceChip(
+              label: orderTypeLabel(type),
+              detail: '${counts[type] ?? 0}',
+              selected: selected == type,
+              showCheck: true,
+              onSelect: () => onSelect(type),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Hold an order at the top of the board, or let it go.
+///
+/// Online-only and not queued: a pin is a preference about a list that only
+/// exists with a connection, so there is nothing to replay it onto.
+Future<void> _togglePin(
+  BuildContext context,
+  WidgetRef ref,
+  PosOrder order,
+) async {
+  final repo = ref.read(posRepoProvider);
+  if (repo == null) return;
+  try {
+    await repo.setPinned(orderId: order.id, pinned: !order.isPinned);
+    ref.invalidate(activeOrdersProvider);
+  } on PosFailure catch (e) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(e.message)));
+  }
+}
+
+Future<void> _printSlip(
+  BuildContext context,
+  WidgetRef ref,
+  PosOrder order,
+) async {
+  final message = await reprintOrderSlip(ref, order.id);
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context)
+    ..clearSnackBars()
+    ..showSnackBar(SnackBar(content: Text(message)));
+}
+
+/// Clear the whole order — the web's "Clear order".
+///
+/// Manager-gated by the server on role, reason required, and audited under the
+/// name of whoever confirmed it. Not queued offline: `cancel_order` refuses an
+/// order that has since been billed, so a replay would fail at the far end with
+/// nothing left on screen to explain why.
+Future<void> _cancelOrder(
+  BuildContext context,
+  WidgetRef ref,
+  PosOrder order,
+) async {
+  final repo = ref.read(posRepoProvider);
+  if (repo == null) return;
+
+  final dishes = order.itemCount;
+  final reason = await showVoidReasonDialog(
+    context: context,
+    title: 'Cancel this order?',
+    body:
+        '${dishes == 1 ? 'The one dish' : 'All $dishes dishes'} on this order '
+        'will be voided and the order cancelled. Any stock it deducted is '
+        'returned, the table is freed, and this is recorded against your name.',
+    confirmLabel: 'Cancel order',
+    keepLabel: 'Keep order',
+    hint: 'e.g. guests left before ordering',
+  );
+  if (reason == null || !context.mounted) return;
+
+  if (!(ref.read(isOnlineProvider).valueOrNull ?? true)) {
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text(
+            "No coverage — an order can't be cancelled yet. Try again when "
+            "you're back.",
+          ),
+        ),
+      );
+    return;
+  }
+
+  String message;
+  try {
+    await repo.cancelOrder(orderId: order.id, reason: reason);
+    message = 'Order cancelled.';
+    ref.invalidate(activeOrdersProvider);
+    unawaited(ref.read(tablesProvider.notifier).refresh());
+  } on PosFailure catch (e) {
+    message = e.message;
+  }
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context)
+    ..clearSnackBars()
+    ..showSnackBar(SnackBar(content: Text(message)));
 }
 
 /// The waiter carried the plate over.
@@ -474,6 +659,9 @@ class _OrderCard extends StatelessWidget {
     required this.onTap,
     required this.onDelivered,
     required this.onBill,
+    required this.onPin,
+    required this.onPrintSlip,
+    required this.onCancel,
   });
 
   final PosOrder order;
@@ -484,6 +672,14 @@ class _OrderCard extends StatelessWidget {
   /// Null when the user can't check out, or when nothing has been fired yet —
   /// `create_bill_for_order` refuses an order the kitchen never saw.
   final VoidCallback? onBill;
+
+  final VoidCallback onPin;
+
+  /// Null without `order.view` / the manager role. **No permission means no
+  /// control**, never a disabled one — a button that can only ever fail is
+  /// worse than no button.
+  final VoidCallback? onPrintSlip;
+  final VoidCallback? onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -532,10 +728,27 @@ class _OrderCard extends StatelessWidget {
                       style: theme.textTheme.titleMedium,
                     ),
                   ),
+                  // The pin is an icon, not a tint: a held order has to still
+                  // read as held in greyscale.
+                  if (order.isPinned) ...[
+                    Icon(
+                      Icons.push_pin,
+                      size: 16,
+                      color: scheme.onSurfaceVariant,
+                      semanticLabel: 'Pinned to the top',
+                    ),
+                    const SizedBox(width: 8),
+                  ],
                   Text(
                     money(order.totalCents, currency),
                     style: (theme.textTheme.titleMedium ?? const TextStyle())
                         .tabular,
+                  ),
+                  _OrderCardMenu(
+                    pinned: order.isPinned,
+                    onPin: onPin,
+                    onPrintSlip: onPrintSlip,
+                    onCancel: onCancel,
                   ),
                 ],
               ),
@@ -555,6 +768,23 @@ class _OrderCard extends StatelessWidget {
                     '${order.itemCount} item${order.itemCount == 1 ? '' : 's'}',
                     style: theme.textTheme.bodySmall,
                   ),
+                  if (order.guests != null) ...[
+                    const SizedBox(width: 12),
+                    Icon(
+                      Icons.group_outlined,
+                      size: 14,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${order.guests}',
+                      style: (theme.textTheme.bodySmall ?? const TextStyle())
+                          .tabular,
+                      semanticsLabel:
+                          '${order.guests} '
+                          'guest${order.guests == 1 ? '' : 's'}',
+                    ),
+                  ],
                   if (order.canFire) ...[
                     const SizedBox(width: 12),
                     Icon(
@@ -634,6 +864,71 @@ class _OrderCard extends StatelessWidget {
   }
 }
 
+/// The order card's overflow: the actions that aren't worth a button each.
+///
+/// Nothing here is ever rendered disabled — an entry the server would refuse
+/// simply isn't offered, which is the rule the web board follows too.
+class _OrderCardMenu extends StatelessWidget {
+  const _OrderCardMenu({
+    required this.pinned,
+    required this.onPin,
+    required this.onPrintSlip,
+    required this.onCancel,
+  });
+
+  final bool pinned;
+  final VoidCallback onPin;
+  final VoidCallback? onPrintSlip;
+  final VoidCallback? onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return PopupMenuButton<VoidCallback>(
+      tooltip: 'Order actions',
+      icon: const Icon(Icons.more_vert),
+      iconSize: 20,
+      onSelected: (action) => action(),
+      itemBuilder: (_) => [
+        PopupMenuItem(
+          value: onPin,
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(pinned ? Icons.push_pin_outlined : Icons.push_pin),
+            title: Text(pinned ? 'Unpin' : 'Pin to top'),
+          ),
+        ),
+        if (onPrintSlip != null)
+          PopupMenuItem(
+            value: onPrintSlip,
+            child: const ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.receipt_long_outlined),
+              title: Text('Print order slip'),
+            ),
+          ),
+        if (onCancel != null) ...[
+          const PopupMenuDivider(),
+          PopupMenuItem(
+            value: onCancel,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                Icons.cancel_outlined,
+                color: theme.colorScheme.error,
+              ),
+              title: Text(
+                'Cancel order',
+                style: TextStyle(color: theme.colorScheme.error),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 /// Bills still owed money.
 ///
 /// Not a convenience: opening a bill takes its order off the Orders tab, so
@@ -664,47 +959,80 @@ class _BillsTab extends ConsumerWidget {
       );
     }
 
-    final bills = ref.watch(openBillsProvider);
+    final filter = ref.watch(billFilterProvider);
+    final bills = ref.watch(filteredBillsProvider);
     final currency = ref.watch(activeTenantProvider)?.currency ?? 'USD';
 
-    return RefreshIndicator(
-      onRefresh: () async => ref.invalidate(openBillsProvider),
-      child: bills.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => ListView(
-          children: [
-            const SizedBox(height: 80),
-            _ErrorBlock(
-              message: "Couldn't load the bills.",
-              detail: '$e',
-              onRetry: () => ref.invalidate(openBillsProvider),
-            ),
-          ],
-        ),
-        data: (list) {
-          if (list.isEmpty) {
-            return ListView(
-              children: const [
-                SizedBox(height: 60),
-                PosEmptyState(
-                  icon: Icons.receipt_long,
-                  title: 'Nothing to settle',
-                  body:
-                      'Bills appear here once an order is billed, and drop off '
-                      'when they are paid in full.',
+    return Column(
+      children: [
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+          child: Row(
+            children: [
+              for (final f in BillFilter.values) ...[
+                if (f != BillFilter.values.first) const SizedBox(width: 8),
+                AppChoiceChip(
+                  label: f.label,
+                  selected: filter == f,
+                  showCheck: true,
+                  onSelect: () =>
+                      ref.read(billFilterProvider.notifier).select(f),
                 ),
               ],
-            );
-          }
-          return ListView.separated(
-            padding: const EdgeInsets.all(12),
-            itemCount: list.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 10),
-            itemBuilder: (context, i) =>
-                _BillCard(bill: list[i], currency: currency, onTap: onOpen!),
-          );
-        },
-      ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: () async => ref.invalidate(filteredBillsProvider),
+            child: bills.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => ListView(
+                children: [
+                  const SizedBox(height: 80),
+                  _ErrorBlock(
+                    message: "Couldn't load the bills.",
+                    detail: '$e',
+                    onRetry: () => ref.invalidate(filteredBillsProvider),
+                  ),
+                ],
+              ),
+              data: (list) {
+                if (list.isEmpty) {
+                  return ListView(
+                    children: [
+                      const SizedBox(height: 60),
+                      PosEmptyState(
+                        icon: Icons.receipt_long,
+                        title: filter == BillFilter.owed
+                            ? 'Nothing to settle'
+                            : 'Nothing here today',
+                        body: filter == BillFilter.owed
+                            ? 'Bills appear here once an order is billed, and '
+                                  'move to Paid when they are settled in full.'
+                            : 'Settled and written-off bills from today show '
+                                  'up here — older ones live in the reports on '
+                                  'the web app.',
+                      ),
+                    ],
+                  );
+                }
+                return ListView.separated(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: list.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
+                  itemBuilder: (context, i) => _BillCard(
+                    bill: list[i],
+                    currency: currency,
+                    onTap: onOpen!,
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -725,10 +1053,14 @@ class _BillCard extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final semantic = context.semantic;
-    // Part paid is the one a cashier must not walk past. Colour plus the word.
-    final statusColor = bill.status == 'partial'
-        ? semantic.attentionText
-        : semantic.infoText;
+    // Part paid is the one a cashier must not walk past. Colour plus the word,
+    // always — settled and written-off have to survive greyscale too.
+    final statusColor = switch (bill.status) {
+      'partial' => semantic.attentionText,
+      'paid' => semantic.goodText,
+      'void' => scheme.error,
+      _ => semantic.infoText,
+    };
 
     return Material(
       color: scheme.surfaceContainerLow,

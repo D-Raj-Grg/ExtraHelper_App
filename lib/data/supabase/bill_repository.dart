@@ -254,20 +254,46 @@ class BillRepository {
   ///
   /// This list is the only way back to a billed order: creating a bill takes the
   /// order off the POS board by design.
-  Future<List<OpenBillRow>> openBills({int limit = 50}) async {
+  Future<List<OpenBillRow>> openBills({int limit = 300}) =>
+      bills(statuses: const ['open', 'partial'], limit: limit);
+
+  /// Bills by status, and optionally only since a given instant.
+  ///
+  /// The two halves want different windows, which is why [since] is a parameter
+  /// rather than always today:
+  ///
+  /// * **Owed** (`open`, `partial`) is never date-bound. A debt from last night
+  ///   is still a debt this morning, and a bill that vanished at midnight would
+  ///   be money nobody could collect.
+  /// * **Settled** (`paid`, `void`) is capped to today, the same boundary the
+  ///   Completed tab draws — otherwise this query grows for the life of the
+  ///   restaurant to serve a question the reports answer better.
+  ///
+  /// `refunded` is deliberately absent: it is a *label* the app can render but
+  /// not a `bill_status` value — the enum is open/partial/paid/void — and
+  /// filtering on one Postgres doesn't have is a runtime 22P02.
+  Future<List<OpenBillRow>> bills({
+    required List<String> statuses,
+    DateTime? since,
+    int limit = 300,
+  }) async {
     try {
-      final rows = await _client
+      var query = _client
           .from('bills')
           .select(
             'id, status, total_cents, created_at, restaurant_tables(label)',
           )
           .eq('tenant_id', _tenantId)
-          .inFilter('status', const ['open', 'partial'])
+          .inFilter('status', statuses);
+      if (since != null) {
+        query = query.gte('created_at', since.toUtc().toIso8601String());
+      }
+      final rows = await query
           .order('created_at', ascending: false)
           .limit(limit);
       return rows.map(OpenBillRow.fromRow).toList();
     } catch (_) {
-      throw const PosTransientFailure("Couldn't load the open bills.");
+      throw const PosTransientFailure("Couldn't load the bills.");
     }
   }
 
@@ -474,6 +500,27 @@ class BillRepository {
     '_bill_id': billId,
     '_order_id': orderId,
   }, "Couldn't add that order to the bill.");
+
+  /// Put two tables on one bill, and return the bill they now share.
+  ///
+  /// Composed rather than a single RPC because that is what merging *is*: open
+  /// the primary table's bill, then add the other order to it. The web's
+  /// `mergeTables` sequences exactly these two calls, and a third function that
+  /// did the same thing slightly differently is how the two clients drift.
+  ///
+  /// `create_bill_for_order` is idempotent, so merging onto a table that
+  /// already has a bill re-uses it rather than opening a second one.
+  Future<String> mergeOrders({
+    required String primaryOrderId,
+    required String otherOrderId,
+  }) async {
+    if (primaryOrderId == otherOrderId) {
+      throw const PosFailure('Pick a different table to merge with.');
+    }
+    final billId = await createBillForOrder(primaryOrderId);
+    await addOrderToBill(billId: billId, orderId: otherOrderId);
+    return billId;
+  }
 
   /// Name the guest this bill belongs to.
   Future<void> attachCustomer({

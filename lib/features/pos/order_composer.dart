@@ -19,6 +19,7 @@ import '../tenant/tenant_providers.dart';
 import 'bill_providers.dart';
 import 'cart_controller.dart';
 import 'custom_item_sheet.dart';
+import 'guests_dialog.dart';
 import 'item_options_sheet.dart';
 import 'manager_ops.dart';
 import 'models.dart';
@@ -68,6 +69,101 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
             orderType: widget.seedTable == null ? 'pickup' : 'dine_in',
             tableId: widget.seedTable?.id,
           );
+  }
+
+  bool get _isDineIn => _isAmend
+      ? widget.existingOrder!.orderType == 'dine_in'
+      : widget.seedTable != null;
+
+  int? get _guests => _isAmend
+      ? (_guestsOverride ?? widget.existingOrder!.guests)
+      : (_cart as CreateCart).guests;
+
+  /// The amended order is a snapshot taken when the composer opened, so a
+  /// guest count saved here has to be remembered locally too — otherwise the
+  /// badge reverts the moment the dialog closes.
+  int? _guestsOverride;
+
+  /// How many people are eating.
+  ///
+  /// On create it rides along in `place_staff_order`, which is why nothing is
+  /// written here. On amend it is a direct column update: covers decide no
+  /// money and no access, and the web action does exactly the same.
+  Future<void> _editGuests() async {
+    final chosen = await showGuestsDialog(context: context, current: _guests);
+    if (chosen == null || !mounted) return;
+
+    if (!_isAmend) {
+      setState(() => (_cart as CreateCart).guests = chosen);
+      return;
+    }
+
+    final repo = ref.read(posRepoProvider);
+    if (repo == null) return;
+    if (!(ref.read(isOnlineProvider).valueOrNull ?? true)) {
+      _toast(
+        "No coverage — the guest count can't be saved yet. The order is safe.",
+        error: true,
+      );
+      return;
+    }
+    try {
+      await repo.setGuests(orderId: widget.existingOrder!.id, guests: chosen);
+      if (!mounted) return;
+      setState(() => _guestsOverride = chosen);
+      ref.invalidate(activeOrdersProvider);
+    } on PosFailure catch (e) {
+      _toast(e.message, error: true);
+    }
+  }
+
+  /// Clear the whole order and leave the composer.
+  ///
+  /// Manager-gated on role by `cancel_order`, reason required, audited. Not
+  /// queued offline — the RPC refuses an order that has since been billed, so a
+  /// replay would fail with the composer long gone.
+  Future<void> _cancelOrder() async {
+    final order = widget.existingOrder!;
+    final repo = ref.read(posRepoProvider);
+    if (repo == null) return;
+
+    final dishes = order.itemCount;
+    final reason = await showVoidReasonDialog(
+      context: context,
+      title: 'Cancel this order?',
+      body:
+          '${dishes == 1 ? 'The one dish' : 'All $dishes dishes'} on this order '
+          'will be voided and the order cancelled. Any stock it deducted is '
+          'returned, the table is freed, and this is recorded against your '
+          'name.',
+      confirmLabel: 'Cancel order',
+      keepLabel: 'Keep order',
+      hint: 'e.g. guests left before ordering',
+    );
+    if (reason == null || !mounted) return;
+
+    if (!(ref.read(isOnlineProvider).valueOrNull ?? true)) {
+      _toast(
+        "No coverage — an order can't be cancelled yet. Try again when you're "
+        'back.',
+        error: true,
+      );
+      return;
+    }
+
+    setState(() => _busy = true);
+    try {
+      await repo.cancelOrder(orderId: order.id, reason: reason);
+      if (!mounted) return;
+      ref.invalidate(activeOrdersProvider);
+      unawaited(ref.read(tablesProvider.notifier).refresh());
+      Navigator.of(context).pop();
+    } on PosFailure catch (e) {
+      if (!mounted) return;
+      _toast(e.message, error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   /// Open this order's bill and leave the composer behind it.
@@ -292,6 +388,20 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
       // waiter who has just been asked for the bill, and `create_bill_for_order`
       // refuses an order the kitchen never saw.
       actions: [
+        // Covers are a dine-in fact: a takeaway bag has no guests, and asking
+        // would be a field nobody can answer.
+        if (_isDineIn)
+          IconButton(
+            onPressed: _busy ? null : _editGuests,
+            icon: Badge(
+              isLabelVisible: _guests != null,
+              label: Text('$_guests'),
+              child: const Icon(Icons.group_outlined),
+            ),
+            tooltip: _guests == null
+                ? 'How many guests?'
+                : '$_guests guest${_guests == 1 ? '' : 's'}',
+          ),
         if (_isAmend &&
             widget.existingOrder!.canBill &&
             ref.watch(hasPermissionProvider('checkout.view')))
@@ -307,6 +417,32 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
           icon: const Icon(Icons.post_add),
           tooltip: 'Something off the menu',
         ),
+        // Only in amend mode: a create-mode order has nothing on the server to
+        // cancel — backing out is what discards it.
+        if (_isAmend &&
+            !widget.existingOrder!.isClosed &&
+            ref.watch(canCancelOrderProvider))
+          PopupMenuButton<void>(
+            tooltip: 'Order actions',
+            itemBuilder: (_) => [
+              PopupMenuItem<void>(
+                onTap: _busy ? null : _cancelOrder,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    Icons.cancel_outlined,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                  title: Text(
+                    'Cancel order',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
       ],
       body: Column(
         children: [

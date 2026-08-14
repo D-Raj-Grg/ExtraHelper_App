@@ -18,6 +18,7 @@ class TicketCard extends StatelessWidget {
     required this.onAdvanceLine,
     required this.onAdvanceTicket,
     required this.onLineLongPress,
+    this.onReprint,
   });
 
   final KdsTicket ticket;
@@ -30,6 +31,13 @@ class TicketCard extends StatelessWidget {
   final void Function(KdsLine line, KotStatus status) onAdvanceLine;
   final void Function(KotStatus status) onAdvanceTicket;
   final void Function(KdsLine line) onLineLongPress;
+
+  /// Queue this ticket again. Null without `order.view` — the RPC checks the
+  /// same key, and a control that can only fail is worse than none.
+  ///
+  /// A jammed roll, a ticket blown off the rail, a station that came online
+  /// after the order fired: the paper is gone and the board still has it.
+  final VoidCallback? onReprint;
 
   @override
   Widget build(BuildContext context) {
@@ -71,6 +79,16 @@ class TicketCard extends StatelessWidget {
                   age.label,
                   style: theme.textTheme.labelLarge?.copyWith(color: ageColor),
                 ),
+                if (onReprint != null) ...[
+                  const SizedBox(width: 4),
+                  IconButton(
+                    onPressed: onReprint,
+                    icon: const Icon(Icons.print_outlined),
+                    iconSize: 20,
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Print this ticket again',
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 2),

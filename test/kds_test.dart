@@ -113,6 +113,7 @@ KdsLine _line(
 KdsTicket _ticket(
   List<KdsLine> lines, {
   KotStatus status = KotStatus.newTicket,
+  String? orderStatus,
 }) => KdsTicket(
   id: 'k1',
   status: status,
@@ -121,9 +122,81 @@ KdsTicket _ticket(
   lines: lines,
   station: 'Grill',
   printed: false,
+  orderStatus: orderStatus,
 );
 
 void main() {
+  group('a ticket is finished when the kitchen OR the till says so', () {
+    test('a bumped ticket is done', () {
+      final t = _ticket(
+        [_line('a', KotStatus.served)],
+        status: KotStatus.served,
+        orderStatus: 'served',
+      );
+      expect(t.isCompleted, isTrue);
+    });
+
+    test('a ready ticket on a billed order leaves the pass', () {
+      // The live defect this fixes: the food went out, the guest paid, and the
+      // ticket sat on the board forever because nobody bumped it. A board with
+      // permanent residents is a board cooks stop reading.
+      final t = _ticket(
+        [_line('a', KotStatus.ready)],
+        status: KotStatus.ready,
+        orderStatus: 'billed',
+      );
+      expect(t.isCompleted, isTrue);
+    });
+
+    test('closed and cancelled orders take their tickets with them', () {
+      for (final status in ['closed', 'cancelled']) {
+        final t = _ticket([
+          _line('a', KotStatus.newTicket),
+        ], orderStatus: status);
+        expect(t.isCompleted, isTrue, reason: status);
+      }
+    });
+
+    test('a new ticket on a live order is still work in hand', () {
+      final t = _ticket([
+        _line('a', KotStatus.newTicket),
+      ], orderStatus: 'placed');
+      expect(t.isCompleted, isFalse);
+    });
+
+    test('an order-finished ticket is not offered for recall', () {
+      // It left the board because the guest paid and went, not because a cook
+      // bumped it. `recall_kot` would put a ticket for an empty table back on
+      // the pass — and the query has no date bound on `ready`, so it would sit
+      // on the recall strip for the life of the restaurant.
+      final billed = _ticket(
+        [_line('a', KotStatus.ready)],
+        status: KotStatus.ready,
+        orderStatus: 'billed',
+      );
+      final bumped = _ticket(
+        [_line('a', KotStatus.served)],
+        status: KotStatus.served,
+        orderStatus: 'served',
+      );
+
+      expect(billed.isCompleted, isTrue);
+      expect(
+        billed.status == KotStatus.served,
+        isFalse,
+        reason: 'so the recall strip must not pick it up',
+      );
+      expect(bumped.status == KotStatus.served, isTrue);
+    });
+
+    test('an order status nobody sent does not finish the ticket', () {
+      // Absent is not "done" — a null from an older row must leave the ticket
+      // on the board, where a cook can see it, rather than hiding it.
+      final t = _ticket([_line('a', KotStatus.preparing)]);
+      expect(t.isCompleted, isFalse);
+    });
+  });
+
   group('a ticket is its least-advanced live line', () {
     test('one dish plated, one still cooking, ticket stays cooking', () {
       final t = _ticket([

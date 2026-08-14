@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../supabase/pos_repository.dart' show PosFailure, PosTransientFailure;
 import '../supabase/supabase_providers.dart';
 import 'print_models.dart';
+import 'print_routing.dart';
 
 /// The queue's client half.
 ///
@@ -105,32 +106,163 @@ class PrintRepository {
   Future<void> retry(String jobId) =>
       _write('retry_print_job', {'_job_id': jobId}, "Couldn't retry that job.");
 
-  /// Put a document on the queue by hand — the test page, or a reprint.
+  /// Put a document on the queue by hand — a reprint, or the test page.
   ///
-  /// A test page carries no idempotency key: asking for a second one is the
-  /// whole point of pressing the button twice.
-  Future<String?> enqueueTest(String printerId) async {
+  /// Routing is resolved **here**, not in the RPC, exactly as the web's
+  /// `enqueuePrint` does it: `enqueue_print_job` takes one printer and queues
+  /// one job, so a document configured for two printers is two calls. Both
+  /// clients therefore have to agree on how a printer is chosen, and the way to
+  /// keep them agreeing is to port the rule rather than re-derive it.
+  ///
+  /// Everything the app queues by hand is a reprint, so `_idem` is always null:
+  /// asking for a second copy of a ticket that already printed is the entire
+  /// point of pressing the button.
+  ///
+  /// Permission is the server's: `enqueue_print_job` checks `order.view` for a
+  /// ticket, `checkout.view` for a receipt and `settings.edit` for a test page.
+  /// The UI hides what the key doesn't allow; the RPC is what enforces it.
+  Future<EnqueueOutcome> enqueue({
+    required String doc,
+    String? kotId,
+    String? billId,
+    String? orderId,
+    String? printerId,
+  }) async {
     try {
-      final id = await _client.rpc<dynamic>(
-        'enqueue_print_job',
-        params: {
-          '_tenant': _tenantId,
-          '_doc': 'test',
-          '_printer_id': printerId,
-          '_kot_id': null,
-          '_bill_id': null,
-          '_order_id': null,
-          '_copies': 1,
-          '_idem': null,
-        },
+      final resolved = await _resolveTargets(
+        doc: doc,
+        kotId: kotId,
+        billId: billId,
+        orderId: orderId,
+        printerId: printerId,
       );
-      return id as String?;
+      if (resolved.targets.isEmpty) return const PrintNoPrinter();
+
+      final jobIds = <String>[];
+      for (final target in resolved.targets) {
+        final id = await _client.rpc<dynamic>(
+          'enqueue_print_job',
+          params: {
+            '_tenant': _tenantId,
+            '_doc': resolved.doc,
+            '_printer_id': target.printerId,
+            '_kot_id': kotId,
+            '_bill_id': billId,
+            '_order_id': orderId,
+            '_copies': target.copies,
+            '_idem': null,
+          },
+        );
+        if (id is String) jobIds.add(id);
+      }
+      return PrintQueued(jobIds);
+    } on PostgrestException catch (e) {
+      throw PosFailure(e.message);
+    } on PosFailure {
+      rethrow;
+    } catch (_) {
+      throw const PosTransientFailure("Couldn't reach the print queue.");
+    }
+  }
+
+  /// Which printers this document is bound for, and what it is really called.
+  ///
+  /// The reads are here; the rules are in `print_routing.dart`, where they can
+  /// be tested without a network.
+  Future<({String doc, List<PrintTarget> targets})> _resolveTargets({
+    required String doc,
+    String? kotId,
+    String? billId,
+    String? orderId,
+    String? printerId,
+  }) async {
+    var resolvedDoc = doc;
+    String? branchId;
+    var targets = <PrintTarget>[];
+
+    if ((doc == 'kot' || doc == 'bot') && kotId != null) {
+      final row = await _client
+          .from('kots')
+          .select('kitchen_stations(kind, printer_id), orders(branch_id)')
+          .eq('id', kotId)
+          .eq('tenant_id', _tenantId)
+          .maybeSingle();
+
+      final routing = kotRoutingFrom(row);
+      resolvedDoc = routing.doc;
+      branchId = routing.branchId;
+      if (routing.station != null) targets = [routing.station!];
+    } else {
+      branchId = await _branchOf(billId: billId, orderId: orderId);
+    }
+
+    // "Print to this one" is an explicit instruction and outranks routing —
+    // it is how the settings screen tests a single machine.
+    if (printerId != null) {
+      return (
+        doc: resolvedDoc,
+        targets: [PrintTarget(printerId: printerId, copies: 1)],
+      );
+    }
+    if (targets.isNotEmpty) return (doc: resolvedDoc, targets: targets);
+
+    final rows = await _client
+        .from('printer_documents')
+        .select('printer_id, copies, printers!inner(is_active, branch_id)')
+        .eq('tenant_id', _tenantId)
+        .eq('doc', resolvedDoc);
+
+    return (
+      doc: resolvedDoc,
+      targets: printerDocumentTargets(rows, branchId: branchId),
+    );
+  }
+
+  /// Which branch this document belongs to, so a printer tied to another one is
+  /// skipped rather than printing a second branch's receipts.
+  Future<String?> _branchOf({String? billId, String? orderId}) async {
+    if (orderId != null) {
+      final row = await _client
+          .from('orders')
+          .select('branch_id')
+          .eq('id', orderId)
+          .eq('tenant_id', _tenantId)
+          .maybeSingle();
+      return row?['branch_id'] as String?;
+    }
+    if (billId != null) {
+      final row = await _client
+          .from('bills')
+          .select('branch_id')
+          .eq('id', billId)
+          .eq('tenant_id', _tenantId)
+          .maybeSingle();
+      return row?['branch_id'] as String?;
+    }
+    return null;
+  }
+
+  /// Every ticket an order fired, so "reprint the kitchen tickets" is one tap
+  /// rather than a hunt through stations.
+  Future<List<String>> orderKotIds(String orderId) async {
+    try {
+      final rows = await _client
+          .from('kots')
+          .select('id')
+          .eq('tenant_id', _tenantId)
+          .eq('order_id', orderId);
+      return rows.map((r) => r['id'] as String?).nonNulls.toList();
     } on PostgrestException catch (e) {
       throw PosFailure(e.message);
     } catch (_) {
-      throw const PosTransientFailure("Couldn't queue the test page.");
+      throw const PosTransientFailure("Couldn't find the order's tickets.");
     }
   }
+
+  /// The settings screen's "print a test page" — one printer, named outright,
+  /// which is the whole point of testing *that* machine.
+  Future<EnqueueOutcome> enqueueTest(String printerId) =>
+      enqueue(doc: 'test', printerId: printerId);
 
   /// Server prose reaches the user rather than being swallowed. A reject and a
   /// timeout are different things — see `PLANNING.md` §2 rule 3.

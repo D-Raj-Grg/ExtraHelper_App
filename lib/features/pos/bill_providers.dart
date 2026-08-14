@@ -18,41 +18,24 @@ final billRepoProvider = Provider<BillRepository?>((ref) {
   return ref.watch(billRepositoryProvider(tenant.tenantId));
 });
 
-/// Three of checkout's RPCs want a **manager as well as the permission key**.
-///
-/// `apply_bill_discount`, `apply_item_discount`, `void_order_item` and
-/// `refund_payment` each check `has_tenant_role(owner, manager)` *and* their
-/// key, so the permission alone is not the gate. The seeded roles only ever
-/// hand those keys to owners and managers, which is why the two look
-/// interchangeable — but permissions are editable per restaurant, and a custom
-/// role granted `order.discount` would otherwise be shown a button that fails
-/// every time with "discounts require a manager".
-///
-/// `user_tenants.role` is what `has_tenant_role` reads, and `Membership.role`
-/// is that same column, so this asks exactly what the server will.
-final _isManagerProvider = Provider<bool>((ref) {
-  final role = ref.watch(activeTenantProvider)?.role;
-  return role == 'owner' || role == 'manager';
-});
-
 /// Discount the bill, or one of its lines.
 final canDiscountProvider = Provider<bool>(
   (ref) =>
-      ref.watch(_isManagerProvider) &&
+      ref.watch(isManagerProvider) &&
       ref.watch(hasPermissionProvider('order.discount')),
 );
 
 /// Void a line off a bill.
 final canVoidLineProvider = Provider<bool>(
   (ref) =>
-      ref.watch(_isManagerProvider) &&
+      ref.watch(isManagerProvider) &&
       ref.watch(hasPermissionProvider('order.void')),
 );
 
 /// Give money back.
 final canRefundProvider = Provider<bool>(
   (ref) =>
-      ref.watch(_isManagerProvider) &&
+      ref.watch(isManagerProvider) &&
       ref.watch(hasPermissionProvider('payment.refund')),
 );
 
@@ -214,7 +197,9 @@ class BillSnapshotNotifier
   void _onSettled() {
     ref
       ..invalidate(activeOrdersProvider)
-      ..invalidate(openBillsProvider);
+      ..invalidate(openBillsProvider)
+      ..invalidate(filteredBillsProvider)
+      ..invalidate(completedOrdersProvider);
     unawaited(ref.read(tablesProvider.notifier).refresh());
   }
 }
@@ -234,4 +219,74 @@ final openBillsProvider = FutureProvider.autoDispose<List<OpenBillRow>>((
     throw const PosFailure(offlineCheckoutMessage);
   }
   return repo.openBills();
+});
+
+/// What the Bills tab is listing.
+///
+/// A bill settled five minutes ago used to be unreachable from the phone: the
+/// tab only ever showed what was owed, so the moment a cashier took the last
+/// rupee the receipt went out of reach — which is exactly when someone asks for
+/// a copy of it.
+enum BillFilter {
+  /// Every bill with money outstanding, however old. Not date-bound: a debt
+  /// does not stop being one at midnight.
+  owed(label: 'Owed', statuses: ['open', 'partial'], dayBound: false),
+
+  /// Settled today. Older ones are a reports question.
+  paid(label: 'Paid', statuses: ['paid'], dayBound: true),
+
+  /// Written off today.
+  voided(label: 'Void', statuses: ['void'], dayBound: true),
+
+  /// Everything from today, whatever became of it.
+  today(
+    label: 'All today',
+    statuses: ['open', 'partial', 'paid', 'void'],
+    dayBound: true,
+  );
+
+  const BillFilter({
+    required this.label,
+    required this.statuses,
+    required this.dayBound,
+  });
+
+  final String label;
+  final List<String> statuses;
+
+  /// Whether the list is capped to the trading day that has just been served.
+  final bool dayBound;
+}
+
+final billFilterProvider = NotifierProvider<BillFilterNotifier, BillFilter>(
+  BillFilterNotifier.new,
+);
+
+class BillFilterNotifier extends Notifier<BillFilter> {
+  @override
+  BillFilter build() => BillFilter.owed;
+
+  void select(BillFilter filter) => state = filter;
+}
+
+/// The Bills tab's list for the chosen filter.
+///
+/// Not cached, like everything else that quotes money: a total from ten minutes
+/// ago is a figure a guest could be charged on, and another terminal may have
+/// discounted it since.
+final filteredBillsProvider = FutureProvider.autoDispose<List<OpenBillRow>>((
+  ref,
+) async {
+  final repo = ref.watch(billRepoProvider);
+  final posRepo = ref.watch(posRepoProvider);
+  if (repo == null) return const [];
+  if (!await ref.read(connectivityProvider).isOnline()) {
+    throw const PosFailure(offlineCheckoutMessage);
+  }
+
+  final filter = ref.watch(billFilterProvider);
+  // The day boundary is the server's — the same `tenant_day_start` the
+  // Completed tab uses, so the two tabs never disagree about when today began.
+  final since = filter.dayBound ? await posRepo?.tenantDayStart() : null;
+  return repo.bills(statuses: filter.statuses, since: since);
 });

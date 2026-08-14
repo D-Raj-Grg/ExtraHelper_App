@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/app_scaffold.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/choice_chip.dart';
+import '../../data/print/reprint_actions.dart';
 import '../../data/supabase/kds_repository.dart';
 import '../tenant/tenant_providers.dart';
 import 'kds_constants.dart';
@@ -31,6 +32,19 @@ class _KdsScreenState extends ConsumerState<KdsScreen> {
   /// so the screen ticks even when nothing changes.
   Timer? _clock;
   DateTime _now = DateTime.now();
+
+  /// Put a ticket back on the queue.
+  ///
+  /// Whether it comes out as a KOT or a BOT is the *station's* call, resolved
+  /// when the job is queued — so a bar ticket reprinted from the pass still
+  /// reads as a bar ticket.
+  Future<void> _reprint(KdsTicket ticket) async {
+    final message = await reprintKot(ref, ticket.id);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
 
   @override
   void initState() {
@@ -60,6 +74,7 @@ class _KdsScreenState extends ConsumerState<KdsScreen> {
     final board = ref.watch(kdsBoardProvider);
     final rail = ref.watch(kdsDishRailProvider);
     final canBump = ref.watch(hasPermissionProvider('kds.bump'));
+    final canPrintTicket = ref.watch(hasPermissionProvider('order.view'));
     final actions = ref.watch(kdsActionsProvider);
 
     return AppScaffold(
@@ -104,6 +119,7 @@ class _KdsScreenState extends ConsumerState<KdsScreen> {
                     if (picked == null || picked == line.status) return;
                     await _run(() => actions.setLineStatus(line.id, picked));
                   },
+                  onReprint: canPrintTicket ? _reprint : null,
                 ),
               if (board.recallable.isNotEmpty)
                 SliverToBoxAdapter(
@@ -224,6 +240,7 @@ class _TicketGrid extends StatelessWidget {
     required this.onAdvanceLine,
     required this.onAdvanceTicket,
     required this.onLineLongPress,
+    required this.onReprint,
   });
 
   final List<KdsTicket> tickets;
@@ -232,6 +249,9 @@ class _TicketGrid extends StatelessWidget {
   final void Function(KdsLine, KotStatus) onAdvanceLine;
   final void Function(KdsTicket, KotStatus) onAdvanceTicket;
   final void Function(KdsLine) onLineLongPress;
+
+  /// Null without `order.view`.
+  final void Function(KdsTicket)? onReprint;
 
   @override
   Widget build(BuildContext context) {
@@ -262,6 +282,9 @@ class _TicketGrid extends StatelessWidget {
                           onAdvanceTicket: (status) =>
                               onAdvanceTicket(slice[i], status),
                           onLineLongPress: onLineLongPress,
+                          onReprint: onReprint == null
+                              ? null
+                              : () => onReprint!(slice[i]),
                         )
                       : const SizedBox.shrink(),
                 ),

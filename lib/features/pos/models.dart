@@ -232,6 +232,85 @@ class PosOrderLine {
   }
 }
 
+/// A finished order, as the Completed tab lists it.
+///
+/// Separate from [PosOrder] because the two answer different questions: an
+/// active order is something to work on, and this is a record of one that is
+/// over. It carries its bill's status and total, which an active order has no
+/// use for, and it deliberately does **not** carry the fields that only mean
+/// something mid-service.
+class PosCompletedOrder {
+  const PosCompletedOrder({
+    required this.id,
+    required this.status,
+    required this.orderType,
+    required this.createdAt,
+    this.tableLabel,
+    this.guests,
+    this.billId,
+    this.billStatus,
+    this.billTotalCents,
+    this.lines = const [],
+  });
+
+  final String id;
+  final String status;
+  final String orderType;
+  final DateTime createdAt;
+  final String? tableLabel;
+  final int? guests;
+  final String? billId;
+  final String? billStatus;
+
+  /// The bill's own total. **Not** what this order contributed: two orders
+  /// merged onto one bill both report the whole figure, which is why the
+  /// takings line is summed from the lines instead.
+  final int? billTotalCents;
+
+  final List<PosOrderLine> lines;
+
+  /// This order's own money, void lines excluded — they were taken off the
+  /// bill and charging for them would be wrong.
+  int get lineTotalCents =>
+      lines.where((l) => !l.isVoid).fold(0, (sum, l) => sum + l.lineTotalCents);
+
+  int get lineCount =>
+      lines.where((l) => !l.isVoid).fold(0, (sum, l) => sum + l.qty);
+
+  /// A cancelled order took no money, so it must not be counted in takings —
+  /// and its figures are shown as a dash rather than a zero, because zero looks
+  /// like a bill that was rung up for nothing.
+  bool get isCancelled => status == 'cancelled';
+
+  /// The short form staff read off a card: the first block of the uuid, which
+  /// is what the web prints too.
+  String get shortId =>
+      id.length >= 8 ? id.substring(0, 8).toUpperCase() : id.toUpperCase();
+
+  static PosCompletedOrder fromRow(Map<String, dynamic> r) {
+    final table = r['restaurant_tables'] as Map<String, dynamic>?;
+    final bill = r['bills'] as Map<String, dynamic>?;
+    final lines = (r['order_items'] as List<dynamic>? ?? const [])
+        .map((l) => PosOrderLine.fromRow(l as Map<String, dynamic>))
+        .toList();
+
+    return PosCompletedOrder(
+      id: r['id'] as String,
+      status: (r['status'] as String?) ?? 'closed',
+      orderType: (r['order_type'] as String?) ?? 'dine_in',
+      createdAt:
+          DateTime.tryParse((r['created_at'] as String?) ?? '')?.toLocal() ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      tableLabel: table?['label'] as String?,
+      guests: (r['guests'] as num?)?.toInt(),
+      billId: (r['bill_id'] as String?) ?? bill?['id'] as String?,
+      billStatus: bill?['status'] as String?,
+      billTotalCents: (bill?['total_cents'] as num?)?.toInt(),
+      lines: lines,
+    );
+  }
+}
+
 class PosOrder {
   const PosOrder({
     required this.id,
@@ -242,6 +321,7 @@ class PosOrder {
     this.tableLabel,
     this.guests,
     this.billId,
+    this.pinnedAt,
     this.lines = const [],
   });
 
@@ -257,6 +337,12 @@ class PosOrder {
   /// the card's "Bill" into "Open bill" — `create_bill_for_order` is idempotent
   /// either way, but the word should tell the truth.
   final String? billId;
+
+  /// Set while a waiter is holding this order at the top of the board. A
+  /// display preference and nothing more — see `PosRepository.setPinned`.
+  final DateTime? pinnedAt;
+
+  bool get isPinned => pinnedAt != null;
 
   final List<PosOrderLine> lines;
 
@@ -295,6 +381,7 @@ class PosOrder {
       tableLabel: table?['label'] as String?,
       guests: r['guests'] as int?,
       billId: r['bill_id'] as String?,
+      pinnedAt: DateTime.tryParse((r['pinned_at'] as String?) ?? '')?.toLocal(),
       lines: lines,
     );
   }

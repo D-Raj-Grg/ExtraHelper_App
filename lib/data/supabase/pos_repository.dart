@@ -137,19 +137,82 @@ class PosRepository {
 
   static const _orderSelect =
       'id, status, order_type, created_at, table_id, guests, bill_id, '
+      'pinned_at, '
       'restaurant_tables!orders_table_id_fkey(label), '
       'order_items(id, name_snapshot, qty, unit_price_cents, status, is_void, notes, '
       'order_item_modifiers(name_snapshot))';
 
   /// Orders still on the floor. Closed and cancelled ones are history.
+  ///
+  /// Pinned first, then newest — the same order the web board uses. A pin is
+  /// how a waiter keeps the table they are mid-service on from sliding down a
+  /// list that reorders itself every time anyone else fires an order.
   Future<List<PosOrder>> activeOrders() async {
     final rows = await _client
         .from('orders')
         .select(_orderSelect)
         .eq('tenant_id', _tenantId)
         .not('status', 'in', '("closed","cancelled","billed")')
+        .order('pinned_at', ascending: false, nullsFirst: false)
         .order('created_at', ascending: false);
     return rows.map((r) => PosOrder.fromRow(r)).toList();
+  }
+
+  /// The same select the web's Completed tab uses, down to the FK hints.
+  ///
+  /// The hints are load-bearing: `orders` reaches `restaurant_tables` and
+  /// `bills` by more than one path, and without naming the constraint PostgREST
+  /// refuses the embed rather than guessing.
+  static const _completedSelect =
+      'id, order_type, status, created_at, guests, table_id, bill_id, '
+      'restaurant_tables!orders_table_id_fkey(label), '
+      'order_items(id, name_snapshot, qty, unit_price_cents, is_void), '
+      'bills!orders_bill_id_fkey(id, status, total_cents)';
+
+  /// Where this restaurant's trading day began, in its own timezone.
+  ///
+  /// Asked of the server rather than computed here — `package:intl` has no IANA
+  /// timezone database, and a boundary that decides which orders a waiter can
+  /// see must not be a second implementation. See the `tenant_day_start`
+  /// migration.
+  Future<DateTime> tenantDayStart() async {
+    try {
+      final at = await _client.rpc<dynamic>(
+        'tenant_day_start',
+        params: {'_tenant': _tenantId},
+      );
+      final parsed = DateTime.tryParse(at as String? ?? '');
+      if (parsed != null) return parsed;
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    } catch (_) {
+      throw const PosTransientFailure("Couldn't load today's orders.");
+    }
+    throw const PosTransientFailure("Couldn't work out when today began.");
+  }
+
+  /// Today's finished orders — billed, closed and cancelled.
+  ///
+  /// Today only, and capped: a busy till closes a few hundred orders a day, and
+  /// a tenant that hits the cap wants the reports on the web app, not a bigger
+  /// query on a phone.
+  Future<List<PosCompletedOrder>> completedOrders({int limit = 300}) async {
+    final dayStart = await tenantDayStart();
+    try {
+      final rows = await _client
+          .from('orders')
+          .select(_completedSelect)
+          .eq('tenant_id', _tenantId)
+          .inFilter('status', const ['billed', 'closed', 'cancelled'])
+          .gte('created_at', dayStart.toUtc().toIso8601String())
+          .order('created_at', ascending: false)
+          .limit(limit);
+      return rows.map(PosCompletedOrder.fromRow).toList();
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    } catch (_) {
+      throw const PosTransientFailure("Couldn't load today's orders.");
+    }
   }
 
   Future<PosOrder?> order(String orderId) async {
@@ -329,6 +392,45 @@ class PosRepository {
     }
   }
 
+  /// Keep an order at the top of the board, or let it go.
+  ///
+  /// A direct column write rather than an RPC, and deliberately: `pinned_at`
+  /// decides no money, no stock and no access, RLS on `orders` is tenant-scoped,
+  /// and the web does exactly the same thing. Anything a *role* should gate
+  /// belongs in a `security definer` function — this is a display preference.
+  Future<void> setPinned({
+    required String orderId,
+    required bool pinned,
+  }) async {
+    try {
+      await _client
+          .from('orders')
+          .update({
+            'pinned_at': pinned
+                ? DateTime.now().toUtc().toIso8601String()
+                : null,
+          })
+          .eq('id', orderId)
+          .eq('tenant_id', _tenantId);
+    } catch (_) {
+      throw const PosTransientFailure("Couldn't pin that order.");
+    }
+  }
+
+  /// How many people are eating, which is what turns covers into a real average
+  /// spend on the reports. Clamped the same way the web action clamps it.
+  Future<void> setGuests({required String orderId, required int guests}) async {
+    try {
+      await _client
+          .from('orders')
+          .update({'guests': guests.clamp(1, 200)})
+          .eq('id', orderId)
+          .eq('tenant_id', _tenantId);
+    } catch (_) {
+      throw const PosTransientFailure("Couldn't save the guest count.");
+    }
+  }
+
   Future<void> cancelOrder({
     required String orderId,
     required String reason,
@@ -340,6 +442,97 @@ class PosRepository {
       );
     } on PostgrestException catch (e) {
       throw PosFailure(_friendly(e.message));
+    } catch (_) {
+      // A cancel that timed out may or may not have landed, and the two look
+      // identical from here. Say so rather than reporting a cancel that didn't
+      // happen — the board refreshes and shows the truth.
+      throw const PosTransientFailure(
+        "Couldn't reach the server. Check the order before cancelling again.",
+      );
+    }
+  }
+
+  // --- Table operations ----------------------------------------------------
+
+  /// The order sitting on a table, for the table-actions sheet.
+  ///
+  /// **Deliberately not [activeOrders]'s filter.** That one hides `billed`
+  /// orders because they belong to the Bills tab; a billed order can still be
+  /// transferred, and refusing to find it would strand a table whose guests
+  /// moved after asking for the bill. Only `closed` and `cancelled` are history.
+  Future<String?> activeOrderIdForTable(String tableId) async {
+    try {
+      final row = await _client
+          .from('orders')
+          .select('id')
+          .eq('tenant_id', _tenantId)
+          .eq('table_id', tableId)
+          .not('status', 'in', '("closed","cancelled")')
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+      return row?['id'] as String?;
+    } catch (_) {
+      throw const PosTransientFailure("Couldn't check that table's order.");
+    }
+  }
+
+  /// Move a whole order to another table.
+  ///
+  /// The RPC frees the old table, occupies the new one and writes the audit
+  /// row. Same-table is a no-op server-side, but the sheet refuses it first so
+  /// nobody watches a spinner to achieve nothing.
+  Future<void> transferOrder({
+    required String orderId,
+    required String toTableId,
+  }) async {
+    try {
+      await _client.rpc(
+        'transfer_order',
+        params: {'_order_id': orderId, '_to_table': toTableId},
+      );
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    } catch (_) {
+      throw const PosTransientFailure(
+        "Couldn't reach the server. Check both tables before trying again.",
+      );
+    }
+  }
+
+  /// Move some lines onto a new order at another table, and return its id.
+  ///
+  /// The new order is minted server-side, which is why this can never be
+  /// queued: there is no id to show until the server answers.
+  Future<String> splitOrderItems({
+    required String orderId,
+    required String toTableId,
+    required List<String> itemIds,
+  }) async {
+    if (itemIds.isEmpty) {
+      throw const PosFailure('Pick at least one dish to move.');
+    }
+    try {
+      final id = await _client.rpc<dynamic>(
+        'split_order_items',
+        params: {
+          '_order_id': orderId,
+          '_to_table': toTableId,
+          '_item_ids': itemIds,
+        },
+      );
+      if (id is! String) {
+        throw const PosFailure("Those dishes couldn't be moved.");
+      }
+      return id;
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    } on PosFailure {
+      rethrow;
+    } catch (_) {
+      throw const PosTransientFailure(
+        "Couldn't reach the server. Check the order before trying again.",
+      );
     }
   }
 

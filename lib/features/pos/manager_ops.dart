@@ -1,17 +1,26 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../app/app_scaffold.dart';
+import '../../app/router.dart';
 import '../../core/format/labels.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/tokens.dart';
+import '../../data/supabase/pos_repository.dart' show PosFailure;
 import '../../data/sync/order_queue.dart';
 import '../../data/sync/sync_providers.dart';
+import '../tenant/tenant_providers.dart';
+import 'bill_providers.dart';
 import 'models.dart';
 import 'order_composer.dart';
 import 'pos_providers.dart';
+import 'table_ops_sheets.dart';
 
-/// Manager ops: 86 a dish, set a table's state.
+/// Manager ops: 86 a dish, set a table's state, and move an order between
+/// tables.
 ///
 /// Both are queued through the outbox, because both are things *other* staff
 /// need to see — a sold-out dish, a table freed — and both are safe to replay,
@@ -55,6 +64,299 @@ Future<void> showItem86Sheet({
         : 'Saved. It goes back on once you’re back on coverage.',
   );
   ref.invalidate(outboxStatusProvider);
+}
+
+/// What a long-press on a table offers: set its state, or move the order that
+/// is sitting on it.
+///
+/// The move actions only appear when there **is** an order — an empty table has
+/// nothing to transfer, merge or split, and offering it would be three taps to
+/// reach a refusal.
+Future<void> showTableActionsSheet({
+  required BuildContext context,
+  required WidgetRef ref,
+  required PosTable table,
+}) async {
+  final canMove = ref.read(hasPermissionProvider('order.create'));
+  final canMerge = ref.read(hasPermissionProvider('checkout.view'));
+
+  final action = await showModalBottomSheet<_TableAction>(
+    context: context,
+    useSafeArea: true,
+    builder: (_) => _TableActionsSheet(
+      table: table,
+      canMove: canMove && !table.isFree,
+      canMerge: canMerge && !table.isFree,
+    ),
+  );
+  if (action == null || !context.mounted) return;
+
+  switch (action) {
+    case _TableAction.state:
+      await showTableStateSheet(context: context, ref: ref, table: table);
+    case _TableAction.transfer:
+      await _transferOrder(context, ref, table);
+    case _TableAction.merge:
+      await _mergeTables(context, ref, table);
+    case _TableAction.split:
+      await _splitOrder(context, ref, table);
+  }
+}
+
+enum _TableAction { state, transfer, merge, split }
+
+class _TableActionsSheet extends StatelessWidget {
+  const _TableActionsSheet({
+    required this.table,
+    required this.canMove,
+    required this.canMerge,
+  });
+
+  final PosTable table;
+  final bool canMove;
+  final bool canMerge;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+            child: Text(
+              'Table ${table.label}',
+              style: theme.textTheme.titleLarge,
+            ),
+          ),
+          ListTile(
+            minTileHeight: Tokens.tapTarget,
+            leading: const Icon(Icons.edit_outlined),
+            title: const Text('Set table state'),
+            subtitle: Text('Now ${tableStateLabel(table.state).toLowerCase()}'),
+            onTap: () => Navigator.of(context).pop(_TableAction.state),
+          ),
+          if (canMove)
+            ListTile(
+              minTileHeight: Tokens.tapTarget,
+              leading: const Icon(Icons.swap_horiz),
+              title: const Text('Move to another table'),
+              subtitle: const Text('The whole order goes with it'),
+              onTap: () => Navigator.of(context).pop(_TableAction.transfer),
+            ),
+          if (canMerge)
+            ListTile(
+              minTileHeight: Tokens.tapTarget,
+              leading: const Icon(Icons.merge),
+              title: const Text('Merge with another table'),
+              subtitle: const Text('One bill for both'),
+              onTap: () => Navigator.of(context).pop(_TableAction.merge),
+            ),
+          if (canMove)
+            ListTile(
+              minTileHeight: Tokens.tapTarget,
+              leading: const Icon(Icons.call_split),
+              title: const Text('Split dishes to another table'),
+              subtitle: const Text('Some dishes move, the rest stay'),
+              onTap: () => Navigator.of(context).pop(_TableAction.split),
+            ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
+/// Move the whole order to another table.
+Future<void> _transferOrder(
+  BuildContext context,
+  WidgetRef ref,
+  PosTable table,
+) async {
+  final repo = ref.read(posRepoProvider);
+  if (repo == null) return;
+  if (!_requireOnline(context, ref, 'moved')) return;
+
+  final orderId = await _orderOn(context, ref, table);
+  if (orderId == null || !context.mounted) return;
+
+  final destination = await showTablePicker(
+    context: context,
+    ref: ref,
+    exclude: table,
+    title: 'Move table ${table.label} to…',
+    body:
+        'The whole order moves. Table ${table.label} is freed unless it has '
+        'another order on it.',
+    freeOnly: true,
+  );
+  if (destination == null || !context.mounted) return;
+
+  await _run(
+    context,
+    ref,
+    () => repo.transferOrder(orderId: orderId, toTableId: destination.id),
+    done: 'Moved to table ${destination.label}.',
+  );
+}
+
+/// Two parties, one bill.
+Future<void> _mergeTables(
+  BuildContext context,
+  WidgetRef ref,
+  PosTable table,
+) async {
+  final billRepo = ref.read(billRepoProvider);
+  if (billRepo == null) return;
+  if (!_requireOnline(context, ref, 'merged')) return;
+
+  final primaryOrderId = await _orderOn(context, ref, table);
+  if (primaryOrderId == null || !context.mounted) return;
+
+  final other = await showTablePicker(
+    context: context,
+    ref: ref,
+    exclude: table,
+    title: 'Merge table ${table.label} with…',
+    body:
+        'Both orders end up on one bill. Pick the table whose order joins this '
+        'one.',
+  );
+  if (other == null || !context.mounted) return;
+
+  final otherOrderId = await _orderOn(context, ref, other);
+  if (otherOrderId == null || !context.mounted) return;
+
+  String message;
+  try {
+    final billId = await billRepo.mergeOrders(
+      primaryOrderId: primaryOrderId,
+      otherOrderId: otherOrderId,
+    );
+    message = 'Merged onto one bill.';
+    ref
+      ..invalidate(activeOrdersProvider)
+      ..invalidate(openBillsProvider)
+      ..invalidate(filteredBillsProvider);
+    unawaited(ref.read(tablesProvider.notifier).refresh());
+    if (context.mounted) await context.push(Routes.billPath(billId));
+  } on PosFailure catch (e) {
+    message = e.message;
+  }
+  if (!context.mounted) return;
+  _say(context, message);
+}
+
+/// Some dishes go to a table of their own.
+Future<void> _splitOrder(
+  BuildContext context,
+  WidgetRef ref,
+  PosTable table,
+) async {
+  final repo = ref.read(posRepoProvider);
+  if (repo == null) return;
+  if (!_requireOnline(context, ref, 'split')) return;
+
+  final orderId = await _orderOn(context, ref, table);
+  if (orderId == null || !context.mounted) return;
+
+  final order = await ref.read(orderProvider(orderId).future);
+  if (order == null || !context.mounted) {
+    if (context.mounted) _say(context, "Couldn't read that order.");
+    return;
+  }
+
+  final currency = ref.read(activeTenantProvider)?.currency ?? 'USD';
+  final itemIds = await showSplitLinePicker(
+    context: context,
+    order: order,
+    currency: currency,
+  );
+  if (itemIds == null || itemIds.isEmpty || !context.mounted) return;
+
+  final destination = await showTablePicker(
+    context: context,
+    ref: ref,
+    exclude: table,
+    title: 'Move those dishes to…',
+    body: 'They become a new order on the table you pick.',
+    freeOnly: true,
+  );
+  if (destination == null || !context.mounted) return;
+
+  await _run(
+    context,
+    ref,
+    () => repo.splitOrderItems(
+      orderId: orderId,
+      toTableId: destination.id,
+      itemIds: itemIds,
+    ),
+    done:
+        '${itemIds.length} dish${itemIds.length == 1 ? '' : 'es'} moved to '
+        'table ${destination.label}.',
+  );
+}
+
+/// Which order is on this table, with the answer a waiter needs when there
+/// isn't one.
+Future<String?> _orderOn(
+  BuildContext context,
+  WidgetRef ref,
+  PosTable table,
+) async {
+  final repo = ref.read(posRepoProvider);
+  if (repo == null) return null;
+  try {
+    final id = await repo.activeOrderIdForTable(table.id);
+    if (id == null && context.mounted) {
+      _say(context, 'Table ${table.label} has no open order to move.');
+    }
+    return id;
+  } on PosFailure catch (e) {
+    if (context.mounted) _say(context, e.message);
+    return null;
+  }
+}
+
+/// None of these can be queued: each writes a destination table's state, and a
+/// split mints an order id the screen has to have.
+bool _requireOnline(BuildContext context, WidgetRef ref, String verb) {
+  if (ref.read(isOnlineProvider).valueOrNull ?? true) return true;
+  _say(
+    context,
+    "No coverage — tables can't be $verb yet. The order is safe; try again "
+    "when you're back.",
+  );
+  return false;
+}
+
+Future<void> _run(
+  BuildContext context,
+  WidgetRef ref,
+  Future<void> Function() write, {
+  required String done,
+}) async {
+  String message;
+  try {
+    await write();
+    message = done;
+    ref.invalidate(activeOrdersProvider);
+    unawaited(ref.read(tablesProvider.notifier).refresh());
+  } on PosFailure catch (e) {
+    message = e.message;
+  }
+  if (!context.mounted) return;
+  _say(context, message);
+}
+
+void _say(BuildContext context, String message) {
+  ScaffoldMessenger.of(context)
+    ..clearSnackBars()
+    ..showSnackBar(SnackBar(content: Text(message)));
 }
 
 /// Free / occupied / reserved / bill requested / cleaning, from the board.
