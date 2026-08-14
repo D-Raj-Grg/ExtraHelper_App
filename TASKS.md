@@ -1062,6 +1062,40 @@ plan; none of them changed.
       raising `23514`) can no longer roll back the guest's whole order; it lands at `placed` and this
       band is the recovery path, showing the real error when tapped.
 
+## Menu editing on the phone (2026-08-14, both clients)
+
+- [x] **The role check on the menu was never a boundary.** Every menu table carried the stock
+      `tenant_all` policy, so `requireRole("owner","manager")` in the web action guarded the button
+      and nothing else — a waiter's own token could `PATCH /rest/v1/item_variants` and halve a
+      price. Fixed server-side in the web repo (`20260814170000_menu_write_guards`): reads stay open
+      to every member (this app's till and offline cache depend on them), writes require
+      `menu.edit`. Exactly the trap already written down in CLAUDE.md, found live.
+- [x] **Four RPCs, one rule set.** `add_variant`, `update_variant`, `move_variant`, `delete_variant`
+      are `security definer` and carry the permission; the web actions were refactored onto them
+      rather than the reverse — rule 1, no business logic in Dart, and none in TypeScript either.
+      `move_variant` renumbers the item rather than swapping two rows, because rows written before
+      `sort` existed share the value 0 and a swap between equals is a silent no-op.
+- [x] **`features/menu`**: a searchable dish list quoting the buyable **price range** (a dish with
+      sizes has no buyable base price — the live web bug), and a per-dish sizes screen with add,
+      edit, move up, move down and remove. `MenuRepository` reads with an explicit `tenant_id`
+      filter and orders variants by `sort` with price delta as the tie-break, matching the till.
+- [x] **Narrower than the web on purpose.** Photo, add-ons, kitchen routing and availability stay
+      there; this is the thing an owner does standing in the restaurant. Drawer entry gated on
+      `menu.view`, controls on `menu.edit`, so a viewer gets a read-only screen rather than a door
+      that refuses everything.
+- [x] **The size sheet owns its controllers** (the Milestone E crash), and the sign is a
+      **More/Less** segmented control rather than a typed minus — a Half is a real variant and a
+      phone keyboard makes a leading `−` easy to lose.
+- [x] **Remove names the real consequence**: past orders stop showing which size was sold
+      (`order_items.variant_id` is `on delete set null`), and a rename does not — so the dialog says
+      to edit instead.
+- [x] 9 tests in `test/menu_editor_test.dart`: permission gating both ways, dead move buttons at
+      both ends of the list, the confirm dialog and its wording, the empty state, the sheet's
+      Less→negative-delta arithmetic and its disabled save, and both variant-ordering fallbacks.
+      Full suite green (265), `flutter analyze` clean.
+- [ ] **Device pass outstanding**: edit a size on a real phone against the demo tenant and confirm
+      the till and the printed ticket agree with the new order.
+
 ## Backlog / Later phases
 
 - [ ] **Offline on a physical iPhone, in airplane mode.** The one verification `CLAUDE.md` asks for

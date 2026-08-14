@@ -28,6 +28,7 @@ class AppDrawer extends ConsumerWidget {
     // `audit_logs` RLS is owner/manager only; `order.void` is held by exactly
     // those two, so it is the honest key to hang the manager log on.
     final canReview = ref.watch(hasPermissionProvider('order.void'));
+    final canSeeMenu = ref.watch(hasPermissionProvider('menu.view'));
 
     final location = GoRouterState.of(context).matchedLocation;
 
@@ -70,6 +71,17 @@ class AppDrawer extends ConsumerWidget {
                 selectedIcon: Icons.inventory_2,
                 label: 'Store room',
                 route: Routes.inventory,
+                location: location,
+              ),
+            // `menu.view` is Owner/Manager only by default; `menu.edit` gates
+            // the controls inside, so a custom role with view alone gets a
+            // read-only screen rather than a door that refuses everything.
+            if (canSeeMenu)
+              _DrawerItem(
+                icon: Icons.restaurant_menu_outlined,
+                selectedIcon: Icons.restaurant_menu,
+                label: 'Menu',
+                route: Routes.menu,
                 location: location,
               ),
             if (canReview)
