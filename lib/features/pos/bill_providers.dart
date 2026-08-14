@@ -279,14 +279,28 @@ final filteredBillsProvider = FutureProvider.autoDispose<List<OpenBillRow>>((
 ) async {
   final repo = ref.watch(billRepoProvider);
   final posRepo = ref.watch(posRepoProvider);
+  // Watched **before** the offline bail-out, and that ordering is the point: a
+  // `watch` after a throw never registers, so a chip tapped while the list is
+  // showing the offline error would move the highlight and re-run nothing. The
+  // tab would sit on a stale error until a pull-to-refresh.
+  final filter = ref.watch(billFilterProvider);
+
   if (repo == null) return const [];
   if (!await ref.read(connectivityProvider).isOnline()) {
     throw const PosFailure(offlineCheckoutMessage);
   }
 
-  final filter = ref.watch(billFilterProvider);
   // The day boundary is the server's — the same `tenant_day_start` the
   // Completed tab uses, so the two tabs never disagree about when today began.
   final since = filter.dayBound ? await posRepo?.tenantDayStart() : null;
-  return repo.bills(statuses: filter.statuses, since: since);
+  return repo.bills(
+    statuses: filter.statuses,
+    since: since,
+    // Settled lists are bound on when the bill was *settled*, not opened — see
+    // `BillRepository.bills`. "All today" includes owed bills, which have no
+    // settlement to speak of, so it stays on when they were opened.
+    sinceColumn: filter == BillFilter.paid || filter == BillFilter.voided
+        ? 'updated_at'
+        : 'created_at',
+  );
 });

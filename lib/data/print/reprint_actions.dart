@@ -73,7 +73,11 @@ Future<String> reprintOrderKots(WidgetRef ref, String orderId) async {
     var queued = 0;
     for (final kotId in kotIds) {
       final outcome = await repo.enqueue(doc: 'kot', kotId: kotId);
-      if (outcome is PrintQueued) queued++;
+      // An empty `jobIds` is not a queued ticket — `enqueue_print_job` can
+      // return null, and `_enqueue` already calls that case a failure. Counting
+      // it here would tell a waiter "3 tickets sent to print" over a printer
+      // that received nothing.
+      if (outcome is PrintQueued && outcome.jobIds.isNotEmpty) queued++;
     }
     if (queued == 0) return _noPrinterMessage;
     return queued == 1

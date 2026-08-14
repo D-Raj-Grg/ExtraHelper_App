@@ -539,6 +539,9 @@ Future<void> _togglePin(
   if (repo == null) return;
   try {
     await repo.setPinned(orderId: order.id, pinned: !order.isPinned);
+    // Guarded: a tenant switch or sign-out mid-write disposes the ref, and
+    // `invalidate` would then throw from a future nobody awaits.
+    if (!context.mounted) return;
     ref.invalidate(activeOrdersProvider);
   } on PosFailure catch (e) {
     if (!context.mounted) return;
@@ -606,12 +609,16 @@ Future<void> _cancelOrder(
   try {
     await repo.cancelOrder(orderId: order.id, reason: reason);
     message = 'Order cancelled.';
-    ref.invalidate(activeOrdersProvider);
-    unawaited(ref.read(tablesProvider.notifier).refresh());
   } on PosFailure catch (e) {
     message = e.message;
   }
   if (!context.mounted) return;
+  if (message == 'Order cancelled.') {
+    ref
+      ..invalidate(activeOrdersProvider)
+      ..invalidate(completedOrdersProvider);
+    unawaited(ref.read(tablesProvider.notifier).refresh());
+  }
   ScaffoldMessenger.of(context)
     ..clearSnackBars()
     ..showSnackBar(SnackBar(content: Text(message)));

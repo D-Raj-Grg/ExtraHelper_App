@@ -272,9 +272,18 @@ class BillRepository {
   /// `refunded` is deliberately absent: it is a *label* the app can render but
   /// not a `bill_status` value — the enum is open/partial/paid/void — and
   /// filtering on one Postgres doesn't have is a runtime 22P02.
+  ///
+  /// [sinceColumn] is `updated_at` for the settled lists, and that is the whole
+  /// point of it existing: a bill **opened at 23:50 and paid at 00:10** was
+  /// created yesterday. Bounding those on `created_at` would drop it out of
+  /// Paid the moment it was settled — unreachable from the phone within minutes
+  /// of the cashier taking the money, in every restaurant that trades past
+  /// midnight. `trg_bills_updated` stamps `updated_at` on settlement, so that
+  /// is when the bill actually joined the list.
   Future<List<OpenBillRow>> bills({
     required List<String> statuses,
     DateTime? since,
+    String sinceColumn = 'created_at',
     int limit = 300,
   }) async {
     try {
@@ -286,10 +295,10 @@ class BillRepository {
           .eq('tenant_id', _tenantId)
           .inFilter('status', statuses);
       if (since != null) {
-        query = query.gte('created_at', since.toUtc().toIso8601String());
+        query = query.gte(sinceColumn, since.toUtc().toIso8601String());
       }
       final rows = await query
-          .order('created_at', ascending: false)
+          .order(sinceColumn, ascending: false)
           .limit(limit);
       return rows.map(OpenBillRow.fromRow).toList();
     } catch (_) {

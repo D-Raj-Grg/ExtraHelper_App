@@ -412,6 +412,10 @@ class PosRepository {
           })
           .eq('id', orderId)
           .eq('tenant_id', _tenantId);
+    } on PostgrestException catch (e) {
+      // A refusal is final and a timeout is not — conflating them is the
+      // classification bug `PLANNING.md` §2 rule 3 exists to prevent.
+      throw PosFailure(_friendly(e.message));
     } catch (_) {
       throw const PosTransientFailure("Couldn't pin that order.");
     }
@@ -426,6 +430,8 @@ class PosRepository {
           .update({'guests': guests.clamp(1, 200)})
           .eq('id', orderId)
           .eq('tenant_id', _tenantId);
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
     } catch (_) {
       throw const PosTransientFailure("Couldn't save the guest count.");
     }

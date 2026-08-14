@@ -231,22 +231,36 @@ Future<void> _mergeTables(
   if (otherOrderId == null || !context.mounted) return;
 
   String message;
+  String? billId;
   try {
-    final billId = await billRepo.mergeOrders(
+    billId = await billRepo.mergeOrders(
       primaryOrderId: primaryOrderId,
       otherOrderId: otherOrderId,
     );
     message = 'Merged onto one bill.';
-    ref
-      ..invalidate(activeOrdersProvider)
-      ..invalidate(openBillsProvider)
-      ..invalidate(filteredBillsProvider);
-    unawaited(ref.read(tablesProvider.notifier).refresh());
-    if (context.mounted) await context.push(Routes.billPath(billId));
   } on PosFailure catch (e) {
     message = e.message;
+  } finally {
+    // **Refreshed even when it failed.** A merge is two RPCs, and the first —
+    // `create_bill_for_order` — has already moved the primary order to `billed`
+    // by the time the second can refuse. Invalidating only on success would
+    // leave that order on the board, and tapping it would open the composer for
+    // an order the server considers billed.
+    if (context.mounted) {
+      ref
+        ..invalidate(activeOrdersProvider)
+        ..invalidate(openBillsProvider)
+        ..invalidate(filteredBillsProvider)
+        ..invalidate(completedOrdersProvider);
+      unawaited(ref.read(tablesProvider.notifier).refresh());
+    }
   }
+
   if (!context.mounted) return;
+  if (billId != null) {
+    await context.push(Routes.billPath(billId));
+    return;
+  }
   _say(context, message);
 }
 
@@ -263,7 +277,12 @@ Future<void> _splitOrder(
   final orderId = await _orderOn(context, ref, table);
   if (orderId == null || !context.mounted) return;
 
-  final order = await ref.read(orderProvider(orderId).future);
+  // **Refresh, don't read.** `orderProvider` is a plain family with nothing
+  // invalidating it, so a second split on the same table would be offered the
+  // snapshot from the first — including the lines it already moved. Picking one
+  // sends a dead `order_items.id` to `split_order_items`, which moves fewer
+  // rows than the waiter chose, or none at all.
+  final order = await ref.refresh(orderProvider(orderId).future);
   if (order == null || !context.mounted) {
     if (context.mounted) _say(context, "Couldn't read that order.");
     return;
@@ -295,9 +314,11 @@ Future<void> _splitOrder(
       toTableId: destination.id,
       itemIds: itemIds,
     ),
-    done:
-        '${itemIds.length} dish${itemIds.length == 1 ? '' : 'es'} moved to '
-        'table ${destination.label}.',
+    // Deliberately not "3 dishes moved": `split_order_items` returns the new
+    // order's id, not a count, and it succeeds when **at least one** line
+    // matched. Naming a number here would let the app claim more than the
+    // server did.
+    done: 'Moved to table ${destination.label}.',
   );
 }
 
@@ -344,12 +365,15 @@ Future<void> _run(
   try {
     await write();
     message = done;
-    ref.invalidate(activeOrdersProvider);
-    unawaited(ref.read(tablesProvider.notifier).refresh());
   } on PosFailure catch (e) {
     message = e.message;
   }
+  // `ref` after disposal throws, and it would throw from a future nobody
+  // awaits — an unhandled error rather than a visible one. A tenant switch or
+  // a sign-out mid-write is exactly when this lands.
   if (!context.mounted) return;
+  ref.invalidate(activeOrdersProvider);
+  unawaited(ref.read(tablesProvider.notifier).refresh());
   _say(context, message);
 }
 
