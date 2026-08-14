@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_scaffold.dart';
 import '../../core/format/money.dart';
+import '../../core/theme/theme_mode_provider.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/widgets/choice_chip.dart';
 import '../../data/supabase/auth_repository.dart';
 import '../../data/supabase/supabase_providers.dart';
 import 'tenant_providers.dart';
@@ -21,6 +23,7 @@ class AccountScreen extends ConsumerWidget {
     final tenant = ref.watch(activeTenantProvider);
     final permissions = ref.watch(permissionsProvider);
     final user = ref.watch(currentUserProvider);
+    final themeMode = ref.watch(themeModeProvider);
 
     return AppScaffold(
       title: 'Account',
@@ -50,6 +53,30 @@ class AccountScreen extends ConsumerWidget {
               _Row(label: 'Timezone', value: tenant.timezone),
               const SizedBox(height: 20),
             ],
+            Text('Appearance', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(
+              'Kept on this device. Light unless you say otherwise, so a phone '
+              'that darkens itself in the evening cannot change the till '
+              'mid-service.',
+              style: theme.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final mode in ThemeMode.values)
+                  AppChoiceChip(
+                    label: themeModeLabel(mode),
+                    selected: themeMode == mode,
+                    onSelect: () =>
+                        ref.read(themeModeProvider.notifier).set(mode),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 24),
+
             Text('What you can do here', style: theme.textTheme.titleMedium),
             const SizedBox(height: 4),
             Text(

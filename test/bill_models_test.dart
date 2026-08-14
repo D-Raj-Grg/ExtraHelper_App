@@ -139,6 +139,7 @@ void main() {
       required int totalCents,
       List<PaymentRow> payments = const [],
       String status = 'open',
+      List<DiscountRow> discounts = const [],
     }) => BillSnapshot(
       bill: Bill(
         id: 'b1',
@@ -163,9 +164,37 @@ void main() {
       ],
       payments: payments,
       charges: const [],
-      discounts: const [],
+      discounts: discounts,
       settings: const TenantMoneySettings(),
     );
+
+    // Mirrors the SQL predicate in remove_bill_discount: a staff discount is
+    // bill-level (no order item) and not a coupon. If these two drift apart the
+    // sheet offers a Remove button that takes something else off, or none at
+    // all when there is something to take off.
+    test('the staff bill discount ignores coupons and line discounts', () {
+      final s = snapshotWith(
+        totalCents: 1000,
+        discounts: const [
+          DiscountRow(type: 'percent', value: 5, couponCode: 'SAVE5'),
+          DiscountRow(type: 'percent', value: 10, orderItemId: 'l1'),
+          DiscountRow(type: 'percent', value: 20, reason: 'manager'),
+        ],
+      );
+      expect(s.staffBillDiscount?.value, 20);
+      expect(s.hasStaffBillDiscount, isTrue);
+    });
+
+    test('a coupon alone is not a staff bill discount', () {
+      final s = snapshotWith(
+        totalCents: 1000,
+        discounts: const [
+          DiscountRow(type: 'percent', value: 5, couponCode: 'SAVE5'),
+        ],
+      );
+      expect(s.staffBillDiscount, isNull);
+      expect(s.hasStaffBillDiscount, isFalse);
+    });
 
     PaymentRow paid(int cents) => PaymentRow(
       id: 'p$cents',

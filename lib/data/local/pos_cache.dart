@@ -177,6 +177,7 @@ class PosCache {
                   itemId: item.id,
                   name: v.name,
                   priceDeltaCents: v.priceDeltaCents,
+                  sort: Value(v.sort),
                 ),
                 mode: InsertMode.insertOrReplace,
               );
@@ -243,10 +244,16 @@ class PosCache {
                   id: v.id,
                   name: v.name,
                   priceDeltaCents: v.priceDeltaCents,
+                  sort: v.sort,
                 ),
               )
               .toList()
-            ..sort((a, b) => a.priceDeltaCents.compareTo(b.priceDeltaCents));
+            ..sort((a, b) {
+              final bySort = a.sort.compareTo(b.sort);
+              return bySort != 0
+                  ? bySort
+                  : a.priceDeltaCents.compareTo(b.priceDeltaCents);
+            });
 
       final ms = (modifierIdsByItem[r.id] ?? const <String>[])
           .map((id) => modifierById[id])

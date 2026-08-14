@@ -380,6 +380,9 @@ class _OrdersTab extends ConsumerWidget {
     final currency = tenant?.currency ?? 'USD';
     final canCancel = ref.watch(canCancelOrderProvider);
     final canPrintSlip = ref.watch(hasPermissionProvider('order.view'));
+    // Kitchen reaches this board on `order.view` alone, and `accept_qr_order`
+    // would refuse it — no permission means no control, never a dead button.
+    final canFire = ref.watch(hasPermissionProvider('order.fire'));
 
     return Scaffold(
       floatingActionButton: onNewTakeaway == null
@@ -466,6 +469,9 @@ class _OrdersTab extends ConsumerWidget {
                           : null,
                       onCancel: canCancel
                           ? () => _cancelOrder(context, ref, shown[i])
+                          : null,
+                      onAcceptQr: canFire && shown[i].awaitingQrAccept
+                          ? () => _acceptQrOrder(context, ref, shown[i])
                           : null,
                     ),
                   ),
@@ -624,6 +630,52 @@ Future<void> _cancelOrder(
     ..showSnackBar(SnackBar(content: Text(message)));
 }
 
+/// The waiter accepted a guest's QR order.
+///
+/// Only shown where the tenant asked for confirmation (`qr_auto_fire` off) —
+/// otherwise the order is with the kitchen before it ever reaches this board.
+/// Not queued offline: `accept_qr_order` is a kitchen action, and a ticket that
+/// syncs half an hour later is worse than one the waiter re-sends on coverage.
+Future<void> _acceptQrOrder(
+  BuildContext context,
+  WidgetRef ref,
+  PosOrder order,
+) async {
+  final repo = ref.read(posRepoProvider);
+  if (repo == null) return;
+
+  if (!(ref.read(isOnlineProvider).valueOrNull ?? true)) {
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text(
+            "No coverage — the kitchen can't be reached yet. Try again when "
+            "you're back.",
+          ),
+        ),
+      );
+    return;
+  }
+
+  String message;
+  var sent = false;
+  try {
+    final kots = await repo.acceptQrOrder(order.id);
+    sent = true;
+    message = kots > 0
+        ? 'Sent to the kitchen · $kots ticket${kots == 1 ? '' : 's'}.'
+        : 'Already with the kitchen.';
+  } on PosFailure catch (e) {
+    message = e.message;
+  }
+  if (!context.mounted) return;
+  if (sent) ref.invalidate(activeOrdersProvider);
+  ScaffoldMessenger.of(context)
+    ..clearSnackBars()
+    ..showSnackBar(SnackBar(content: Text(message)));
+}
+
 /// The waiter carried the plate over.
 ///
 /// `served` used to be set only as a side effect of the kitchen bumping the
@@ -669,6 +721,7 @@ class _OrderCard extends StatelessWidget {
     required this.onPin,
     required this.onPrintSlip,
     required this.onCancel,
+    required this.onAcceptQr,
   });
 
   final PosOrder order;
@@ -687,6 +740,10 @@ class _OrderCard extends StatelessWidget {
   /// worse than no button.
   final VoidCallback? onPrintSlip;
   final VoidCallback? onCancel;
+
+  /// Null unless this is a guest's QR order still waiting to be accepted, and
+  /// the user may fire — see [PosOrder.awaitingQrAccept].
+  final VoidCallback? onAcceptQr;
 
   @override
   Widget build(BuildContext context) {
@@ -844,6 +901,45 @@ class _OrderCard extends StatelessWidget {
                           minimumSize: const Size(0, Tokens.tapTarget),
                         ),
                         child: const Text('Delivered'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              // A guest ordered and nobody has told the kitchen yet. Same
+              // shape as the "Ready to run" band, in the attention colour with
+              // its own icon — the two must not read alike in greyscale.
+              if (onAcceptQr != null) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+                  decoration: BoxDecoration(
+                    color: semantic.attention.withValues(alpha: 0.16),
+                    border: Border.all(color: semantic.attention),
+                    borderRadius: BorderRadius.circular(Tokens.radiusMd),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.qr_code_2,
+                        size: 18,
+                        color: semantic.attentionText,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Waiting for you',
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: semantic.attentionText,
+                          ),
+                        ),
+                      ),
+                      FilledButton(
+                        onPressed: onAcceptQr,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(0, Tokens.tapTarget),
+                        ),
+                        child: const Text('Send to kitchen'),
                       ),
                     ],
                   ),

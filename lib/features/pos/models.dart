@@ -7,16 +7,22 @@ class PosVariant {
     required this.id,
     required this.name,
     required this.priceDeltaCents,
+    this.sort = 0,
   });
 
   final String id;
   final String name;
   final int priceDeltaCents;
 
+  /// Owner-chosen display order, set on the web menu editor. Price order is
+  /// not the same thing — a Half is cheaper but may still belong last.
+  final int sort;
+
   static PosVariant fromRow(Map<String, dynamic> r) => PosVariant(
     id: r['id'] as String,
     name: (r['name'] as String?) ?? '',
     priceDeltaCents: (r['price_delta_cents'] as int?) ?? 0,
+    sort: (r['sort'] as int?) ?? 0,
   );
 }
 
@@ -354,6 +360,14 @@ class PosOrder {
       lines.where((l) => !l.isVoid).fold(0, (sum, l) => sum + l.qty);
 
   bool get canFire => lines.any((l) => !l.isVoid && l.status == 'draft');
+
+  /// A guest's QR order nobody has accepted yet.
+  ///
+  /// Only happens where the tenant turned `qr_auto_fire` off; with it on the
+  /// order is already `in_kitchen` when it reaches this board. The lines stay
+  /// `placed` (never `draft`) so [canFire] is false for them — this is the
+  /// waiter's own "send it" gate, not the composer's.
+  bool get awaitingQrAccept => orderType == 'qr' && status == 'placed';
 
   /// Ready to bill: something has actually gone to the kitchen.
   ///

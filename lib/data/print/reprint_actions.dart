@@ -42,6 +42,18 @@ Future<String> reprintBill(WidgetRef ref, String billId) => _enqueue(
   queued: 'Receipt sent to print.',
 );
 
+/// The bill, before anyone pays it.
+///
+/// Same document and the same permission — `buildBill` heads an unsettled bill
+/// "ESTIMATE" and prints no tender lines, so nothing here has to ask for a
+/// different one. What differs is only what it is called in front of the person
+/// who pressed it: they are presenting a bill, not reprinting a receipt.
+///
+/// Queuing this stamps `bills.bill_printed_total_cents`, which is how the
+/// checkout screen later knows the guest is holding an out-of-date slip.
+Future<String> printBillEstimate(WidgetRef ref, String billId) =>
+    _enqueue(ref, doc: 'bill', billId: billId, queued: 'Bill sent to print.');
+
 /// The order slip — the waiter's copy, not the kitchen's. Needs `order.view`.
 Future<String> reprintOrderSlip(WidgetRef ref, String orderId) => _enqueue(
   ref,

@@ -52,6 +52,10 @@ class CachedVariants extends Table with _TenantScoped {
   TextColumn get name => text()();
   IntColumn get priceDeltaCents => integer()();
 
+  /// Owner-chosen display order. Defaulted so a phone upgrading from v3 keeps
+  /// its cached menu instead of losing the column and the rows with it.
+  IntColumn get sort => integer().withDefault(const Constant(0))();
+
   @override
   Set<Column<Object>> get primaryKey => {tenantId, id};
 }
@@ -189,11 +193,12 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.memory() : super(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
-  /// v2 added the identity cache, v3 the store room. A phone that already has an
-  /// older file is upgraded in place — dropping the file would take the outbox
-  /// with it, and the outbox may be holding a real order.
+  /// v2 added the identity cache, v3 the store room, v4 the variant display
+  /// order. A phone that already has an older file is upgraded in place —
+  /// dropping the file would take the outbox with it, and the outbox may be
+  /// holding a real order.
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) => m.createAll(),
@@ -204,6 +209,9 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 3) {
         await m.createTable(cachedInventoryItems);
+      }
+      if (from < 4) {
+        await m.addColumn(cachedVariants, cachedVariants.sort);
       }
     },
   );

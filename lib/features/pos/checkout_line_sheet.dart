@@ -152,6 +152,33 @@ class _LineSheetState extends State<_LineSheet> {
             if (line.isAdjustable && widget.canDiscount) ...[
               const SizedBox(height: 18),
               SheetLabel('Discount this line'),
+              // A second discount replaces this one rather than adding to it,
+              // so show what is already off and offer to take it back.
+              if (line.discountCents > 0) ...[
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Now: ${money(line.discountCents, widget.currency)} off',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton.icon(
+                      icon: const Icon(Icons.close, size: 18),
+                      label: const Text('Remove'),
+                      onPressed: () {
+                        final orderItemId = line.orderItemId;
+                        if (orderItemId == null) return;
+                        Navigator.of(context).pop(
+                          RemoveDiscountAdjustment(orderItemId: orderItemId),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ],
               Row(
                 children: [
                   AppChoiceChip(

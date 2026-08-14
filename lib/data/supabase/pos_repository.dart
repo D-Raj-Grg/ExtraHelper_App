@@ -71,7 +71,7 @@ class PosRepository {
         .from('menu_items')
         .select(
           'id, name, base_price_cents, category_id, is_86, is_veg, image_url, '
-          'item_variants(id, name, price_delta_cents), '
+          'item_variants(id, name, price_delta_cents, sort), '
           'item_modifiers(modifiers(id, name, price_cents))',
         )
         .eq('tenant_id', _tenantId)
@@ -83,7 +83,12 @@ class PosRepository {
           (r['item_variants'] as List<dynamic>? ?? const [])
               .map((v) => PosVariant.fromRow(v as Map<String, dynamic>))
               .toList()
-            ..sort((a, b) => a.priceDeltaCents.compareTo(b.priceDeltaCents));
+            ..sort((a, b) {
+              final bySort = a.sort.compareTo(b.sort);
+              return bySort != 0
+                  ? bySort
+                  : a.priceDeltaCents.compareTo(b.priceDeltaCents);
+            });
 
       final modifiers = (r['item_modifiers'] as List<dynamic>? ?? const [])
           .map((l) => (l as Map<String, dynamic>)['modifiers'])
@@ -388,6 +393,28 @@ class PosRepository {
     } catch (_) {
       throw const PosTransientFailure(
         "Couldn't reach the kitchen. Check the order before re-firing.",
+      );
+    }
+  }
+
+  /// Accept a guest's QR order and send it to the kitchen.
+  ///
+  /// Only reachable when the tenant turned off `qr_auto_fire` — with it on (the
+  /// default) `place_qr_order` builds the tickets itself and the order arrives
+  /// on the board already `in_kitchen`. Returns how many tickets it made; zero
+  /// means the lines were already ticketed, which is a no-op, not an error.
+  Future<int> acceptQrOrder(String orderId) async {
+    try {
+      final res = await _client.rpc(
+        'accept_qr_order',
+        params: {'_order_id': orderId},
+      );
+      return (res as num?)?.toInt() ?? 0;
+    } on PostgrestException catch (e) {
+      throw PosFailure(_friendly(e.message));
+    } catch (_) {
+      throw const PosTransientFailure(
+        "Couldn't reach the kitchen. Check the order before sending it again.",
       );
     }
   }

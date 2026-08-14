@@ -220,6 +220,30 @@ void main() {
       expect(sent.canFire, isFalse);
     });
 
+    test('a QR order waits for a waiter only while it sits at placed', () {
+      PosOrder qr(String status) => PosOrder(
+        id: 'o',
+        status: status,
+        orderType: 'qr',
+        createdAt: DateTime(2026),
+        lines: [line('a', 1, 100, status: 'placed')],
+      );
+      // Waiter-confirmation mode: the guest sent it, the kitchen has nothing.
+      expect(qr('placed').awaitingQrAccept, isTrue);
+      // Auto-fire mode (the default) — place_qr_order already built the
+      // tickets, so there is nothing for the waiter to send.
+      expect(qr('in_kitchen').awaitingQrAccept, isFalse);
+      // A staff order at 'placed' is the composer's business, not this band's.
+      final staff = PosOrder(
+        id: 'o',
+        status: 'placed',
+        orderType: 'dine_in',
+        createdAt: DateTime(2026),
+        lines: [line('a', 1, 100, status: 'placed')],
+      );
+      expect(staff.awaitingQrAccept, isFalse);
+    });
+
     test('a fired line is not deletable — it needs a reasoned void', () {
       expect(line('a', 1, 100, status: 'placed').isFired, isTrue);
       expect(line('a', 1, 100).isFired, isFalse);
