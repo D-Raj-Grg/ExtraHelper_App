@@ -593,6 +593,7 @@ class _JobTile extends ConsumerWidget {
     'full_kot': 'Full ticket',
     'order_slip': 'Order slip',
     'bill': 'Bill',
+    'receipt': 'Receipt',
     'test': 'Test page',
   };
 

@@ -35,22 +35,26 @@ const _noPrinterMessage =
     'Settings → Printers.';
 
 /// A receipt, again. Needs `checkout.view`; the RPC enforces it.
+///
+/// `receipt` is its own document with its own printer assignment, so a counter
+/// that prints bills but hands over no receipt gets no paper here — which is
+/// the point of keeping the two apart.
 Future<String> reprintBill(WidgetRef ref, String billId) => _enqueue(
   ref,
-  doc: 'bill',
+  doc: 'receipt',
   billId: billId,
   queued: 'Receipt sent to print.',
 );
 
 /// The bill, before anyone pays it.
 ///
-/// Same document and the same permission — `buildBill` heads an unsettled bill
-/// "ESTIMATE" and prints no tender lines, so nothing here has to ask for a
-/// different one. What differs is only what it is called in front of the person
-/// who pressed it: they are presenting a bill, not reprinting a receipt.
+/// Same paper — `buildBill` heads an unsettled bill "ESTIMATE" and prints no
+/// tender lines — but a different document, because presenting the bill and
+/// handing over a receipt are switched on separately per printer.
 ///
 /// Queuing this stamps `bills.bill_printed_total_cents`, which is how the
-/// checkout screen later knows the guest is holding an out-of-date slip.
+/// checkout screen later knows the guest is holding an out-of-date slip. Only
+/// `bill` stamps it; a receipt is history, not a slip anyone is reading.
 Future<String> printBillEstimate(WidgetRef ref, String billId) =>
     _enqueue(ref, doc: 'bill', billId: billId, queued: 'Bill sent to print.');
 
