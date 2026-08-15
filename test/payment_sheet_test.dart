@@ -150,13 +150,13 @@ void main() {
 
       // Cash is selected by default — no reference, but the change field.
       expect(find.text('Reference (optional)'), findsNothing);
-      expect(find.text('Cash handed over (optional)'), findsOneWidget);
+      expect(find.text('Cash received (optional)'), findsOneWidget);
 
       await tester.tap(find.text('eSewa'));
       await tester.pumpAndSettle();
 
       expect(find.text('Reference (optional)'), findsOneWidget);
-      expect(find.text('Cash handed over (optional)'), findsNothing);
+      expect(find.text('Cash received (optional)'), findsNothing);
     });
 
     testWidgets('travels out with the method that was selected', (

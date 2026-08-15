@@ -304,7 +304,7 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                   ],
                   onChanged: (_) => setState(() {}),
                   decoration: InputDecoration(
-                    labelText: 'Cash handed over (optional)',
+                    labelText: 'Cash received (optional)',
                     prefixText: '${widget.currency} ',
                   ),
                 ),
