@@ -1108,6 +1108,33 @@ plan; none of them changed.
       `name_snapshot`, which is snapshotted at order time and does not re-read `sort` — worth one
       real print to confirm nothing else reads the order.
 
+## Digital payment methods on the phone (2026-08-14, both clients)
+
+- [x] **eSewa, FonePay and a bank transfer are offered here; `online` still is not.** The reason
+      the phone refused `online` was never that it is digital — it is that the web charges it
+      through a server-side gateway adapter with no RPC behind it, so the app would log money it
+      never collected. These three charge nothing at all: the guest scans a QR, shows the
+      confirmation, the cashier records what arrived. Same trust as a terminal card, so they are
+      safe here, and they **queue offline exactly like cash**.
+- [x] Enum values added server-side in the web repo
+      (`20260814180000_digital_payment_methods.sql`). `wallet` and `points` already existed;
+      `wallet` stays the catch-all for a provider nobody has named yet (Khalti, IME Pay, ConnectIPS).
+- [x] `paymentMethods` is now `[cash, card, esewa, fonepay, bank, wallet]`, and the split sheet
+      imports the same list — one catalogue, two sheets.
+- [x] **Labels carry brand casing.** `_humanize` would have produced "Esewa" and "Fonepay" on a
+      receipt a guest reads. `labels.dart` names all three explicitly, and `labels_test` asserts it.
+- [x] **A reference field for the methods that have one.** `record_payment` gained
+      `_reference` → `payments.reference` (trimmed server-side, blank stored as null, 120 cap).
+      `PaymentIntent` carries it and `recordPayment` passes it — omitted entirely when blank, which
+      is also what keeps the 4-arg call valid.
+- [x] **The reference belongs to the selected method.** A cashier who types an eSewa id, changes
+      their mind and takes cash must not have that id land on the cash payment. Covered in
+      `test/payment_sheet_test.dart` (9 tests) along with the offered/withheld method list.
+- [x] `flutter analyze` clean, `dart format` applied, 271 tests pass.
+
+**Still open:** the reference is not offered on a *split* tender — a split is composed under time
+pressure and there is no room for a text field per share. Revisit if a cashier asks for it.
+
 ## Backlog / Later phases
 
 - [ ] **Offline on a physical iPhone, in airplane mode.** The one verification `CLAUDE.md` asks for

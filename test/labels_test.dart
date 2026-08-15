@@ -59,10 +59,25 @@ void main() {
       // Every `payment_method` the DB can hold, including `online` — the phone
       // never offers it, but a bill settled on the web can carry one and the
       // payments list must not print the raw enum at the guest.
-      for (final v in ['cash', 'card', 'online', 'wallet', 'points']) {
+      for (final v in [
+        'cash',
+        'card',
+        'online',
+        'wallet',
+        'points',
+        'esewa',
+        'fonepay',
+        'bank',
+      ]) {
         expect(paymentMethodLabel(v), isNot(contains('_')));
       }
       expect(paymentMethodLabel('points'), 'Loyalty points');
+      // Brand names carry their own casing. The humanising fallback would
+      // capitalise these into "Esewa" and "Fonepay", which is wrong on a
+      // receipt a guest reads.
+      expect(paymentMethodLabel('esewa'), 'eSewa');
+      expect(paymentMethodLabel('fonepay'), 'FonePay');
+      expect(paymentMethodLabel('bank'), 'Bank transfer');
     });
 
     test('an enum added server-side degrades readably', () {

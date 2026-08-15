@@ -235,24 +235,31 @@ void main() {
       },
     );
 
-    test('the owner-chosen order survives the cache, price order does not', () async {
-      // Half costs less than KG but the owner put it last, so price order is
-      // exactly the wrong answer here.
-      final cache = PosCache(db);
-      await cache.adoptTenant('t1');
-      await cache.saveMenu('t1', [
-        _item(
-          'i1',
-          variants: const [
-            PosVariant(id: 'v1', name: 'Half', priceDeltaCents: 0, sort: 2),
-            PosVariant(id: 'v2', name: 'KG', priceDeltaCents: 130000, sort: 1),
-          ],
-        ),
-      ]);
+    test(
+      'the owner-chosen order survives the cache, price order does not',
+      () async {
+        // Half costs less than KG but the owner put it last, so price order is
+        // exactly the wrong answer here.
+        final cache = PosCache(db);
+        await cache.adoptTenant('t1');
+        await cache.saveMenu('t1', [
+          _item(
+            'i1',
+            variants: const [
+              PosVariant(id: 'v1', name: 'Half', priceDeltaCents: 0, sort: 2),
+              PosVariant(
+                id: 'v2',
+                name: 'KG',
+                priceDeltaCents: 130000,
+                sort: 1,
+              ),
+            ],
+          ),
+        ]);
 
-      final menu = await cache.menu('t1');
-      expect(menu.single.variants.map((v) => v.name), ['KG', 'Half']);
-    },
+        final menu = await cache.menu('t1');
+        expect(menu.single.variants.map((v) => v.name), ['KG', 'Half']);
+      },
     );
 
     test('the board and floors read back from cache alone', () async {

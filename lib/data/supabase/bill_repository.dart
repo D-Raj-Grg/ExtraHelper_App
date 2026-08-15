@@ -486,11 +486,16 @@ class BillRepository {
   /// `unique(tenant_id, idempotency_key)` and clamps the amount to what is
   /// outstanding, which together are what make a retry safe and a *new* key on
   /// a retry a double charge. Never mint one here.
+  ///
+  /// [reference] is the guest-side transaction id for a wallet or bank payment.
+  /// It is descriptive only — the server never treats it as proof of anything,
+  /// and it does not take part in dedup.
   Future<String> recordPayment({
     required String billId,
     required String method,
     required int amountCents,
     required String idempotencyKey,
+    String? reference,
   }) async {
     if (amountCents <= 0) {
       throw const PosFailure('Enter an amount to take.');
@@ -503,6 +508,8 @@ class BillRepository {
           '_method': method,
           '_amount_cents': amountCents,
           '_idempotency_key': idempotencyKey,
+          if (reference != null && reference.trim().isNotEmpty)
+            '_reference': reference.trim(),
         },
       );
       return status is String ? status : 'partial';
