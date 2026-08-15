@@ -179,6 +179,31 @@ void main() {
     expect(find.text('On the house'), findsOneWidget);
   });
 
+  testWidgets('a wrongly-added item can be taken off from the list', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(permissions: manager, snapshot: _snapshot(), role: 'manager'),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Remove Dal bhat'));
+    await tester.pumpAndSettle();
+
+    // The reason is the server's requirement, not a nicety: `void_order_item`
+    // refuses without one.
+    expect(find.text('Remove Dal bhat?'), findsOneWidget);
+  });
+
+  testWidgets('without order.void there is no delete button on a line', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_app(permissions: cashier, snapshot: _snapshot()));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Remove Dal bhat'), findsNothing);
+  });
+
   testWidgets(
     'the discount key alone is not enough — the RPC wants a manager too',
     (tester) async {

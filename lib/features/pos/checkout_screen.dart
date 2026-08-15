@@ -22,6 +22,7 @@ import 'checkout_line_sheet.dart';
 import 'checkout_payment_sheet.dart';
 import 'checkout_split_sheet.dart';
 import 'pos_providers.dart';
+import 'void_reason_dialog.dart';
 
 /// The bill: what is on it, what it comes to, and what has been paid.
 ///
@@ -408,6 +409,30 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     await _apply(adjustment);
   }
 
+  /// Remove one line straight from the list.
+  ///
+  /// The sheet already offers this, but a wrongly-added item is the single most
+  /// common correction mid-service and it should not need two taps and a read.
+  /// Same RPC, same mandatory reason — `void_order_item` is the only path.
+  Future<void> _voidLine(BillLine line) async {
+    final orderItemId = line.orderItemId;
+    if (orderItemId == null) return;
+
+    final reason = await showVoidReasonDialog(
+      context: context,
+      title: 'Remove ${line.description}?',
+      // `void_order_item` takes the line, not a quantity — on a line of three
+      // all three go. Say so rather than let someone find out after the fact.
+      body:
+          '${line.qty > 1 ? 'All ${line.qty} come off this bill' : 'The line comes off this bill'} '
+          'and the kitchen is told to drop it. '
+          'Stock already deducted is returned.',
+      confirmLabel: 'Remove it',
+    );
+    if (reason == null || !mounted) return;
+    await _apply(VoidLineAdjustment(orderItemId: orderItemId, reason: reason));
+  }
+
   @override
   Widget build(BuildContext context) {
     final snapshot = ref.watch(billSnapshotProvider(widget.billId));
@@ -468,6 +493,9 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
               error: _error,
               onAdjust: live ? () => _adjust(s, currency) : null,
               onLine: live ? (line) => _openLine(line, currency) : null,
+              onVoidLine: live && ref.watch(canVoidLineProvider)
+                  ? _voidLine
+                  : null,
               onSplit: live && canPay && s.canTakePayment
                   ? () => _split(currency)
                   : null,
@@ -495,6 +523,7 @@ class _Body extends StatelessWidget {
     required this.error,
     required this.onAdjust,
     required this.onLine,
+    required this.onVoidLine,
     required this.onSplit,
     required this.onGuest,
     required this.onMerge,
@@ -512,6 +541,10 @@ class _Body extends StatelessWidget {
   /// Null while busy, offline, or once the bill is settled.
   final VoidCallback? onAdjust;
   final void Function(BillLine)? onLine;
+
+  /// Also null without `order.void_item` — the row hides the button rather than
+  /// offering one the RPC will refuse.
+  final void Function(BillLine)? onVoidLine;
   final VoidCallback? onSplit;
   final VoidCallback? onGuest;
   final void Function(MergeableOrder)? onMerge;
@@ -557,7 +590,12 @@ class _Body extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 12),
-        _LinesCard(snapshot: snapshot, currency: currency, onLine: onLine),
+        _LinesCard(
+          snapshot: snapshot,
+          currency: currency,
+          onLine: onLine,
+          onVoidLine: onVoidLine,
+        ),
         const SizedBox(height: 12),
         _TotalsCard(snapshot: snapshot, currency: currency, onAdjust: onAdjust),
         if (onSplit != null) ...[
@@ -661,11 +699,13 @@ class _LinesCard extends StatelessWidget {
     required this.snapshot,
     required this.currency,
     required this.onLine,
+    required this.onVoidLine,
   });
 
   final BillSnapshot snapshot;
   final String currency;
   final void Function(BillLine)? onLine;
+  final void Function(BillLine)? onVoidLine;
 
   @override
   Widget build(BuildContext context) {
@@ -723,6 +763,27 @@ class _LinesCard extends StatelessWidget {
                       style: (theme.textTheme.bodyMedium ?? const TextStyle())
                           .tabular,
                     ),
+                    // A line `recompute_bill` wrote with no order item behind
+                    // it has nothing for `void_order_item` to take, so it gets
+                    // no button — but it keeps the gutter, or the money column
+                    // would step in and out down the card.
+                    if (onVoidLine != null && !line.isAdjustable)
+                      const SizedBox(width: 4 + Tokens.tapTarget),
+                    if (onVoidLine != null && line.isAdjustable) ...[
+                      const SizedBox(width: 4),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, size: 20),
+                        color: theme.colorScheme.error,
+                        constraints: const BoxConstraints(
+                          minWidth: Tokens.tapTarget,
+                          minHeight: Tokens.tapTarget,
+                        ),
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.standard,
+                        tooltip: 'Remove ${line.description}',
+                        onPressed: () => onVoidLine!(line),
+                      ),
+                    ],
                   ],
                 ),
               ),
