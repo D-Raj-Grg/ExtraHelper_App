@@ -10,6 +10,7 @@ import '../features/dashboard/dashboard_screen.dart';
 import '../features/dev/design_gallery.dart';
 import '../features/inventory/inventory_screen.dart';
 import '../features/kds/kds_screen.dart';
+import '../features/menu/menu_screen.dart';
 import '../features/pos/checkout_screen.dart';
 import '../features/pos/manager_ops.dart';
 import '../features/settings/printing_screen.dart';
@@ -25,6 +26,7 @@ abstract final class Routes {
   static const kds = '/kitchen';
   static const dashboard = '/dashboard';
   static const inventory = '/store-room';
+  static const menu = '/menu';
   static const managerLog = '/manager-log';
   static const printing = '/printing';
   static const account = '/account';
@@ -117,6 +119,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: Routes.inventory,
         builder: (context, state) => const InventoryScreen(),
+      ),
+      GoRoute(
+        path: Routes.menu,
+        builder: (context, state) => const MenuScreen(),
       ),
       GoRoute(
         path: Routes.managerLog,

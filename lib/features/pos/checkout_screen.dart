@@ -108,6 +108,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
           method: intent.method,
           amountCents: intent.amountCents,
           idempotencyKey: key,
+          reference: intent.reference,
         );
       });
       // It landed. The next payment is a genuinely new one, even for the same

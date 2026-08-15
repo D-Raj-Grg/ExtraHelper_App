@@ -1062,6 +1062,79 @@ plan; none of them changed.
       raising `23514`) can no longer roll back the guest's whole order; it lands at `placed` and this
       band is the recovery path, showing the real error when tapped.
 
+## Menu editing on the phone (2026-08-14, both clients)
+
+- [x] **The role check on the menu was never a boundary.** Every menu table carried the stock
+      `tenant_all` policy, so `requireRole("owner","manager")` in the web action guarded the button
+      and nothing else — a waiter's own token could `PATCH /rest/v1/item_variants` and halve a
+      price. Fixed server-side in the web repo (`20260814170000_menu_write_guards`): reads stay open
+      to every member (this app's till and offline cache depend on them), writes require
+      `menu.edit`. Exactly the trap already written down in CLAUDE.md, found live.
+- [x] **Four RPCs, one rule set.** `add_variant`, `update_variant`, `move_variant`, `delete_variant`
+      are `security definer` and carry the permission; the web actions were refactored onto them
+      rather than the reverse — rule 1, no business logic in Dart, and none in TypeScript either.
+      `move_variant` renumbers the item rather than swapping two rows, because rows written before
+      `sort` existed share the value 0 and a swap between equals is a silent no-op.
+- [x] **`features/menu`**: a searchable dish list quoting the buyable **price range** (a dish with
+      sizes has no buyable base price — the live web bug), and a per-dish sizes screen with add,
+      edit, move up, move down and remove. `MenuRepository` reads with an explicit `tenant_id`
+      filter and orders variants by `sort` with price delta as the tie-break, matching the till.
+- [x] **Narrower than the web on purpose.** Photo, add-ons, kitchen routing and availability stay
+      there; this is the thing an owner does standing in the restaurant. Drawer entry gated on
+      `menu.view`, controls on `menu.edit`, so a viewer gets a read-only screen rather than a door
+      that refuses everything.
+- [x] **The size sheet owns its controllers** (the Milestone E crash), and the sign is a
+      **More/Less** segmented control rather than a typed minus — a Half is a real variant and a
+      phone keyboard makes a leading `−` easy to lose.
+- [x] **Remove names the real consequence**: past orders stop showing which size was sold
+      (`order_items.variant_id` is `on delete set null`), and a rename does not — so the dialog says
+      to edit instead.
+- [x] 9 tests in `test/menu_editor_test.dart`: permission gating both ways, dead move buttons at
+      both ends of the list, the confirm dialog and its wording, the empty state, the sheet's
+      Less→negative-delta arithmetic and its disabled save, and both variant-ordering fallbacks.
+      Full suite green (265), `flutter analyze` clean.
+- [x] **Device pass done** (2026-08-14, iOS simulator, real backend). `integration_test/menu_edit_device_test.dart`
+      signs in as a throwaway owner on a throwaway tenant, walks drawer → Menu → dish, taps **move
+      down**, asserts the row that was second is now first and nothing else moved, then reads the
+      **till's own query** (`PosRepository.menu()`) on the same live session and asserts it lists
+      the sizes in the editor's order. Green on `iPhone 17` (iOS 26), and the write was confirmed in
+      the database afterwards — `250 gm, 1 Jir, 1 Kg` → `1 Jir, 250 gm, 1 Kg` — so this is the RPC
+      landing, not a local rebuild. Tenant and both users deleted after.
+
+      The till assertion goes through the repository rather than the POS screen on purpose: the POS
+      board shows *orders*, and a waiter only reaches the dish grid by starting one. The first run
+      failed exactly there, which is what the shape of the app actually is.
+- [ ] Printed-ticket check still outstanding: a KOT for a variant line names the size in
+      `name_snapshot`, which is snapshotted at order time and does not re-read `sort` — worth one
+      real print to confirm nothing else reads the order.
+
+## Digital payment methods on the phone (2026-08-14, both clients)
+
+- [x] **eSewa, FonePay and a bank transfer are offered here; `online` still is not.** The reason
+      the phone refused `online` was never that it is digital — it is that the web charges it
+      through a server-side gateway adapter with no RPC behind it, so the app would log money it
+      never collected. These three charge nothing at all: the guest scans a QR, shows the
+      confirmation, the cashier records what arrived. Same trust as a terminal card, so they are
+      safe here, and they **queue offline exactly like cash**.
+- [x] Enum values added server-side in the web repo
+      (`20260814180000_digital_payment_methods.sql`). `wallet` and `points` already existed;
+      `wallet` stays the catch-all for a provider nobody has named yet (Khalti, IME Pay, ConnectIPS).
+- [x] `paymentMethods` is now `[cash, card, esewa, fonepay, bank, wallet]`, and the split sheet
+      imports the same list — one catalogue, two sheets.
+- [x] **Labels carry brand casing.** `_humanize` would have produced "Esewa" and "Fonepay" on a
+      receipt a guest reads. `labels.dart` names all three explicitly, and `labels_test` asserts it.
+- [x] **A reference field for the methods that have one.** `record_payment` gained
+      `_reference` → `payments.reference` (trimmed server-side, blank stored as null, 120 cap).
+      `PaymentIntent` carries it and `recordPayment` passes it — omitted entirely when blank, which
+      is also what keeps the 4-arg call valid.
+- [x] **The reference belongs to the selected method.** A cashier who types an eSewa id, changes
+      their mind and takes cash must not have that id land on the cash payment. Covered in
+      `test/payment_sheet_test.dart` (9 tests) along with the offered/withheld method list.
+- [x] `flutter analyze` clean, `dart format` applied, 271 tests pass.
+
+**Still open:** the reference is not offered on a *split* tender — a split is composed under time
+pressure and there is no room for a text field per share. Revisit if a cashier asks for it.
+
 ## Backlog / Later phases
 
 - [ ] **Offline on a physical iPhone, in airplane mode.** The one verification `CLAUDE.md` asks for

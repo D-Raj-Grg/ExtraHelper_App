@@ -13,8 +13,24 @@ import 'bill_models.dart';
 /// `online` is deliberately absent. The web charges a card through a
 /// server-side gateway adapter that has no RPC behind it, so an app offering
 /// "Card (online)" would record a payment it never collected. A card taken on a
-/// terminal at the table is [card], the same as the web's offline card path.
-const paymentMethods = ['cash', 'card', 'wallet'];
+/// terminal at the table is `card`, the same as the web's offline card path.
+///
+/// eSewa, FonePay and a bank transfer are safe here for the opposite reason:
+/// nothing charges them. The guest scans a QR, shows the confirmation, and the
+/// cashier records what arrived — the same trust as a terminal card. That also
+/// means they queue offline exactly like cash.
+const paymentMethods = ['cash', 'card', 'esewa', 'fonepay', 'bank', 'wallet'];
+
+/// Methods that carry a guest-side transaction id worth keeping. Cash has none;
+/// for the rest it is what makes the payment reconcilable against the
+/// provider's own statement later.
+const _referenceMethods = {'card', 'esewa', 'fonepay', 'bank', 'wallet'};
+
+bool paymentMethodTakesReference(String method) =>
+    _referenceMethods.contains(method);
+
+/// The server caps `payments.reference`; mirror it so the field can't overrun.
+const paymentReferenceMax = 120;
 
 /// What the cashier decided to do with the balance.
 enum PaymentMode {
@@ -30,23 +46,33 @@ enum PaymentMode {
 
 /// The result of the sheet — what to do, once the sheet is gone.
 class PaymentIntent {
-  const PaymentIntent.take({required this.method, required this.amountCents})
-    : mode = PaymentMode.full,
-      isCredit = false;
+  const PaymentIntent.take({
+    required this.method,
+    required this.amountCents,
+    this.reference,
+  }) : mode = PaymentMode.full,
+       isCredit = false;
 
-  const PaymentIntent.partial({required this.method, required this.amountCents})
-    : mode = PaymentMode.partial,
-      isCredit = false;
+  const PaymentIntent.partial({
+    required this.method,
+    required this.amountCents,
+    this.reference,
+  }) : mode = PaymentMode.partial,
+       isCredit = false;
 
   const PaymentIntent.credit()
     : mode = PaymentMode.credit,
       method = 'cash',
       amountCents = 0,
+      reference = null,
       isCredit = true;
 
   final PaymentMode mode;
   final String method;
   final int amountCents;
+
+  /// The guest's transaction id, when they had one. Null for cash.
+  final String? reference;
   final bool isCredit;
 }
 
@@ -97,6 +123,7 @@ class _PaymentSheetState extends State<_PaymentSheet> {
     text: (widget.snapshot.dueCents / 100).toStringAsFixed(2),
   );
   final _tendered = TextEditingController();
+  final _reference = TextEditingController();
 
   PaymentMode _mode = PaymentMode.full;
   String _method = 'cash';
@@ -108,6 +135,7 @@ class _PaymentSheetState extends State<_PaymentSheet> {
   void dispose() {
     _amount.dispose();
     _tendered.dispose();
+    _reference.dispose();
     super.dispose();
   }
 
@@ -129,10 +157,24 @@ class _PaymentSheetState extends State<_PaymentSheet> {
       setState(() => _error = 'Enter an amount to take.');
       return;
     }
+    // Only the methods that offer the field carry one out — switching to cash
+    // after typing an eSewa id must not stamp that id on the cash payment.
+    final typed = _reference.text.trim();
+    final ref = paymentMethodTakesReference(_method) && typed.isNotEmpty
+        ? typed
+        : null;
     Navigator.of(context).pop(
       _mode == PaymentMode.full
-          ? PaymentIntent.take(method: _method, amountCents: cents)
-          : PaymentIntent.partial(method: _method, amountCents: cents),
+          ? PaymentIntent.take(
+              method: _method,
+              amountCents: cents,
+              reference: ref,
+            )
+          : PaymentIntent.partial(
+              method: _method,
+              amountCents: cents,
+              reference: ref,
+            ),
     );
   }
 
@@ -235,6 +277,21 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                 ],
               ),
 
+              if (paymentMethodTakesReference(_method)) ...[
+                const SizedBox(height: 14),
+                TextField(
+                  controller: _reference,
+                  maxLength: paymentReferenceMax,
+                  textCapitalization: TextCapitalization.characters,
+                  onChanged: (_) => setState(() => _error = null),
+                  decoration: const InputDecoration(
+                    labelText: 'Reference (optional)',
+                    helperText: 'Transaction id from the guest’s confirmation',
+                    counterText: '',
+                  ),
+                ),
+              ],
+
               if (_method == 'cash') ...[
                 const SizedBox(height: 14),
                 TextField(
@@ -247,7 +304,7 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                   ],
                   onChanged: (_) => setState(() {}),
                   decoration: InputDecoration(
-                    labelText: 'Cash handed over (optional)',
+                    labelText: 'Cash received (optional)',
                     prefixText: '${widget.currency} ',
                   ),
                 ),

@@ -61,6 +61,11 @@ const _paymentMethodLabels = {
   // adapter, so an app that offered "Card (online)" would log money it never
   // collected. See `TASKS.md`.
   'online': 'Card (online)',
+  // Record-only: nothing is charged, the cashier records what the guest's
+  // confirmation screen showed. Safe on the phone, unlike `online`.
+  'esewa': 'eSewa',
+  'fonepay': 'FonePay',
+  'bank': 'Bank transfer',
   'wallet': 'Wallet',
   'points': 'Loyalty points',
 };

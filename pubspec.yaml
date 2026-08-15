@@ -5,7 +5,7 @@ publish_to: 'none'
 # The build number after the + must strictly increase on every upload to App Store
 # Connect / Play — a number is burned the moment a build carrying it is accepted,
 # even if that build is later superseded.
-version: 1.0.7+5
+version: 1.0.7+6
 
 environment:
   sdk: ^3.10.7
@@ -53,6 +53,10 @@ dependencies:
 
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+  # On-device pass for the menu editor: the widget suite proves what is drawn,
+  # this proves the RPCs answer from a real build against the real backend.
+  integration_test:
     sdk: flutter
   flutter_lints: ^6.0.0
   drift_dev: ^2.34.0
