@@ -106,13 +106,21 @@ class KdsTicket {
   /// Whether this ticket is finished, and therefore off the pass.
   ///
   /// **The order half matters as much as the kitchen half.** A ticket the
-  /// kitchen never bumped, on an order that has since been billed, closed or
+  /// kitchen never bumped, on an order that has since been closed or
   /// cancelled, is history: the food went out, the guest paid and left. Without
   /// this it sat on the board forever, and every cook learned to ignore the
   /// bottom of the list. The web settled the same rule in `isKotCompleted`.
+  ///
+  /// `billed` is **not** in that set, and leaving it in was a live hole: the
+  /// amend RPCs now take new items on a `billed` order while its bill is
+  /// unpaid, and firing them makes a real ticket on an order that stays
+  /// `billed`. Counting that as history hid the round from the only screen the
+  /// kitchen looks at — the guest was charged for food nobody ever cooked.
+  /// `closed` is the status that means paid, and it is the one that belongs
+  /// here.
   bool get isCompleted =>
       status == KotStatus.served ||
-      const {'billed', 'closed', 'cancelled'}.contains(orderStatus);
+      const {'closed', 'cancelled'}.contains(orderStatus);
 
   /// The ticket is its least-advanced live line — the same rank ladder
   /// `set_kot_item_status` uses server-side, so an optimistic tap agrees with

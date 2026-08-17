@@ -56,13 +56,43 @@ void main() {
     });
 
     test(
-      'a cancelled order is closed, so nothing offers to cancel it twice',
+      'a cancelled order is settled, so nothing offers to cancel it twice',
       () {
-        expect(_order(status: 'cancelled').isClosed, isTrue);
-        expect(_order(status: 'billed').isClosed, isTrue);
-        expect(_order().isClosed, isFalse);
+        expect(_order(status: 'cancelled').isSettled, isTrue);
+        expect(_order(status: 'billed').isSettled, isTrue);
+        expect(_order().isSettled, isFalse);
       },
     );
+
+    test('the bill\'s status rides in on the embed', () {
+      final order = PosOrder.fromRow({
+        'id': 'o1',
+        'status': 'billed',
+        'order_type': 'dine_in',
+        'created_at': '2026-08-14T13:00:00Z',
+        'bills': {'id': 'b1', 'status': 'open'},
+      });
+
+      expect(order.billId, 'b1');
+      expect(order.billStatus, 'open');
+      // Printed but unpaid: another round is still allowed.
+      expect(order.isAmendable, isTrue);
+    });
+
+    test('a row fetched without the bills embed knows no bill status', () {
+      // Older callers select the order alone. A missing embed must read as
+      // "unknown", never as an open bill — that would offer to add items to
+      // an order the server has already shut.
+      final order = PosOrder.fromRow({
+        'id': 'o1',
+        'status': 'billed',
+        'order_type': 'dine_in',
+        'created_at': '2026-08-14T13:00:00Z',
+      });
+
+      expect(order.billStatus, isNull);
+      expect(order.isAmendable, isFalse);
+    });
   });
 
   group('cancel reason', () {

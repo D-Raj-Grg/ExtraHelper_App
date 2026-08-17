@@ -373,6 +373,7 @@ class BillSnapshot {
     this.customer,
     this.mergeable = const [],
     this.waiterName,
+    this.orderId,
   });
 
   final Bill bill;
@@ -384,6 +385,17 @@ class BillSnapshot {
   final BillCustomer? customer;
   final List<MergeableOrder> mergeable;
   final String? waiterName;
+
+  /// The **one** order behind this bill, when there is exactly one.
+  ///
+  /// Null on a merged tab, and that is the point. `add_order_to_bill` points
+  /// several orders at a single bill — two tables sharing one ticket — and the
+  /// reader takes the oldest of them for the guest details. Handing that id to
+  /// the composer would put table 6's next round onto table 5's order, and the
+  /// runner would carry it to the wrong table. The web shipped exactly that
+  /// bug. With no way to ask *which* order the new round belongs to, the honest
+  /// answer is to offer nothing: staff add the round from the floor instead.
+  final String? orderId;
 
   int get paidCents => payments.fold(0, (n, p) => n + p.amountCents);
 
@@ -416,4 +428,23 @@ class BillSnapshot {
 
   /// Money can still be taken. A void bill can't, whatever it is owed.
   bool get canTakePayment => bill.isSettleable && dueCents > 0;
+
+  /// Another round can still go onto this ticket.
+  ///
+  /// Mirrors `amend_order_add_item` / `amend_order_add_custom_item` **exactly**:
+  /// the bill must be `open` and carry no `completed` payment. Deliberately
+  /// *not* [Bill.isSettleable] — that also admits `partial`, which the RPC
+  /// refuses ("this bill has already taken a payment"), and a button that can
+  /// only dead-end is worse than no button. The web shipped the looser
+  /// predicate first and had to tighten it to `open`.
+  ///
+  /// [payments] is already filtered to `status = 'completed'` by the repository,
+  /// so the emptiness check is the same fact the RPC's `exists (…)` asks. It is
+  /// near-redundant with `open` — `record_payment` rolls the bill to `partial`
+  /// — but it is what the server checks, so it is what is checked here.
+  ///
+  /// [orderId] is part of it because the composer needs an order to open, and a
+  /// merged bill cannot say which one. See [orderId].
+  bool get canAddItems =>
+      orderId != null && bill.status == 'open' && payments.isEmpty;
 }

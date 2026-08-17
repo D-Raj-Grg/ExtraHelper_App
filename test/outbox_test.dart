@@ -318,6 +318,45 @@ void main() {
       expect(h.transport.calls.length, 1, reason: 'dead rows are not retried');
     });
 
+    test(
+      'a round refused by a paid bill dies alone, and the fire still goes',
+      () async {
+        // The waiter added one more beer to a billed order while the cashier
+        // was taking the money. `amend_order_add_item` refuses it, and that
+        // refusal must stay this entry's business: only a dead *create*
+        // orphans what follows it, and this order was created long ago.
+        final h = _harness();
+        h.transport.failures.add(
+          const TransportRejected('this bill has already taken a payment'),
+        );
+
+        final refused = await h.queue.addItem(
+          orderRef: 'order-1',
+          line: _line('b'),
+        );
+        final fired = await h.queue.fire('order-1');
+
+        expect(refused.isRejected, isTrue);
+        expect(refused.error, 'this bill has already taken a payment');
+
+        final rows = await h.store.all();
+        expect(rows[0].kind, OutboxKind.amendAdd);
+        expect(rows[0].state, OutboxState.dead);
+        expect(rows[0].attempts, 0, reason: 'a reject is not a retry');
+        expect(rows[0].lastError, 'this bill has already taken a payment');
+
+        // The fire is untouched by its neighbour's refusal.
+        expect(fired.synced, isTrue);
+        expect(fired.isRejected, isFalse);
+        expect(h.transport.calls, ['addItem:order-1:b', 'fire:order-1']);
+
+        // And the reason survives for the waiter to read off the queue.
+        final dead = await h.queue.deadEntries();
+        expect(dead.single.kind, OutboxKind.amendAdd);
+        expect(dead.single.lastError, contains('already taken a payment'));
+      },
+    );
+
     test('six transient failures: dead after five, error preserved', () async {
       final h = _harness();
       for (var i = 0; i < 6; i++) {

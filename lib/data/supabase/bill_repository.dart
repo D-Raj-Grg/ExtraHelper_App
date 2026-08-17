@@ -57,7 +57,7 @@ class BillRepository {
     final List<Map<String, dynamic>> paymentRows;
     final List<Map<String, dynamic>> chargeRows;
     final List<Map<String, dynamic>> discountRows;
-    final Map<String, dynamic>? orderRow;
+    final List<Map<String, dynamic>> orderRows;
     final Map<String, dynamic>? settingsRow;
 
     try {
@@ -104,8 +104,13 @@ class BillRepository {
             .eq('bill_id', billId)
             .eq('tenant_id', _tenantId)
             .order('created_at')
-            .limit(1)
-            .maybeSingle(),
+            // Two, not one. A bill can span **several** orders —
+            // `add_order_to_bill` points each of them at the same bill, which
+            // is how two tables share a tab — and the oldest one is still the
+            // right row to read the guest off. But "add items" needs to know
+            // whether that row is the *only* one, and one extra row answers
+            // that without a second round trip.
+            .limit(2),
         _client
             .from('tenant_settings')
             .select('points_value_cents')
@@ -118,7 +123,7 @@ class BillRepository {
       paymentRows = _rows(results[2]);
       chargeRows = _rows(results[3]);
       discountRows = _rows(results[4]);
-      orderRow = results[5] as Map<String, dynamic>?;
+      orderRows = _rows(results[5]);
       settingsRow = results[6] as Map<String, dynamic>?;
     } on PostgrestException catch (e) {
       throw PosFailure(_friendly(e.message));
@@ -132,6 +137,16 @@ class BillRepository {
       );
     }
     final bill = Bill.fromRow(billRow);
+
+    // The oldest order on the bill — the guest and the waiter are read off it,
+    // exactly as before.
+    final orderRow = orderRows.firstOrNull;
+    // …but its id only travels onward when it is the *whole* bill. On a merged
+    // tab there is no single "this order", and guessing puts one table's round
+    // on another table's ticket. See [BillSnapshot.orderId].
+    final soleOrderId = orderRows.length == 1
+        ? orderRows.first['id'] as String?
+        : null;
 
     final orderItemIds = itemRows
         .map((r) => r['order_item_id'] as String?)
@@ -226,6 +241,7 @@ class BillRepository {
       customer: _customerOf(orderRow),
       mergeable: mergeableRows.map(MergeableOrder.fromRow).toList(),
       waiterName: waiterName,
+      orderId: soleOrderId,
     );
   }
 

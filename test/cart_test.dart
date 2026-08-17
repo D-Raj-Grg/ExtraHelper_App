@@ -249,26 +249,60 @@ void main() {
       expect(line('a', 1, 100).isFired, isFalse);
     });
 
-    test('billed, closed and cancelled orders are shut for edits', () {
-      for (final s in ['billed', 'closed', 'cancelled']) {
-        final o = PosOrder(
+    test(
+      'billed, closed and cancelled orders are out of the waiter\'s hands',
+      () {
+        for (final s in ['billed', 'closed', 'cancelled']) {
+          final o = PosOrder(
+            id: 'o',
+            status: s,
+            orderType: 'dine_in',
+            createdAt: DateTime(2026),
+          );
+          expect(o.isSettled, isTrue, reason: s);
+        }
+        for (final s in ['draft', 'in_kitchen', 'ready', 'served']) {
+          final o = PosOrder(
+            id: 'o',
+            status: s,
+            orderType: 'dine_in',
+            createdAt: DateTime(2026),
+          );
+          expect(o.isSettled, isFalse, reason: s);
+        }
+      },
+    );
+
+    test(
+      'one more beer goes on a billed order only while the bill is unpaid',
+      () {
+        PosOrder o(String status, {String? billStatus}) => PosOrder(
           id: 'o',
-          status: s,
+          status: status,
           orderType: 'dine_in',
           createdAt: DateTime(2026),
+          billStatus: billStatus,
         );
-        expect(o.isClosed, isTrue, reason: s);
-      }
-      for (final s in ['draft', 'in_kitchen', 'ready', 'served']) {
-        final o = PosOrder(
-          id: 'o',
-          status: s,
-          orderType: 'dine_in',
-          createdAt: DateTime(2026),
-        );
-        expect(o.isClosed, isFalse, reason: s);
-      }
-    });
+
+        // Over and done with — the table has gone, or the order never happened.
+        expect(o('closed').isAmendable, isFalse);
+        expect(o('cancelled').isAmendable, isFalse);
+
+        // The bill is printed but nobody has paid: the round still goes on.
+        expect(o('billed', billStatus: 'open').isAmendable, isTrue);
+
+        // Money has changed hands, so a new order is the honest answer.
+        expect(o('billed', billStatus: 'paid').isAmendable, isFalse);
+        expect(o('billed', billStatus: 'partial').isAmendable, isFalse);
+
+        // No embed, no idea — and guessing "open" would offer an action the
+        // server is about to refuse.
+        expect(o('billed').isAmendable, isFalse);
+
+        // Mid-service, long before any bill exists.
+        expect(o('served').isAmendable, isTrue);
+      },
+    );
   });
 }
 

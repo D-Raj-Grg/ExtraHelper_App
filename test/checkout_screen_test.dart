@@ -37,7 +37,11 @@ BillSnapshot _snapshot({
   BillCustomer? customer,
   DateTime? printedAt,
   int? printedTotalCents,
+  // Null by default, which is what a merged tab reads as: the screen then
+  // offers nothing rather than putting one table's round on another's order.
+  String? orderId,
 }) => BillSnapshot(
+  orderId: orderId,
   bill: Bill(
     id: _billId,
     status: status,
@@ -329,6 +333,146 @@ void main() {
     expect(find.text('Due'), findsOneWidget);
     expect(find.text('NPR 6.00'), findsOneWidget);
     expect(find.text('Part paid'), findsOneWidget);
+  });
+
+  // --- another round on a bill that is out but unpaid ---------------------
+  //
+  // The slip is printed, the guest asks for one more beer, and nobody has paid
+  // yet. `amend_order_add_item` allows exactly that, and only that: once money
+  // has moved the order is shut and the round belongs on a fresh one. A button
+  // offered a moment later than the server allows is a waiter promising a
+  // guest something the RPC is about to refuse.
+
+  /// Walks to the foot of the lazy list, so a `findsNothing` means the control
+  /// is absent rather than merely unbuilt.
+  Future<void> toFoot(WidgetTester tester) async {
+    for (var i = 0; i < 8; i++) {
+      await tester.drag(find.byType(ListView), const Offset(0, -400));
+      await tester.pumpAndSettle();
+    }
+  }
+
+  const orderTaker = {'checkout.view', 'payment.take', 'order.create'};
+
+  testWidgets('an unpaid bill for one table can still take another round', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        permissions: orderTaker,
+        snapshot: _snapshot(orderId: 'order-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.dragUntilVisible(
+      find.text('Add items'),
+      find.byType(ListView),
+      const Offset(0, -80),
+    );
+    expect(find.text('Add items'), findsOneWidget);
+    expect(find.text('More for this table'), findsOneWidget);
+  });
+
+  testWidgets('without order.create the round is somebody else\'s job', (
+    tester,
+  ) async {
+    // The same fixture as above but for the one key. If this passed with the
+    // cashier set, the test above would be proving nothing.
+    await tester.pumpWidget(
+      _app(
+        permissions: cashier,
+        snapshot: _snapshot(orderId: 'order-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await toFoot(tester);
+
+    expect(find.text('Add items'), findsNothing);
+  });
+
+  testWidgets('once a payment has landed the round goes on a new order', (
+    tester,
+  ) async {
+    // record_payment rolls the bill to `partial`, and the RPC refuses it with
+    // "this bill has already taken a payment".
+    await tester.pumpWidget(
+      _app(
+        permissions: orderTaker,
+        snapshot: _snapshot(
+          status: 'partial',
+          paidCents: 400,
+          orderId: 'order-1',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await toFoot(tester);
+
+    expect(find.text('Add items'), findsNothing);
+  });
+
+  testWidgets('a paid bill is finished, however much the table wants', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        permissions: orderTaker,
+        snapshot: _snapshot(
+          status: 'paid',
+          paidCents: 1000,
+          orderId: 'order-1',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await toFoot(tester);
+
+    expect(find.text('Add items'), findsNothing);
+  });
+
+  testWidgets('a voided bill takes no more food either', (tester) async {
+    await tester.pumpWidget(
+      _app(
+        permissions: orderTaker,
+        snapshot: _snapshot(status: 'void', orderId: 'order-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await toFoot(tester);
+
+    expect(find.text('Add items'), findsNothing);
+  });
+
+  testWidgets('offline the round is not offered at all', (tester) async {
+    // Unlike payment and printing, this one is absent rather than disabled: an
+    // amend queued offline against a bill someone settles in the meantime
+    // resolves as a dead outbox row, after the guest has been given a total.
+    await tester.pumpWidget(
+      _app(
+        permissions: orderTaker,
+        snapshot: _snapshot(orderId: 'order-1'),
+        online: false,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await toFoot(tester);
+
+    expect(find.text('Add items'), findsNothing);
+  });
+
+  testWidgets('a merged tab cannot say whose round it would be', (
+    tester,
+  ) async {
+    // Two tables on one ticket. Picking either order sends table 6's beer to
+    // table 5 — the web shipped exactly that. Staff add it from the floor.
+    await tester.pumpWidget(
+      _app(permissions: orderTaker, snapshot: _snapshot()),
+    );
+    await tester.pumpAndSettle();
+    await toFoot(tester);
+
+    expect(find.text('Add items'), findsNothing);
   });
 
   // --- presenting the bill -------------------------------------------------
