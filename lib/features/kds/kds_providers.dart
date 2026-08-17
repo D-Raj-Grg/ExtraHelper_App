@@ -203,7 +203,7 @@ final kdsBoardProvider = Provider<KdsBoard>((ref) {
     // A ready ticket on a bill that has been paid is not work in hand.
     live: visible.where((t) => !t.isCompleted).toList(),
     // **Only what the kitchen itself bumped.** A ticket that left the board
-    // because its order was billed, closed or cancelled is not recallable in
+    // because its order was closed or cancelled is not recallable in
     // any useful sense — `recall_kot` would put a ticket for a paid-and-gone
     // table back on the pass. It also has no date bound in the query, unlike
     // `served`, so listing it here would leave a ticket from three weeks ago on

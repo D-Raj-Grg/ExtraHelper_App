@@ -140,10 +140,17 @@ class PosRepository {
 
   // --- Orders --------------------------------------------------------------
 
+  /// The bill embed carries `status`, not just the id: since the amend RPCs
+  /// started accepting items on a `billed` order whose bill is still `open`,
+  /// the order's own status no longer says whether it can be added to. The
+  /// `!orders_bill_id_fkey` hint is load-bearing for the same reason it is on
+  /// [_completedSelect] — more than one path reaches `bills`, and PostgREST
+  /// refuses the embed rather than guessing.
   static const _orderSelect =
       'id, status, order_type, created_at, table_id, guests, bill_id, '
       'pinned_at, '
       'restaurant_tables!orders_table_id_fkey(label), '
+      'bills!orders_bill_id_fkey(id, status), '
       'order_items(id, name_snapshot, qty, unit_price_cents, status, is_void, notes, '
       'order_item_modifiers(name_snapshot))';
 
@@ -712,6 +719,9 @@ class PosRepository {
     }
     if (m.contains('no valid items')) {
       return 'None of those dishes are available any more.';
+    }
+    if (m.contains('already taken a payment')) {
+      return 'This bill has already been paid — start a new order for the table.';
     }
     if (m.contains('table implies')) {
       return 'Pick a table or takeaway, not both.';

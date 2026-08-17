@@ -200,14 +200,51 @@ class _PosScreenState extends ConsumerState<PosScreen> {
       return;
     }
 
-    final open = (orders ?? const <PosOrder>[])
-        .where((o) => o.tableId == table.id && !o.isClosed)
+    var open = (orders ?? const <PosOrder>[])
+        .where((o) => o.tableId == table.id && !o.isSettled)
         .firstOrNull;
 
+    // Last resort before starting a second order on a table that is mid-
+    // payment. `activeOrders` excludes `billed` at the SQL level, so on a
+    // `bill_requested` table the filter above finds nothing by construction —
+    // and the bill lookup that should have caught it just missed, whether it
+    // timed out, threw, or returned null. Falling through to
+    // `OrderComposer(seedTable:)` here was only ever right when a billed order
+    // couldn't be amended; now it is a duplicate order.
+    //
+    // `activeOrderIdForTable` is the query that deliberately finds billed
+    // orders — it excludes closed and cancelled only. Capped the same six
+    // seconds as everything else on this tap: a slow answer must not freeze a
+    // waiter mid-service, and if it can't resolve either we are no worse off
+    // than before.
+    if (open == null && table.state == 'bill_requested' && online) {
+      final posRepo = ref.read(posRepoProvider);
+      if (posRepo != null) {
+        try {
+          final orderId = await posRepo
+              .activeOrderIdForTable(table.id)
+              .timeout(const Duration(seconds: 6));
+          if (!mounted) return;
+          if (orderId != null) {
+            open = await posRepo
+                .order(orderId)
+                .timeout(const Duration(seconds: 6));
+            if (!mounted) return;
+          }
+        } on Object {
+          // Keep the existing behaviour: a new order on this table. The board
+          // and the Bills tab both still show the truth.
+        }
+      }
+    }
+
+    // Copied to a final so the builder can promote it — a mutable local never
+    // narrows inside a closure.
+    final resolved = open;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => open != null
-            ? OrderComposer(existingOrder: open)
+        builder: (_) => resolved != null
+            ? OrderComposer(existingOrder: resolved)
             : OrderComposer(seedTable: table),
       ),
     );

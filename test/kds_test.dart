@@ -136,16 +136,28 @@ void main() {
       expect(t.isCompleted, isTrue);
     });
 
-    test('a ready ticket on a billed order leaves the pass', () {
+    test('a ready ticket on a closed order leaves the pass', () {
       // The live defect this fixes: the food went out, the guest paid, and the
       // ticket sat on the board forever because nobody bumped it. A board with
       // permanent residents is a board cooks stop reading.
       final t = _ticket(
         [_line('a', KotStatus.ready)],
         status: KotStatus.ready,
-        orderStatus: 'billed',
+        orderStatus: 'closed',
       );
       expect(t.isCompleted, isTrue);
+    });
+
+    test('a new ticket on a billed order is work in hand, not history', () {
+      // `billed` says a bill was printed, not that anyone paid it. A table that
+      // asks for the bill and then orders one more round fires a real ticket
+      // onto an order that stays `billed` — and this predicate is what decides
+      // whether the kitchen ever sees it. Treating it as finished charged the
+      // guest for food nobody cooked.
+      final t = _ticket([
+        _line('a', KotStatus.newTicket),
+      ], orderStatus: 'billed');
+      expect(t.isCompleted, isFalse);
     });
 
     test('closed and cancelled orders take their tickets with them', () {
@@ -172,7 +184,7 @@ void main() {
       final billed = _ticket(
         [_line('a', KotStatus.ready)],
         status: KotStatus.ready,
-        orderStatus: 'billed',
+        orderStatus: 'closed',
       );
       final bumped = _ticket(
         [_line('a', KotStatus.served)],

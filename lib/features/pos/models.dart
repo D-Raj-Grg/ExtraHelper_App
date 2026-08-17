@@ -327,6 +327,7 @@ class PosOrder {
     this.tableLabel,
     this.guests,
     this.billId,
+    this.billStatus,
     this.pinnedAt,
     this.lines = const [],
   });
@@ -343,6 +344,13 @@ class PosOrder {
   /// the card's "Bill" into "Open bill" — `create_bill_for_order` is idempotent
   /// either way, but the word should tell the truth.
   final String? billId;
+
+  /// The bill's own status (`open`, `settled`, `void`, …), from the embed —
+  /// null when no bill exists yet, or when a caller built this order from a row
+  /// that didn't select the embed. It is the second half of [isAmendable]: once
+  /// checkout runs, the order says `billed` but the bill is what decides
+  /// whether the kitchen can still be sent more food.
+  final String? billStatus;
 
   /// Set while a waiter is holding this order at the top of the board. A
   /// display preference and nothing more — see `PosRepository.setPinned`.
@@ -375,12 +383,36 @@ class PosOrder {
   /// the button before then is offering a guaranteed error.
   bool get canBill => lines.any((l) => !l.isVoid && l.isFired);
 
-  /// Settled or abandoned — no further edits.
-  bool get isClosed =>
+  /// Past the service stage: billed, settled or abandoned. Destructive and
+  /// lifecycle actions (fire, bill, cancel, void-by-lifecycle) are not offered
+  /// for these — the order has left the waiter's hands.
+  ///
+  /// Deliberately **not** the same question as [isAmendable]: a `billed` order
+  /// whose bill is still open is settled for lifecycle purposes yet can still
+  /// take another round of drinks.
+  bool get isSettled =>
       status == 'billed' || status == 'closed' || status == 'cancelled';
+
+  /// Whether the server will accept another item on this order.
+  ///
+  /// Mirrors `amend_order_add_item` / `amend_order_add_custom_item`: `closed`
+  /// and `cancelled` are refused outright, and a `billed` order is refused only
+  /// once its bill has left `open`. Adding to an open bill is the normal
+  /// "one more beer after the bill was printed" case, and the DB trigger keeps
+  /// the bill's total in step with the lines.
+  ///
+  /// **Necessary but not sufficient.** The server also refuses when a
+  /// `completed` payment exists against the bill, which nothing here can see —
+  /// so this only decides whether to *offer* the action. The RPC is the real
+  /// boundary, and its rejection is surfaced verbatim rather than pre-empted.
+  bool get isAmendable =>
+      status != 'closed' &&
+      status != 'cancelled' &&
+      (status != 'billed' || billStatus == 'open');
 
   static PosOrder fromRow(Map<String, dynamic> r) {
     final table = r['restaurant_tables'] as Map<String, dynamic>?;
+    final bill = r['bills'] as Map<String, dynamic>?;
     final lines = (r['order_items'] as List<dynamic>? ?? const [])
         .map((l) => PosOrderLine.fromRow(l as Map<String, dynamic>))
         .toList();
@@ -394,7 +426,8 @@ class PosOrder {
       tableId: r['table_id'] as String?,
       tableLabel: table?['label'] as String?,
       guests: r['guests'] as int?,
-      billId: r['bill_id'] as String?,
+      billId: (r['bill_id'] as String?) ?? bill?['id'] as String?,
+      billStatus: bill?['status'] as String?,
       pinnedAt: DateTime.tryParse((r['pinned_at'] as String?) ?? '')?.toLocal(),
       lines: lines,
     );

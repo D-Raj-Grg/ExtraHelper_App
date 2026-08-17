@@ -140,7 +140,9 @@ void main() {
       List<PaymentRow> payments = const [],
       String status = 'open',
       List<DiscountRow> discounts = const [],
+      String? orderId = 'o1',
     }) => BillSnapshot(
+      orderId: orderId,
       bill: Bill(
         id: 'b1',
         status: status,
@@ -224,5 +226,51 @@ void main() {
     test('item total is the lines, before any bill-level arithmetic', () {
       expect(snapshotWith(totalCents: 1300).itemTotalCents, 500);
     });
+
+    test('an unpaid single-order bill can still take another round', () {
+      final s = snapshotWith(totalCents: 1000);
+      expect(s.orderId, 'o1');
+      expect(s.canAddItems, isTrue);
+    });
+
+    test('once a payment lands, the round goes on a new order', () {
+      // record_payment rolls the bill to 'partial', and the RPC refuses either
+      // way — both halves of the predicate are checked here on purpose.
+      expect(
+        snapshotWith(
+          totalCents: 1000,
+          status: 'partial',
+          payments: [paid(400)],
+        ).canAddItems,
+        isFalse,
+      );
+      // Belt and braces: a completed payment against a bill still reading
+      // 'open' must close the door just the same.
+      expect(
+        snapshotWith(totalCents: 1000, payments: [paid(400)]).canAddItems,
+        isFalse,
+      );
+    });
+
+    test('a paid or void bill takes no more food', () {
+      expect(
+        snapshotWith(totalCents: 1000, status: 'paid').canAddItems,
+        isFalse,
+      );
+      expect(
+        snapshotWith(totalCents: 1000, status: 'void').canAddItems,
+        isFalse,
+      );
+    });
+
+    test(
+      'a merged tab cannot say whose next round it is, so it offers none',
+      () {
+        // Two tables on one ticket: handing either order id to the composer
+        // sends table 6's beer to table 5. Staff add it from the floor instead.
+        final s = snapshotWith(totalCents: 1000, orderId: null);
+        expect(s.canAddItems, isFalse);
+      },
+    );
   });
 }

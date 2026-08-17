@@ -53,6 +53,15 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
 
   bool get _isAmend => widget.existingOrder != null;
 
+  /// The guest is holding a printed slip, or is about to be.
+  ///
+  /// The server now takes new lines on a `billed` order while its bill is
+  /// still open, and a trigger keeps the bill's total in step. That is the
+  /// right behaviour — a table that orders one more round shouldn't need a
+  /// second order — but it means a tap in here silently reprices a total
+  /// somebody has already read. Everything gated on this exists to say so.
+  bool get _isBilled => widget.existingOrder?.status == 'billed';
+
   @override
   void initState() {
     super.initState();
@@ -334,6 +343,9 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
   /// firing path: an order the kitchen can't see isn't an order anyone placed,
   /// and the two-button version had waiters saving drafts that never cooked.
   Future<void> _commitAndFire() async {
+    // Read before the commit: the toast fires after this widget has popped, and
+    // the wording depends on what the order was when the waiter tapped.
+    final billed = _isBilled;
     setState(() => _busy = true);
     try {
       final result = await _cart.commit(fire: true);
@@ -348,9 +360,19 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
 
       // Queued-but-not-sent is a success. Say what happened plainly, and never
       // leave a waiter wondering whether the kitchen has it.
+      //
+      // On a billed order the bill moved too — a trigger resyncs its total the
+      // moment the lines land — and the slip in the guest's hand is now wrong.
+      // Naming the reprint here is the difference between a corrected charge
+      // and an argument at the till.
       _toast(
         result.synced
-            ? 'Sent to the kitchen.'
+            ? (billed
+                  ? 'Sent to the kitchen. The bill was updated — reprint it.'
+                  : 'Sent to the kitchen.')
+            : billed
+            ? 'Saved. It goes to the kitchen and updates the bill the moment '
+                  "you're back on coverage — reprint the bill after that."
             : "Saved. It goes to the kitchen the moment you're back on "
                   'coverage.',
       );
@@ -408,7 +430,13 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
           IconButton(
             onPressed: _busy ? null : _openBill,
             icon: const Icon(Icons.point_of_sale),
-            tooltip: 'Bill this order',
+            // Once the order has a bill, `create_bill_for_order` is idempotent
+            // and hands back the one that exists — so this taps through to a
+            // bill rather than making one. Saying "Bill this order" there would
+            // promise a second bill that nothing will ever create.
+            tooltip: widget.existingOrder!.billId != null
+                ? 'Open bill'
+                : 'Bill this order',
           ),
         // Beside the search box, because "it isn't on the menu" is what a
         // waiter concludes after searching for it and not finding it.
@@ -419,8 +447,12 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
         ),
         // Only in amend mode: a create-mode order has nothing on the server to
         // cancel — backing out is what discards it.
+        // Deliberately `isSettled`, not `isAmendable`: adding to a billed order
+        // is now allowed, but `cancel_order` still refuses one outright. Widen
+        // this to `isAmendable` and a billed order grows a Cancel entry that
+        // can only ever end in a server error.
         if (_isAmend &&
-            !widget.existingOrder!.isClosed &&
+            !widget.existingOrder!.isSettled &&
             ref.watch(canCancelOrderProvider))
           PopupMenuButton<void>(
             tooltip: 'Order actions',
@@ -446,6 +478,13 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
       ],
       body: Column(
         children: [
+          // Above the search box, not beside the send button: the waiter has to
+          // know before they start tapping dishes, not after.
+          if (_isBilled)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(12, 10, 12, 2),
+              child: _BilledBand(),
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
             child: TextField(
@@ -557,6 +596,7 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
             currency: currency,
             busy: _busy,
             isAmend: _isAmend,
+            isBilled: _isBilled,
             onSetQty: _setQty,
             onRemove: _removeLine,
             onFire: _commitAndFire,
@@ -577,6 +617,60 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
   }
 }
 
+/// This order already has a bill, and adding to it moves the total.
+///
+/// Same shape as the checkout screen's `_StatusBand` — tinted fill, matching
+/// border, icon and words carrying the meaning so it survives a greyscale
+/// screenshot. That widget is private to its own file, so the pattern travels
+/// rather than the class. The concern is `Bill.printedTotalIsStale` seen a step
+/// earlier: there it warns that the guest is holding an old total, here it
+/// warns you are about to create one.
+class _BilledBand extends StatelessWidget {
+  const _BilledBand();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    // Orange is this system's bill-requested colour, and this is the same
+    // moment in the service — the guest is waiting to pay.
+    final color = context.semantic.attentionText;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        border: Border.all(color: color.withValues(alpha: 0.6)),
+        borderRadius: BorderRadius.circular(Tokens.radiusMd),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.warning_amber_rounded, size: 18, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'This order is already billed',
+                  style: theme.textTheme.labelLarge?.copyWith(color: color),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Anything you add goes on the same bill and changes the '
+                  'total. The bill will need reprinting.',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// The running order. Collapsed to a summary bar until tapped — on a phone the
 /// dish grid is the thing a waiter needs to see.
 class _CartPanel extends StatefulWidget {
@@ -585,6 +679,7 @@ class _CartPanel extends StatefulWidget {
     required this.currency,
     required this.busy,
     required this.isAmend,
+    required this.isBilled,
     required this.onSetQty,
     required this.onRemove,
     required this.onFire,
@@ -594,6 +689,11 @@ class _CartPanel extends StatefulWidget {
   final String currency;
   final bool busy;
   final bool isAmend;
+
+  /// Three states, not two: the kitchen half of the button is true either way,
+  /// but on a billed order the money moves too, and the label is the last place
+  /// to say so before the tap.
+  final bool isBilled;
   final void Function(CartDisplayLine, int) onSetQty;
   final void Function(CartDisplayLine) onRemove;
   final VoidCallback onFire;
@@ -688,7 +788,11 @@ class _CartPanelState extends State<_CartPanel> {
                         )
                       : const Icon(Icons.local_fire_department),
                   label: Text(
-                    widget.isAmend ? 'Send new items' : 'Send to kitchen',
+                    widget.isBilled
+                        ? 'Send & update the bill'
+                        : widget.isAmend
+                        ? 'Send new items'
+                        : 'Send to kitchen',
                   ),
                 ),
               ),

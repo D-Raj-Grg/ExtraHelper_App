@@ -21,6 +21,8 @@ import 'checkout_customer_sheet.dart';
 import 'checkout_line_sheet.dart';
 import 'checkout_payment_sheet.dart';
 import 'checkout_split_sheet.dart';
+import 'models.dart' show PosOrder;
+import 'order_composer.dart';
 import 'pos_providers.dart';
 import 'void_reason_dialog.dart';
 
@@ -342,6 +344,101 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     }
   }
 
+  /// One more round on a bill that has already been printed.
+  ///
+  /// The only way back to the composer for a `billed` order: creating the bill
+  /// drops it out of `activeOrders`, so the POS board can no longer reach it and
+  /// this screen is where the table's next drink has to start from.
+  ///
+  /// The order is read fresh rather than carried on the snapshot — the composer
+  /// needs the lines, and the bill screen deliberately doesn't hold them.
+  Future<void> _addItems(BillSnapshot snapshot) async {
+    final orderId = snapshot.orderId;
+    final repo = ref.read(posRepoProvider);
+    if (orderId == null || repo == null || _busy) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    PosOrder? order;
+    try {
+      // Capped like every other tap on this screen: a waiter mid-service must
+      // never be left holding a dead button on a slow connection.
+      order = await repo.order(orderId).timeout(const Duration(seconds: 6));
+    } on PosFailure catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = e.message;
+      });
+      return;
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error =
+            "Couldn't open that order. Check the connection and try again.";
+      });
+      return;
+    }
+    if (!mounted) return;
+
+    final loaded = order;
+    if (loaded == null) {
+      // Deleted, or moved onto another bill between the read and the tap.
+      // Refusing beats pushing a composer with nothing in it.
+      setState(() {
+        _busy = false;
+        _error =
+            'That order is no longer there. Pull down to refresh this bill.';
+      });
+      return;
+    }
+
+    // The server has the final say, but there is no point pushing a composer
+    // whose every tap will bounce: `isAmendable` is the same rule the RPC
+    // applies, read off the row we just fetched rather than off the snapshot
+    // that may predate a payment on another terminal.
+    if (!loaded.isAmendable) {
+      setState(() {
+        _busy = false;
+        _error =
+            'This bill has already been paid — start a new order for the table.';
+      });
+      return;
+    }
+
+    // `_busy` deliberately stays set across the push and the refresh below.
+    // Clearing it here would re-enable "Take payment" while the screen is still
+    // showing the pre-amend total, and the payment sheet seeds its amount from
+    // that figure — so a quick tap on return would charge the guest the old
+    // total and settle the bill short.
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => OrderComposer(existingOrder: loaded),
+      ),
+    );
+    // Back from the composer, and this screen may be gone (tenant switch,
+    // sign-out) — `ref` after dispose throws from a Future nobody is watching.
+    if (!mounted) return;
+    try {
+      // Awaited, unlike the post-print refresh: an added line changes
+      // `bills.total_cents` via `recompute_bill`, so until this lands the
+      // totals card and the due bar are quoting a figure the guest is no longer
+      // being charged. `refresh()` keeps the old data on screen while it reads,
+      // which is exactly why the screen has to stay busy until it returns.
+      await ref.read(billSnapshotProvider(widget.billId).notifier).refresh();
+      if (!mounted) return;
+      ref.invalidate(activeOrdersProvider);
+    } finally {
+      // In a finally so a failed refresh can't strand the screen busy with
+      // every control dead.
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _merge(MergeableOrder order) async {
     if (_busy) return;
     setState(() {
@@ -438,6 +535,9 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     final snapshot = ref.watch(billSnapshotProvider(widget.billId));
     final currency = ref.watch(activeTenantProvider)?.currency ?? 'USD';
     final canPay = ref.watch(hasPermissionProvider('payment.take'));
+    // The key both amend RPCs check. Same one the composer's own screen wants,
+    // so a waiter who can start a round can add to one.
+    final canOrder = ref.watch(hasPermissionProvider('order.create'));
     final online = ref.watch(isOnlineProvider).valueOrNull ?? true;
 
     return AppScaffold(
@@ -501,6 +601,19 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                   : null,
               onGuest: live && canPay ? () => _guest(s, currency) : null,
               onMerge: live ? _merge : null,
+              // Not `live`: that admits `partial`, which both amend RPCs
+              // refuse. Online is its own condition — an amend queued offline
+              // against a bill someone may settle in the meantime resolves as a
+              // dead outbox row, and the guest has already been handed a total.
+              // Eligibility and readiness are separate on purpose: the card
+              // shows whenever this bill could take another round, and only the
+              // button goes dead while something else is running. Folding
+              // `_busy` into the first test made the whole card come and go
+              // during a print, shifting everything under it.
+              canAddItems: s.canAddItems && online && canOrder,
+              onAddItems: s.canAddItems && online && !_busy && canOrder
+                  ? () => _addItems(s)
+                  : null,
               onRefund:
                   s.bill.isPaid &&
                       online &&
@@ -527,6 +640,8 @@ class _Body extends StatelessWidget {
     required this.onSplit,
     required this.onGuest,
     required this.onMerge,
+    required this.canAddItems,
+    required this.onAddItems,
     required this.onRefund,
   });
 
@@ -548,6 +663,15 @@ class _Body extends StatelessWidget {
   final VoidCallback? onSplit;
   final VoidCallback? onGuest;
   final void Function(MergeableOrder)? onMerge;
+
+  /// Whether this bill could take another round at all: unpaid, one order,
+  /// online, and the user holds `order.create`. Decides whether the card is on
+  /// screen — not whether it is tappable right now.
+  final bool canAddItems;
+
+  /// Another round onto this same order. Null while something else is running,
+  /// so the button disables without the card moving.
+  final VoidCallback? onAddItems;
 
   /// The mirror image: only on a bill that *is* settled, and only with
   /// `payment.refund`.
@@ -618,6 +742,36 @@ class _Body extends StatelessWidget {
         ],
         const SizedBox(height: 12),
         _CustomerCard(snapshot: snapshot, currency: currency, onGuest: onGuest),
+        // Above the merge card on purpose: "another round for this table" is
+        // the everyday intent, and merging a *different* table's order onto
+        // this ticket is the rarer one.
+        if (canAddItems) ...[
+          const SizedBox(height: 12),
+          CheckoutCard(
+            title: 'More for this table',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'The items go on this same bill, and the total changes — the '
+                  'guest will need the bill again.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: onAddItems,
+                  icon: const Icon(Icons.add_shopping_cart, size: 18),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, Tokens.tapTarget),
+                  ),
+                  label: const Text('Add items'),
+                ),
+              ],
+            ),
+          ),
+        ],
         if (snapshot.mergeable.isNotEmpty && onMerge != null) ...[
           const SizedBox(height: 12),
           CheckoutCard(
