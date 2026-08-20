@@ -5,7 +5,7 @@ import '../../core/format/money.dart';
 import '../../core/theme/tokens.dart';
 import '../../data/supabase/menu_repository.dart';
 
-/// A size and what it does to the price, as typed by whoever is editing.
+/// A variant and what it does to the price, as typed by whoever is editing.
 class VariantDraft {
   const VariantDraft({required this.name, required this.priceDeltaCents});
 
@@ -13,7 +13,7 @@ class VariantDraft {
   final int priceDeltaCents;
 }
 
-/// Add or edit one size.
+/// Add or edit one variant.
 ///
 /// The sheet **owns its controllers** and disposes them in its own `State`.
 /// Creating a `TextEditingController` beside a `showModalBottomSheet` and
@@ -112,7 +112,7 @@ class _VariantSheetState extends State<_VariantSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              widget.editing == null ? 'Add a size' : 'Edit size',
+              widget.editing == null ? 'Add a variant' : 'Edit variant',
               style: theme.textTheme.titleMedium,
             ),
             Text(
@@ -128,7 +128,7 @@ class _VariantSheetState extends State<_VariantSheet> {
               textCapitalization: TextCapitalization.sentences,
               decoration: const InputDecoration(
                 labelText: 'Name',
-                hintText: 'Half, 1 kg, Large',
+                hintText: 'Half, 1 kg, Large, Mutton',
                 constraints: BoxConstraints(minHeight: Tokens.tapTarget),
               ),
             ),
@@ -188,7 +188,7 @@ class _VariantSheetState extends State<_VariantSheet> {
                         ),
                       )
                     : null,
-                child: Text(widget.editing == null ? 'Add size' : 'Save'),
+                child: Text(widget.editing == null ? 'Add variant' : 'Save'),
               ),
             ),
           ],

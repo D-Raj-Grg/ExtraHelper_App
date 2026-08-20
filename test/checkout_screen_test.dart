@@ -40,6 +40,7 @@ BillSnapshot _snapshot({
   // Null by default, which is what a merged tab reads as: the screen then
   // offers nothing rather than putting one table's round on another's order.
   String? orderId,
+  List<BillLine>? lines,
 }) => BillSnapshot(
   orderId: orderId,
   bill: Bill(
@@ -57,16 +58,18 @@ BillSnapshot _snapshot({
     printedAt: printedAt,
     printedTotalCents: printedTotalCents,
   ),
-  lines: const [
-    BillLine(
-      id: 'l1',
-      orderItemId: 'oi1',
-      description: 'Dal bhat',
-      qty: 1,
-      unitPriceCents: 1000,
-      totalCents: 1000,
-    ),
-  ],
+  lines:
+      lines ??
+      const [
+        BillLine(
+          id: 'l1',
+          orderItemId: 'oi1',
+          description: 'Dal bhat',
+          qty: 1,
+          unitPriceCents: 1000,
+          totalCents: 1000,
+        ),
+      ],
   payments: [
     if (paidCents > 0)
       PaymentRow(
@@ -578,5 +581,95 @@ void main() {
       find.widgetWithText(OutlinedButton, 'Print bill'),
     );
     expect(button.onPressed, isNull);
+  });
+
+  testWidgets('the same beer rung up twice reads as one line of two', (
+    tester,
+  ) async {
+    // Two `bill_items` rows is what a second round actually produces —
+    // `amend_order_add_item` inserts one per tap. The guest counts drinks, not
+    // rows, so the card folds them the way the printed slip already does.
+    await tester.pumpWidget(
+      _app(
+        permissions: cashier,
+        snapshot: _snapshot(
+          totalCents: 90000,
+          lines: const [
+            BillLine(
+              id: 'l1',
+              orderItemId: 'oi1',
+              description: 'Tuborg',
+              qty: 1,
+              unitPriceCents: 45000,
+              totalCents: 45000,
+            ),
+            BillLine(
+              id: 'l2',
+              orderItemId: 'oi2',
+              description: 'Tuborg',
+              qty: 1,
+              unitPriceCents: 45000,
+              totalCents: 45000,
+            ),
+          ],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Tuborg'), findsOneWidget);
+    expect(find.textContaining('2 × '), findsOneWidget);
+    expect(find.textContaining('2 rounds'), findsOneWidget);
+  });
+
+  testWidgets('removing from a folded line asks which one first', (
+    tester,
+  ) async {
+    // Every write behind this card takes a single `order_item_id`. Folding is
+    // for reading; the moment someone wants to change one, they have to say
+    // which of the rows they mean.
+    await tester.pumpWidget(
+      _app(
+        permissions: manager,
+        role: 'manager',
+        snapshot: _snapshot(
+          totalCents: 90000,
+          lines: const [
+            BillLine(
+              id: 'l1',
+              orderItemId: 'oi1',
+              description: 'Tuborg',
+              qty: 1,
+              unitPriceCents: 45000,
+              totalCents: 45000,
+            ),
+            BillLine(
+              id: 'l2',
+              orderItemId: 'oi2',
+              description: 'Tuborg',
+              qty: 1,
+              unitPriceCents: 45000,
+              totalCents: 45000,
+            ),
+          ],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Remove Tuborg'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Remove which Tuborg?'), findsOneWidget);
+    expect(find.textContaining('rung up 2 times'), findsOneWidget);
+  });
+
+  testWidgets('the bill says when it was opened', (tester) async {
+    // An unpaid bill outlives midnight on purpose. Without a date on it, one
+    // left from last night looks exactly like one opened ten minutes ago.
+    await tester.pumpWidget(_app(permissions: cashier, snapshot: _snapshot()));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Aug 13, 2026'), findsOneWidget);
   });
 }

@@ -8,7 +8,12 @@ import '../tenant/tenant_providers.dart';
 import 'menu_providers.dart';
 import 'variant_sheet.dart';
 
-/// One dish's sizes: add, rename, reprice, reorder, remove.
+/// One dish's variants: add, rename, reprice, reorder, remove.
+///
+/// "Variant", not "size": the column is `menu_item_variants` and a restaurant
+/// uses it for Half and 1 kg, but also for Chicken and Mutton. The web calls
+/// the section "Sizes & variants" and its button "Add variant" — one product,
+/// one word for the thing.
 ///
 /// Takes an **id, not an item**. Every write refreshes the list, so a captured
 /// object would keep showing the values from before the first edit.
@@ -41,7 +46,7 @@ class _ItemVariantsScreenState extends ConsumerState<ItemVariantsScreen> {
 
     if (item == null) {
       return const AppScaffold(
-        title: 'Sizes',
+        title: 'Variants',
         showDrawer: false,
         body: Center(child: CircularProgressIndicator()),
       );
@@ -57,7 +62,7 @@ class _ItemVariantsScreenState extends ConsumerState<ItemVariantsScreen> {
           ? FloatingActionButton.extended(
               onPressed: _busy ? null : () => _add(context, item, currency),
               icon: const Icon(Icons.add),
-              label: const Text('Add size'),
+              label: const Text('Add variant'),
             )
           : null,
       body: variants.isEmpty
@@ -68,17 +73,18 @@ class _ItemVariantsScreenState extends ConsumerState<ItemVariantsScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      Icons.straighten,
+                      Icons.style_outlined,
                       size: 40,
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                     const SizedBox(height: 12),
-                    Text('No sizes', style: theme.textTheme.titleMedium),
+                    Text('No variants', style: theme.textTheme.titleMedium),
                     const SizedBox(height: 6),
                     Text(
                       canEdit
-                          ? 'The dish sells at its base price. Add a size when '
-                                'a Half or a 1 kg costs something different.'
+                          ? 'The dish sells at its base price. Add a variant '
+                                'when a Half, a 1 kg or a Mutton costs '
+                                'something different.'
                           : 'The dish sells at its base price.',
                       textAlign: TextAlign.center,
                       style: theme.textTheme.bodySmall?.copyWith(
@@ -121,7 +127,7 @@ class _ItemVariantsScreenState extends ConsumerState<ItemVariantsScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'You can see the sizes but not change them.',
+                        'You can see the variants but not change them.',
                         style: theme.textTheme.bodySmall,
                       ),
                     ),
@@ -222,11 +228,11 @@ class _ItemVariantsScreenState extends ConsumerState<ItemVariantsScreen> {
       builder: (ctx) => AlertDialog(
         title: Text('Remove ${variant.name}?'),
         // The real consequence, not "are you sure": deleting the row nulls
-        // `order_items.variant_id`, so finished orders stop saying which size
-        // went out. Renaming keeps that history.
+        // `order_items.variant_id`, so finished orders stop saying which
+        // variant went out. Renaming keeps that history.
         content: const Text(
-          'Past orders will stop showing which size was sold. To fix a name or '
-          'a price, edit the size instead.',
+          'Past orders will stop showing which variant was sold. To fix a name '
+          'or a price, edit the variant instead.',
         ),
         actions: [
           TextButton(

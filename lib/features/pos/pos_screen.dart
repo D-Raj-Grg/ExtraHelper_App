@@ -7,9 +7,11 @@ import 'package:go_router/go_router.dart';
 import '../../app/router.dart';
 import '../../core/format/labels.dart';
 import '../../core/format/money.dart';
+import '../../core/format/when.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/choice_chip.dart';
+import '../../core/widgets/earlier_day_chip.dart';
 import '../../data/print/reprint_actions.dart';
 import '../../data/supabase/pos_repository.dart';
 import '../../data/sync/sync_providers.dart';
@@ -869,6 +871,13 @@ class _OrderCard extends StatelessWidget {
                     '${order.itemCount} item${order.itemCount == 1 ? '' : 's'}',
                     style: theme.textTheme.bodySmall,
                   ),
+                  // Same reason as the bill card: an order left open overnight
+                  // stays on the board by design, and nothing on it used to
+                  // say which night it came from.
+                  if (isEarlierDay(order.createdAt)) ...[
+                    const SizedBox(width: 12),
+                    Flexible(child: EarlierDayChip(at: order.createdAt)),
+                  ],
                   if (order.guests != null) ...[
                     const SizedBox(width: 12),
                     Icon(
@@ -1243,6 +1252,16 @@ class _BillCard extends StatelessWidget {
                             color: statusColor,
                           ),
                         ),
+                        // An unpaid bill deliberately outlives midnight — a
+                        // debt from last night is still a debt this morning.
+                        // Without a date on the card, though, it reads as one
+                        // that "didn't clear".
+                        if (isEarlierDay(bill.createdAt)) ...[
+                          const SizedBox(width: 8),
+                          // Flexible: at a large text size the chip's label is
+                          // wider than what the status word leaves behind.
+                          Flexible(child: EarlierDayChip(at: bill.createdAt)),
+                        ],
                       ],
                     ),
                   ],

@@ -12,7 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 ///
 /// The server is the boundary — `menu.edit` is checked by the RPCs *and* by the
 /// table policies. These tests are about not offering a door that is locked,
-/// and about the two things a wrong pixel here costs real money: a size priced
+/// and about the two things a wrong pixel here costs real money: a variant priced
 /// the wrong way round, and an order the kitchen reads in the wrong order.
 
 const _itemId = 'item-1111-2222-3333-444444444444';
@@ -73,7 +73,7 @@ void main() {
 
       expect(find.byTooltip('Edit 250 gm'), findsOneWidget);
       expect(find.byTooltip('Remove 250 gm'), findsOneWidget);
-      expect(find.text('Add size'), findsOneWidget);
+      expect(find.text('Add variant'), findsOneWidget);
       expect(find.textContaining('not change them'), findsNothing);
     });
 
@@ -81,12 +81,12 @@ void main() {
       await tester.pumpWidget(_harness(permissions: const {'menu.view'}));
       await tester.pumpAndSettle();
 
-      // The sizes are still worth seeing — a manager checking a price should
+      // The variants are still worth seeing — a manager checking a price should
       // not have to be able to change it.
       expect(find.text('250 gm'), findsOneWidget);
       expect(find.byTooltip('Edit 250 gm'), findsNothing);
       expect(find.byTooltip('Remove 250 gm'), findsNothing);
-      expect(find.text('Add size'), findsNothing);
+      expect(find.text('Add variant'), findsNothing);
       expect(find.textContaining('not change them'), findsOneWidget);
     });
   });
@@ -112,7 +112,7 @@ void main() {
     });
   });
 
-  group('removing a size', () {
+  group('removing a variant', () {
     testWidgets('asks first, and names what is actually lost', (tester) async {
       await tester.pumpWidget(
         _harness(permissions: const {'menu.view', 'menu.edit'}),
@@ -124,7 +124,7 @@ void main() {
 
       expect(find.text('Remove 250 gm?'), findsOneWidget);
       // Not "are you sure": deleting nulls order_items.variant_id, so history
-      // forgets which size was sold. Renaming does not.
+      // forgets which variant was sold. Renaming does not.
       expect(find.textContaining('Past orders'), findsOneWidget);
 
       await tester.tap(find.text('Keep'));
@@ -134,7 +134,7 @@ void main() {
   });
 
   group('the empty state teaches the next step', () {
-    testWidgets('no sizes says what a size is for', (tester) async {
+    testWidgets('no variants says what a variant is for', (tester) async {
       await tester.pumpWidget(
         _harness(
           permissions: const {'menu.view', 'menu.edit'},
@@ -143,12 +143,12 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('No sizes'), findsOneWidget);
+      expect(find.text('No variants'), findsOneWidget);
       expect(find.textContaining('base price'), findsOneWidget);
     });
   });
 
-  group('the size sheet', () {
+  group('the variant sheet', () {
     testWidgets('"Less" makes the change negative, and says the real price', (
       tester,
     ) async {
@@ -188,14 +188,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Sells for NPR 400.00'), findsOneWidget);
 
-      await tester.tap(find.text('Add size'));
+      await tester.tap(find.text('Add variant'));
       await tester.pumpAndSettle();
 
       expect(result?.name, 'Half');
       expect(result?.priceDeltaCents, -20000);
     });
 
-    testWidgets('a nameless size cannot be saved', (tester) async {
+    testWidgets('a nameless variant cannot be saved', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: Builder(
@@ -224,7 +224,7 @@ void main() {
   });
 
   group('the row the server sends', () {
-    test('sizes come back in the owner\'s order, not price order', () {
+    test('variants come back in the owner\'s order, not price order', () {
       // Half is cheaper than KG but the owner put it last — price order is
       // exactly the wrong answer, and it is what the app did before `sort`.
       final item = MenuEditItem.fromJson({

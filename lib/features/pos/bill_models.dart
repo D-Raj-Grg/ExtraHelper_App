@@ -286,6 +286,38 @@ class BillCustomer {
   String get label => name ?? phone ?? 'Guest';
 }
 
+/// A guest already in the tenant's book, offered back for reselection.
+///
+/// The points come from the loyalty account when there is one; a customer who
+/// has never earned any has no row at all, which is a zero, not a null.
+class CustomerHit {
+  const CustomerHit({
+    required this.id,
+    required this.points,
+    this.name,
+    this.phone,
+  });
+
+  final String id;
+  final String? name;
+  final String? phone;
+  final int points;
+
+  String get label => name ?? phone ?? 'Guest';
+
+  static CustomerHit fromRow(Map<String, dynamic> r) {
+    final loyalty = (r['loyalty_accounts'] as List<dynamic>? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .firstOrNull;
+    return CustomerHit(
+      id: r['id'] as String,
+      name: r['name'] as String?,
+      phone: r['phone'] as String?,
+      points: (loyalty?['points_balance'] as int?) ?? 0,
+    );
+  }
+}
+
 /// A fired order with no bill yet — a candidate for merging onto this one.
 class MergeableOrder {
   const MergeableOrder({

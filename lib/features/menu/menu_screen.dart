@@ -10,11 +10,11 @@ import '../tenant/tenant_providers.dart';
 import 'item_variants_screen.dart';
 import 'menu_providers.dart';
 
-/// The menu, on a phone: find a dish, fix its sizes.
+/// The menu, on a phone: find a dish, fix its variants.
 ///
 /// Deliberately narrower than the web editor — photo, add-ons, kitchen routing
 /// and availability stay there. This is the thing an owner does standing in
-/// the restaurant: a size is wrong, or a size is in the wrong order.
+/// the restaurant: a variant is wrong, or a variant is in the wrong order.
 class MenuScreen extends ConsumerStatefulWidget {
   const MenuScreen({super.key});
 
@@ -72,7 +72,7 @@ class _MenuScreenState extends ConsumerState<MenuScreen> {
                     title: 'No dishes yet',
                     body:
                         'Add dishes on the web app under Menu. They show up '
-                        'here to price and size.',
+                        'here to price and set variants.',
                   );
                 }
                 if (visible.isEmpty) {
@@ -95,7 +95,7 @@ class _MenuScreenState extends ConsumerState<MenuScreen> {
                         MaterialPageRoute<void>(
                           // By id, not by the object: the row is re-derived
                           // from a refreshed list, and a captured snapshot
-                          // would show stale sizes after the first edit.
+                          // would show stale variants after the first edit.
                           builder: (_) =>
                               ItemVariantsScreen(itemId: visible[i].id),
                         ),
@@ -149,7 +149,7 @@ class _ItemRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    // A dish with sizes forces a choice, so its base price is unbuyable —
+    // A dish with variants forces a choice, so its base price is unbuyable —
     // quote what someone can actually pay, the way the POS tiles do.
     final deltas = item.variants.map((v) => v.priceDeltaCents).toList();
     final lo = deltas.isEmpty
@@ -165,9 +165,9 @@ class _ItemRow extends StatelessWidget {
       title: Text(item.name),
       subtitle: Text(
         item.variants.isEmpty
-            ? (item.categoryName ?? 'No sizes')
+            ? (item.categoryName ?? 'No variants')
             : '${item.variants.length} '
-                  '${item.variants.length == 1 ? 'size' : 'sizes'}'
+                  '${item.variants.length == 1 ? 'variant' : 'variants'}'
                   ' · ${item.variants.map((v) => v.name).join(', ')}',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,

@@ -1205,6 +1205,43 @@ pressure and there is no room for a text field per share. Revisit if a cashier a
       cases. Note for anyone updating: existing installs follow the OS today, so a staff member on a
       dark phone sees the app turn light once, until they choose. Suite green (255), analyze clean.
 
+- [x] **The bill you can read before you print it** (2026-08-20). Four things staff asked for on the
+      till, all in the same corner of the app. **One:** checkout could print a bill but never show
+      one — the receipt template is TypeScript (`../extrahelper/lib/print/docs.ts`) rendered at
+      `/api/print/render`, so the first look anyone got at a slip was the slip. New read-only
+      `BillViewScreen` (`features/pos/bill_view_screen.dart`, route `/bill/:billId/view`, app-bar
+      action on checkout) lays the same figures out in the same order off the *existing*
+      `billSnapshotProvider` — no new query, no writes; printing is the only action on it, because
+      printing reads a bill rather than changes it. **Two:** the same drink rung up in two rounds
+      read as "Tuborg ×1" twice. Root cause: merge-by-signature exists only in `CreateCart.add`;
+      `AmendCart.add` fires one `amend_order_add_item` per tap and the SQL inserts unconditionally,
+      and `recompute_bill` copies `order_items` to `bill_items` one for one. The web has lived with
+      this by folding at render time (`groupParticulars`), which Flutter never ported — so the
+      *printed* slip was already grouped while the cashier's screen was not. `bill_grouping.dart`
+      is that port, keyed on description + unit price + modifiers + **adjustability** (a synthetic
+      line with no `order_item_id` must never fold into one that can be voided). Display only:
+      every source line keeps its id, and a tap on a folded row asks which of the rows it means, so
+      every RPC still takes exactly one `order_item_id`. The editable cart, the split sheet and KDS
+      stay per-line on purpose. **Three:** no date anywhere on checkout, though `Bill.createdAt` was
+      already parsed and the printed slip has always carried a Date row. New `core/format/when.dart`
+      (`billDateTime` / `billDate` / `clockTime` / `isEarlierDay`) — device timezone, matching every
+      other formatter in the app, since `package:intl` ships no IANA database. **Four:** "the bill
+      doesn't clear next day" turned out to be visibility, not persistence — nothing is cached to
+      disk, and `openBills()` / `activeOrders()` are unbounded by date deliberately (a debt from
+      last night is still a debt this morning). They just never said which night: bill and order
+      cards now carry an amber `EarlierDayChip` with a history icon, so it survives greyscale.
+      Suite green (306), analyze clean.
+
+- [x] **The menu editor says "variant", like the rest of the product** (2026-08-20). Every string on
+      the phone's menu editor called `menu_item_variants` a *size* — "Add size", "No sizes", "2
+      sizes", "edit the size instead". The column is not only sizes: a restaurant uses it for Half
+      and 1 kg, and equally for Chicken and Mutton, and the web has always said "Sizes & variants"
+      with an "Add variant" button. A waiter reading "Add size" does not think to put Mutton there.
+      Renamed the copy across `menu_screen.dart`, `item_variants_screen.dart` and
+      `variant_sheet.dart` (plus the ruler icon on the empty state, which said "size" a second
+      time), and the name hint now reads "Half, 1 kg, Large, Mutton". Copy only — no schema, no
+      RPC, no behaviour. Tests renamed with it. Suite green (314), analyze clean.
+
 ## Open Questions
 
 - [x] Confirm bundle id `com.extrahelper.app` before the first signed build. Confirmed and shipped in
@@ -1213,5 +1250,13 @@ pressure and there is no room for a text field per share. Revisit if a cashier a
       surface? Decide before the manager-ops phase.
 - [x] Cashier/payments on mobile — **answered 2026-08-13: yes, at full parity with the web.** Shipped
       as the Checkout milestone below.
+- [ ] `BillFilter.today` day-bounds on `created_at` while `paid`/`voided` bound on `updated_at`
+      (`features/pos/bill_providers.dart`), so a bill opened before midnight and settled today is
+      missing from "All today" even though it shows under Paid. Found while fixing the stale-bill
+      complaint; a different symptom, left alone deliberately. One-line fix.
+- [ ] The printed bill's `groupParticulars` (`../extrahelper/lib/print/docs.ts`) keys on description
+      and unit price alone, so two drinks at the same price differing only by a modifier fold into
+      one row on paper while the Flutter checkout and bill view keep them apart. Totals agree; only
+      the breakdown differs. Fix belongs on the paper side — add the modifier set to the key.
 - [ ] Push notifications (FCM/APNs) for new orders — needed, and on whose device?
 - [ ] Pilot distribution — TestFlight + Play internal track, or a direct `.apk`?
