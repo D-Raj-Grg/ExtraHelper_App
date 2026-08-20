@@ -20,6 +20,13 @@ class AttachCustomerAction extends CustomerAction {
   final String? phone;
 }
 
+/// Someone already in the book, picked back out of it.
+class PickCustomerAction extends CustomerAction {
+  const PickCustomerAction(this.customerId);
+
+  final String customerId;
+}
+
 class RedeemPointsAction extends CustomerAction {
   const RedeemPointsAction(this.points);
 
@@ -30,24 +37,33 @@ class RedeemPointsAction extends CustomerAction {
 ///
 /// Attaching a guest is also what makes "leave it on the tab" honest: an unpaid
 /// bill under nobody's name is a bill nobody can be asked to settle.
+/// [search] is how the sheet reaches the tenant's book — passed in rather than
+/// read off a provider so the sheet stays a plain widget with no Riverpod in it.
 Future<CustomerAction?> showCustomerSheet({
   required BuildContext context,
   required BillSnapshot snapshot,
   required String currency,
+  Future<List<CustomerHit>> Function(String query)? search,
 }) {
   return showModalBottomSheet<CustomerAction>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
-    builder: (_) => _CustomerSheet(snapshot: snapshot, currency: currency),
+    builder: (_) =>
+        _CustomerSheet(snapshot: snapshot, currency: currency, search: search),
   );
 }
 
 class _CustomerSheet extends StatefulWidget {
-  const _CustomerSheet({required this.snapshot, required this.currency});
+  const _CustomerSheet({
+    required this.snapshot,
+    required this.currency,
+    this.search,
+  });
 
   final BillSnapshot snapshot;
   final String currency;
+  final Future<List<CustomerHit>> Function(String query)? search;
 
   @override
   State<_CustomerSheet> createState() => _CustomerSheetState();
@@ -61,15 +77,44 @@ class _CustomerSheetState extends State<_CustomerSheet> {
     text: widget.snapshot.customer?.phone ?? '',
   );
   final _points = TextEditingController();
+  final _search = TextEditingController();
 
   String? _error;
+
+  List<CustomerHit> _hits = const [];
+  bool _searching = false;
+
+  /// Only the newest search may write [_hits]. Typing fast fires several, and
+  /// they come back out of order — an older, slower one landing last would put
+  /// results for an abandoned query under the cashier's finger.
+  int _searchSeq = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.snapshot.customer == null) _runSearch('');
+  }
 
   @override
   void dispose() {
     _name.dispose();
     _phone.dispose();
     _points.dispose();
+    _search.dispose();
     super.dispose();
+  }
+
+  Future<void> _runSearch(String query) async {
+    final search = widget.search;
+    if (search == null) return;
+    final seq = ++_searchSeq;
+    setState(() => _searching = true);
+    final found = await search(query);
+    if (!mounted || seq != _searchSeq) return;
+    setState(() {
+      _hits = found;
+      _searching = false;
+    });
   }
 
   @override
@@ -99,8 +144,47 @@ class _CustomerSheetState extends State<_CustomerSheet> {
           children: [
             Text('Guest', style: theme.textTheme.titleMedium),
 
+            if (customer == null && widget.search != null) ...[
+              const SizedBox(height: 14),
+              SheetLabel('Someone who has been in before'),
+              TextField(
+                controller: _search,
+                textInputAction: TextInputAction.search,
+                onChanged: _runSearch,
+                decoration: InputDecoration(
+                  labelText: 'Search guests',
+                  hintText: 'Name or phone',
+                  isDense: true,
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  suffixIcon: _searching
+                      ? const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : null,
+                ),
+              ),
+              const SizedBox(height: 4),
+              _CustomerHits(
+                hits: _hits,
+                searching: _searching,
+                currency: widget.currency,
+                pointsValueCents: rate,
+                onPick: (hit) =>
+                    Navigator.of(context).pop(PickCustomerAction(hit.id)),
+              ),
+            ],
+
             const SizedBox(height: 14),
-            SheetLabel('Who this bill is for'),
+            SheetLabel(
+              customer == null && widget.search != null
+                  ? 'Or someone new'
+                  : 'Who this bill is for',
+            ),
             TextField(
               controller: _name,
               textCapitalization: TextCapitalization.words,
@@ -208,6 +292,74 @@ class _CustomerSheetState extends State<_CustomerSheet> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// The book, or as much of it as fits — tap a row to put the bill on them.
+///
+/// Scroll-capped rather than endless: a sheet whose list grows past the screen
+/// pushes the "or someone new" fields out of reach, and a cashier who can't see
+/// them starts typing into the search box instead.
+class _CustomerHits extends StatelessWidget {
+  const _CustomerHits({
+    required this.hits,
+    required this.searching,
+    required this.currency,
+    required this.pointsValueCents,
+    required this.onPick,
+  });
+
+  final List<CustomerHit> hits;
+  final bool searching;
+  final String currency;
+  final int pointsValueCents;
+  final void Function(CustomerHit) onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    if (hits.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Text(
+          searching ? 'Looking…' : 'Nobody by that name or number yet.',
+          style: theme.textTheme.bodySmall,
+        ),
+      );
+    }
+
+    final rate = pointsValueCents < 1 ? 1 : pointsValueCents;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 260),
+      child: ListView.builder(
+        shrinkWrap: true,
+        itemCount: hits.length,
+        itemBuilder: (context, i) {
+          final hit = hits[i];
+          return ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            minVerticalPadding: 8,
+            title: Text(hit.label),
+            subtitle: Text(
+              hit.phone != null && hit.name != null
+                  ? '${hit.phone} · ${hit.points} pts, worth about '
+                        '${money(hit.points * rate, currency)}'
+                  : '${hit.points} pts, worth about '
+                        '${money(hit.points * rate, currency)}',
+            ),
+            trailing: TextButton(
+              onPressed: () => onPick(hit),
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, Tokens.tapTarget),
+              ),
+              child: const Text('Attach'),
+            ),
+            onTap: () => onPick(hit),
+          );
+        },
       ),
     );
   }

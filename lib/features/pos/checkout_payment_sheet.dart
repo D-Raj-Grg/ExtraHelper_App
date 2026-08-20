@@ -149,6 +149,14 @@ class _PaymentSheetState extends State<_PaymentSheet> {
 
   void _submit() {
     if (_mode == PaymentMode.credit) {
+      // A tab has to be on someone. Catch it here rather than popping and
+      // failing behind the sheet, where the cashier has already looked away.
+      if (!widget.canLeaveOnTab) {
+        setState(
+          () => _error = 'Attach a guest before leaving this bill unpaid.',
+        );
+        return;
+      }
       Navigator.of(context).pop(const PaymentIntent.credit());
       return;
     }
@@ -226,16 +234,19 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                     _error = null;
                   }),
                 ),
-                if (widget.canLeaveOnTab)
-                  AppChoiceChip(
-                    label: 'Leave on the tab',
-                    selected: credit,
-                    showCheck: true,
-                    onSelect: () => setState(() {
-                      _mode = PaymentMode.credit;
-                      _error = null;
-                    }),
-                  ),
+                // Always offered, even with no guest attached. Hiding it left
+                // a cashier on a phone with no way to *see* that an unpaid tab
+                // exists at all — the web shows the chip and explains the
+                // missing guest instead, and so does this.
+                AppChoiceChip(
+                  label: 'Unpaid (credit)',
+                  selected: credit,
+                  showCheck: true,
+                  onSelect: () => setState(() {
+                    _mode = PaymentMode.credit;
+                    _error = null;
+                  }),
+                ),
               ],
             ),
 

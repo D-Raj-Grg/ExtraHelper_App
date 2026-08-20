@@ -11,6 +11,7 @@ import '../features/dev/design_gallery.dart';
 import '../features/inventory/inventory_screen.dart';
 import '../features/kds/kds_screen.dart';
 import '../features/menu/menu_screen.dart';
+import '../features/pos/bill_view_screen.dart';
 import '../features/pos/checkout_screen.dart';
 import '../features/pos/manager_ops.dart';
 import '../features/settings/printing_screen.dart';
@@ -37,6 +38,12 @@ abstract final class Routes {
   static const bill = '/bill/:billId';
 
   static String billPath(String billId) => '/bill/$billId';
+
+  /// The bill as a document rather than a set of levers. Pushed on top of
+  /// checkout — someone looks at the slip, then backs out to the controls.
+  static const billView = '/bill/:billId/view';
+
+  static String billViewPath(String billId) => '/bill/$billId/view';
 }
 
 /// The router, with **one** place that decides where a user belongs.
@@ -145,6 +152,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: Routes.bill,
         builder: (context, state) =>
             CheckoutScreen(billId: state.pathParameters['billId']!),
+      ),
+      // Same reasoning on permissions, and read-only besides.
+      GoRoute(
+        path: Routes.billView,
+        builder: (context, state) =>
+            BillViewScreen(billId: state.pathParameters['billId']!),
       ),
       // Debug-only: the greyscale check for "never colour alone" needs every
       // state on one screen, which real screens can't offer.

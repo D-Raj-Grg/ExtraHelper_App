@@ -81,8 +81,9 @@ Future<PaymentIntent?> _open(WidgetTester tester) async {
 
 Future<PaymentIntent?> _openAndSettle(
   WidgetTester tester,
-  Future<void> Function() act,
-) async {
+  Future<void> Function() act, {
+  bool canLeaveOnTab = true,
+}) async {
   PaymentIntent? intent;
 
   await tester.pumpWidget(
@@ -95,7 +96,7 @@ Future<PaymentIntent?> _openAndSettle(
                 context: context,
                 snapshot: _snapshot(),
                 currency: 'NPR',
-                canLeaveOnTab: true,
+                canLeaveOnTab: canLeaveOnTab,
               );
             },
             child: const Text('open'),
@@ -213,6 +214,46 @@ void main() {
       expect(intent, isNotNull);
       expect(intent!.method, 'bank');
       expect(intent.reference, isNull);
+    });
+  });
+
+  group('unpaid', () {
+    testWidgets('the chip is offered even with no guest attached', (
+      tester,
+    ) async {
+      final intent = await _openAndSettle(tester, () async {
+        expect(find.text('Unpaid (credit)'), findsOneWidget);
+      }, canLeaveOnTab: false);
+      expect(intent, isNull);
+    });
+
+    testWidgets('with no guest, the sheet stays open and says why', (
+      tester,
+    ) async {
+      final intent = await _openAndSettle(tester, () async {
+        await tester.tap(find.text('Unpaid (credit)'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Leave unpaid'));
+      }, canLeaveOnTab: false);
+
+      expect(intent, isNull);
+      expect(
+        find.text('Attach a guest before leaving this bill unpaid.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('with a guest, it pops a credit intent', (tester) async {
+      final intent = await _openAndSettle(tester, () async {
+        await tester.tap(find.text('Unpaid (credit)'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Leave unpaid'));
+      });
+
+      expect(intent, isNotNull);
+      expect(intent!.isCredit, isTrue);
+      expect(intent.mode, PaymentMode.credit);
+      expect(intent.amountCents, 0);
     });
   });
 }

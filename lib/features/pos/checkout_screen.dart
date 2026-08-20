@@ -2,17 +2,21 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../app/app_scaffold.dart';
+import '../../app/router.dart';
 import '../../core/format/labels.dart';
 import '../../core/format/money.dart';
+import '../../core/format/when.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/tokens.dart';
 import '../../data/print/reprint_actions.dart';
 import '../../data/supabase/pos_repository.dart' show PosFailure;
 import '../../data/sync/sync_providers.dart';
 import '../tenant/tenant_providers.dart';
+import 'bill_grouping.dart';
 import 'bill_math.dart';
 import 'bill_models.dart';
 import 'bill_providers.dart';
@@ -79,8 +83,9 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     );
     if (intent == null || !mounted) return;
 
-    // Nothing is collected on credit — the bill simply stays open, which it
-    // already is. Say so and go back to the floor.
+    // Nothing is collected on credit, but something still has to be written:
+    // the guest has left, so the *table* has to go back to free. Leaving that
+    // to a toast is what parked live tables on `bill_requested` for days.
     if (intent.isCredit) {
       final name = snapshot.customer?.label;
       if (name == null) {
@@ -89,6 +94,22 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         );
         return;
       }
+      setState(() {
+        _busy = true;
+        _error = null;
+      });
+      try {
+        await ref
+            .read(billSnapshotProvider(widget.billId).notifier)
+            .mutate((repo) => repo.leaveOnCredit(billId: widget.billId));
+      } on PosFailure catch (e) {
+        if (!mounted) return;
+        setState(() => _error = e.message);
+        return;
+      } finally {
+        if (mounted) setState(() => _busy = false);
+      }
+      if (!mounted) return;
       unawaited(Navigator.of(context).maybePop());
       ScaffoldMessenger.of(context)
         ..clearSnackBars()
@@ -303,10 +324,16 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   }
 
   Future<void> _guest(BillSnapshot snapshot, String currency) async {
+    // Read once, outside the sheet: the sheet only asks, and a repo that isn't
+    // there yet (no tenant) simply means no picker, not a broken sheet.
+    final repo = ref.read(billRepoProvider);
     final action = await showCustomerSheet(
       context: context,
       snapshot: snapshot,
       currency: currency,
+      search: repo == null
+          ? null
+          : (query) => repo.searchCustomers(query: query),
     );
     if (action == null || !mounted) return;
 
@@ -326,6 +353,12 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                   name: name,
                   phone: phone,
                 ),
+              // By id, so a guest with no phone on file comes back as
+              // themselves rather than as a fresh duplicate.
+              PickCustomerAction(:final customerId) => repo.attachCustomerById(
+                billId: widget.billId,
+                customerId: customerId,
+              ),
               // Keyed like a payment, because it records one: a replayed redeem
               // under the same key must not burn the points twice.
               RedeemPointsAction(:final points) => repo.redeemPoints(
@@ -546,6 +579,18 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
           ? 'Table ${snapshot.valueOrNull!.bill.tableLabel}'
           : null,
       showDrawer: false,
+      // The document, before any paper is burnt. No permission of its own for
+      // the same reason printing has none: it reads the bill this screen is
+      // already showing.
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.receipt_long_outlined),
+          tooltip: 'View bill',
+          onPressed: snapshot.valueOrNull == null
+              ? null
+              : () => context.push(Routes.billViewPath(widget.billId)),
+        ),
+      ],
       bottomNavigationBar: snapshot.valueOrNull == null
           ? null
           : _DueBar(
@@ -836,11 +881,34 @@ class _StatusBand extends StatelessWidget {
               style: theme.textTheme.labelLarge?.copyWith(color: color),
             ),
           ),
-          Text(
-            // The web prints an 8-character bill number; a guest querying a
-            // charge quotes this, so the two clients must agree on it.
-            '#${bill.id.substring(0, 8).toUpperCase()}',
-            style: (theme.textTheme.labelSmall ?? const TextStyle()).tabular,
+          // Flexible: the date is the widest thing in this band once someone
+          // turns their text size up, and an unconstrained column would push
+          // it off the edge of the card.
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  // The web prints an 8-character bill number; a guest
+                  // querying a charge quotes this, so the two clients must
+                  // agree on it.
+                  '#${bill.id.substring(0, 8).toUpperCase()}',
+                  textAlign: TextAlign.end,
+                  style:
+                      (theme.textTheme.labelSmall ?? const TextStyle()).tabular,
+                ),
+                // The printed slip has always carried a Date row; the screen
+                // did not, which is how a bill left over from last night
+                // looked the same as one opened ten minutes ago.
+                Text(
+                  billDateTime(bill.createdAt),
+                  textAlign: TextAlign.end,
+                  style: (theme.textTheme.labelSmall ?? const TextStyle())
+                      .copyWith(color: theme.colorScheme.onSurfaceVariant)
+                      .tabular,
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -861,20 +929,103 @@ class _LinesCard extends StatelessWidget {
   final void Function(BillLine)? onLine;
   final void Function(BillLine)? onVoidLine;
 
+  /// Which of the rows behind a grouped line the cashier means.
+  ///
+  /// Rows are folded for reading — "Tuborg ×2", not two lines of one — but
+  /// every write behind this card takes a single `order_item_id`. So a tap on a
+  /// folded row asks first, and a tap on a plain one goes straight through, as
+  /// it always has.
+  Future<BillLine?> _pick(
+    BuildContext context,
+    GroupedBillLine group, {
+    required String verb,
+  }) async {
+    if (group.soleSource case final line?) return line;
+    return showModalBottomSheet<BillLine>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+                child: Text(
+                  '$verb which ${group.description}?',
+                  style: theme.textTheme.titleSmall,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Text(
+                  'This item was rung up ${group.sources.length} times. '
+                  'Pick the one to change.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              for (final (i, line) in group.sources.indexed)
+                ListTile(
+                  minTileHeight: Tokens.tapTarget,
+                  leading: CircleAvatar(
+                    radius: 14,
+                    child: Text('${i + 1}', style: theme.textTheme.labelMedium),
+                  ),
+                  title: Text(
+                    '${line.qty} × ${money(line.unitPriceCents, currency)}',
+                  ),
+                  subtitle: line.discountCents > 0
+                      ? Text('− ${money(line.discountCents, currency)} off')
+                      : null,
+                  trailing: Text(
+                    money(line.totalCents, currency),
+                    style: (theme.textTheme.bodyMedium ?? const TextStyle())
+                        .tabular,
+                  ),
+                  onTap: () => Navigator.of(sheetContext).pop(line),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _tap(BuildContext context, GroupedBillLine group) async {
+    final line = await _pick(context, group, verb: 'Adjust');
+    if (line != null) onLine?.call(line);
+  }
+
+  Future<void> _remove(BuildContext context, GroupedBillLine group) async {
+    final line = await _pick(context, group, verb: 'Remove');
+    if (line != null) onVoidLine?.call(line);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final semantic = context.semantic;
 
+    // Folded for reading, exactly as the printed slip already folds them:
+    // three teas rung up in three rounds are three `bill_items` rows, and a
+    // guest counting three separate lines at one price each reads it as an
+    // overcharge.
+    final rows = groupBillLines(snapshot.lines);
+
     return CheckoutCard(
       title: 'Items',
       child: Column(
         children: [
-          for (final line in snapshot.lines)
+          for (final row in rows)
             InkWell(
               // A whole-row target rather than a discount box in a cell: at
               // 360dp the cell the web uses is smaller than a fingertip.
-              onTap: onLine == null ? null : () => onLine!(line),
+              onTap: onLine == null ? null : () => _tap(context, row),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 7),
                 child: Row(
@@ -885,10 +1036,10 @@ class _LinesCard extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            line.description,
+                            row.description,
                             style: theme.textTheme.bodyMedium,
                           ),
-                          for (final m in line.modifiers)
+                          for (final m in row.modifiers)
                             Text(
                               '↳ ${m.name}${m.qty > 1 ? ' ×${m.qty}' : ''}',
                               style: theme.textTheme.bodySmall?.copyWith(
@@ -896,14 +1047,15 @@ class _LinesCard extends StatelessWidget {
                               ),
                             ),
                           Text(
-                            '${line.qty} × ${money(line.unitPriceCents, currency)}',
+                            '${row.qty} × ${money(row.unitPriceCents, currency)}'
+                            '${row.isGrouped ? ' · ${row.sources.length} rounds' : ''}',
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant,
                             ),
                           ),
-                          if (line.discountCents > 0)
+                          if (row.discountCents > 0)
                             Text(
-                              '− ${money(line.discountCents, currency)} off',
+                              '− ${money(row.discountCents, currency)} off',
                               style: theme.textTheme.labelSmall?.copyWith(
                                 color: semantic.goodText,
                               ),
@@ -912,18 +1064,21 @@ class _LinesCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 10),
-                    Text(
-                      money(line.totalCents, currency),
-                      style: (theme.textTheme.bodyMedium ?? const TextStyle())
-                          .tabular,
+                    Flexible(
+                      child: Text(
+                        money(row.totalCents, currency),
+                        textAlign: TextAlign.end,
+                        style: (theme.textTheme.bodyMedium ?? const TextStyle())
+                            .tabular,
+                      ),
                     ),
                     // A line `recompute_bill` wrote with no order item behind
                     // it has nothing for `void_order_item` to take, so it gets
                     // no button — but it keeps the gutter, or the money column
                     // would step in and out down the card.
-                    if (onVoidLine != null && !line.isAdjustable)
+                    if (onVoidLine != null && !row.isAdjustable)
                       const SizedBox(width: 4 + Tokens.tapTarget),
-                    if (onVoidLine != null && line.isAdjustable) ...[
+                    if (onVoidLine != null && row.isAdjustable) ...[
                       const SizedBox(width: 4),
                       IconButton(
                         icon: const Icon(Icons.delete_outline, size: 20),
@@ -934,15 +1089,15 @@ class _LinesCard extends StatelessWidget {
                         ),
                         padding: EdgeInsets.zero,
                         visualDensity: VisualDensity.standard,
-                        tooltip: 'Remove ${line.description}',
-                        onPressed: () => onVoidLine!(line),
+                        tooltip: 'Remove ${row.description}',
+                        onPressed: () => _remove(context, row),
                       ),
                     ],
                   ],
                 ),
               ),
             ),
-          if (snapshot.lines.isEmpty)
+          if (rows.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 10),
               child: Text(
@@ -1071,7 +1226,11 @@ class _PaymentsCard extends StatelessWidget {
         children: [
           for (final p in snapshot.payments)
             MoneyRow(
-              label: paymentMethodLabel(p.method),
+              // Time, not date: the bill's own date is already in the status
+              // band above, and two payments an hour apart on one bill is the
+              // thing a cashier reconciling a drawer needs to tell apart.
+              label:
+                  '${paymentMethodLabel(p.method)} · ${clockTime(p.createdAt)}',
               cents: p.amountCents,
               currency: currency,
             ),
@@ -1178,6 +1337,27 @@ class _DueBar extends StatelessWidget {
         ? 'Settled'
         : 'Due';
 
+    // Same threshold the bill view uses to drop its columns. Beside the total,
+    // a scaled-up "Reprint bill" both overflows sideways and forces the row so
+    // tall that the payment button below it falls off the bottom of the bar.
+    final stacked = MediaQuery.textScalerOf(context).scale(1) > 1.3;
+    final printButton = onPrint == null
+        ? null
+        : OutlinedButton.icon(
+            onPressed: busy || !online ? null : onPrint,
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(0, Tokens.tapTarget),
+            ),
+            icon: const Icon(Icons.print_outlined, size: 18),
+            label: Text(
+              snapshot.bill.isPaid
+                  ? 'Print receipt'
+                  : snapshot.bill.wasPrinted
+                  ? 'Reprint bill'
+                  : 'Print bill',
+            ),
+          );
+
     return SafeArea(
       top: false,
       child: Container(
@@ -1264,23 +1444,17 @@ class _DueBar extends StatelessWidget {
                 // real transaction — the guest reads the bill, then pays it.
                 // Stacking both would push the bar over the controls it sits
                 // under, on exactly the small phones this bar exists for.
-                if (onPrint != null)
-                  OutlinedButton.icon(
-                    onPressed: busy || !online ? null : onPrint,
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, Tokens.tapTarget),
-                    ),
-                    icon: const Icon(Icons.print_outlined, size: 18),
-                    label: Text(
-                      snapshot.bill.isPaid
-                          ? 'Print receipt'
-                          : snapshot.bill.wasPrinted
-                          ? 'Reprint bill'
-                          : 'Print bill',
-                    ),
-                  ),
+                //
+                // Unless the text is scaled up, where "Reprint bill" beside
+                // a four-figure total is wider than the phone: then it drops
+                // to its own full-width line rather than being clipped.
+                if (printButton != null && !stacked) printButton,
               ],
             ),
+            if (printButton != null && stacked) ...[
+              const SizedBox(height: 8),
+              SizedBox(width: double.infinity, child: printButton),
+            ],
             if (onTake != null) ...[
               const SizedBox(height: 8),
               SizedBox(
@@ -1343,9 +1517,19 @@ class MoneyRow extends StatelessWidget {
             child: Text(label, style: base?.copyWith(color: color)),
           ),
           ?trailing,
-          Text(
-            cents < 0 ? '− ${money(-cents, currency)}' : money(cents, currency),
-            style: (base ?? const TextStyle()).copyWith(color: color).tabular,
+          // Flexible: at a large text size "Service + packaging" and its
+          // figure together are wider than a 320dp phone, and an
+          // unconstrained amount clips the last digits of a price rather than
+          // wrapping. Losing a digit off a total is the worst failure this
+          // screen has.
+          Flexible(
+            child: Text(
+              cents < 0
+                  ? '− ${money(-cents, currency)}'
+                  : money(cents, currency),
+              textAlign: TextAlign.end,
+              style: (base ?? const TextStyle()).copyWith(color: color).tabular,
+            ),
           ),
         ],
       ),

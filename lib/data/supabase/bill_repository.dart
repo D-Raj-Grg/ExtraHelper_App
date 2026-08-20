@@ -590,6 +590,64 @@ class BillRepository {
     }, "Couldn't attach that guest.");
   }
 
+  /// Attach a guest the cashier picked out of the book.
+  ///
+  /// By id, not by name and phone: [attachCustomer] can only find someone again
+  /// through their number, so a guest saved with a name and no phone would come
+  /// back as a fresh duplicate every time. The RPC re-checks the id against the
+  /// tenant — an id off the wire is never trusted by a security-definer write.
+  Future<void> attachCustomerById({
+    required String billId,
+    required String customerId,
+  }) {
+    return _write('attach_bill_customer_by_id', {
+      '_bill_id': billId,
+      '_customer_id': customerId,
+    }, "Couldn't attach that guest.");
+  }
+
+  /// Leave the bill on the guest's tab.
+  ///
+  /// Not a toast and a pop, which is what this used to be: nothing was written,
+  /// so the bill stayed open, the order stayed billed, and **the table stayed
+  /// occupied** with the guest long gone. The RPC keeps the status — nothing
+  /// was collected, and inventing `paid` would fabricate takings — and frees
+  /// every table the bill holds. It refuses a bill with no customer on it.
+  Future<void> leaveOnCredit({required String billId}) {
+    return _write('leave_bill_on_credit', {
+      '_bill_id': billId,
+    }, "Couldn't leave this bill unpaid.");
+  }
+
+  /// The tenant's guests, for the picker. Newest first when nothing is typed.
+  ///
+  /// Capped, like the web's till load: an unbounded select would ship the whole
+  /// CRM to a phone. A cashier looking for someone types, and the search runs
+  /// on the server across the name and the number.
+  Future<List<CustomerHit>> searchCustomers({String query = ''}) async {
+    final q = query.trim();
+    try {
+      var request = _client
+          .from('customers')
+          .select('id, name, phone, loyalty_accounts(points_balance)')
+          .eq('tenant_id', _tenantId);
+      if (q.isNotEmpty) {
+        // The `or` filter is parsed as text, so anything that is punctuation
+        // *to that parser* is stripped before it gets there — commas and
+        // parens separate its terms, quotes and backslashes quote them.
+        final safe = q.replaceAll(RegExp(r'[,()*"\\]'), ' ').trim();
+        if (safe.isEmpty) return const [];
+        request = request.or('name.ilike.%$safe%,phone.ilike.%$safe%');
+      }
+      final rows = _rows(await request.order('name').limit(30));
+      return rows.map(CustomerHit.fromRow).toList();
+    } catch (_) {
+      // A picker that can't reach the book is a picker the cashier types past,
+      // not a red screen mid-service.
+      return const [];
+    }
+  }
+
   /// Burn loyalty points against the balance.
   ///
   /// Keyed like a payment, because it *is* one: the RPC records a `points`
