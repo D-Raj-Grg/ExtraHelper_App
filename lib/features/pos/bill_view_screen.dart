@@ -9,7 +9,6 @@ import '../../core/format/money.dart';
 import '../../core/format/when.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/tokens.dart';
-import '../../core/widgets/earlier_day_chip.dart';
 import '../../data/print/reprint_actions.dart';
 import '../../data/sync/sync_providers.dart';
 import '../tenant/tenant_providers.dart';
@@ -17,6 +16,7 @@ import 'bill_grouping.dart';
 import 'bill_models.dart';
 import 'bill_providers.dart';
 import 'checkout_screen.dart' show CheckoutErrorBlock, MoneyRow;
+import 'earlier_day_mark.dart';
 
 /// The bill as the guest will read it, before any paper is burnt.
 ///
@@ -297,10 +297,10 @@ class _Header extends StatelessWidget {
             ),
           ],
         ),
-        if (isEarlierDay(bill.createdAt)) ...[
-          const SizedBox(height: 8),
-          EarlierDayChip(at: bill.createdAt),
-        ],
+        EarlierDayMark(
+          at: bill.createdAt,
+          padding: const EdgeInsets.only(top: 8),
+        ),
       ],
     );
   }

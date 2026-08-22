@@ -14,6 +14,7 @@ import '../features/menu/menu_screen.dart';
 import '../features/pos/bill_view_screen.dart';
 import '../features/pos/checkout_screen.dart';
 import '../features/pos/manager_ops.dart';
+import '../features/reports/day_close_screen.dart';
 import '../features/settings/printing_screen.dart';
 import '../features/tenant/account_screen.dart';
 import '../features/tenant/home_shell.dart';
@@ -27,6 +28,7 @@ abstract final class Routes {
   static const join = '/join';
   static const kds = '/kitchen';
   static const dashboard = '/dashboard';
+  static const dayClose = '/day-close';
   static const inventory = '/store-room';
   static const menu = '/menu';
   static const managerLog = '/manager-log';
@@ -93,6 +95,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: Routes.dashboard,
         builder: (context, state) => const DashboardScreen(),
+      ),
+      GoRoute(
+        path: Routes.dayClose,
+        builder: (context, state) => const DayCloseScreen(),
       ),
       GoRoute(
         path: Routes.inventory,

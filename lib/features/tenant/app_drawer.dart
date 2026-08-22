@@ -62,6 +62,16 @@ class AppDrawer extends ConsumerWidget {
                 route: Routes.dashboard,
                 location: location,
               ),
+            // Same key as the dashboard: the day close exposes strictly less
+            // than the web Sales tab a `reports.view` holder already sees.
+            if (canSeeReports)
+              _DrawerItem(
+                icon: Icons.event_available_outlined,
+                selectedIcon: Icons.event_available,
+                label: 'Day close',
+                route: Routes.dayClose,
+                location: location,
+              ),
             // `inventory.view` is Owner/Manager/Inventory, so a waiter never
             // sees the door; the RPCs enforce `inventory.edit` separately,
             // which is why a viewer still gets a read-only screen.

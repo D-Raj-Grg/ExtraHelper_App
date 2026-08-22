@@ -8,6 +8,7 @@ import '../../core/theme/tokens.dart';
 import '../../core/widgets/choice_chip.dart';
 import '../../data/print/reprint_actions.dart';
 import '../tenant/tenant_providers.dart';
+import 'day_summary_bar.dart';
 import 'models.dart';
 import 'order_composer.dart' show PosEmptyState;
 import 'pos_providers.dart';
@@ -77,21 +78,11 @@ class CompletedTab extends ConsumerWidget {
               ? list
               : list.where((o) => o.status == active).toList();
 
-          // Summed from each order's own lines, not from `bills.total_cents`:
-          // two orders merged onto one bill both carry the whole bill total,
-          // and adding those would count the money twice. Cancelled orders took
-          // nothing, so they are left out entirely.
-          final takings = list
-              .where((o) => !o.isCancelled)
-              .fold(0, (sum, o) => sum + o.lineTotalCents);
-
           return Column(
             children: [
-              _Summary(
-                count: list.length,
-                takings: takings,
-                currency: currency,
-              ),
+              // `list`, not `shown`: the day's figures must not move when the
+              // chips below filter the rows.
+              DaySummaryBar(orders: list, currency: currency),
               _StatusChips(
                 counts: counts,
                 total: list.length,
@@ -126,40 +117,6 @@ class CompletedTab extends ConsumerWidget {
             ],
           );
         },
-      ),
-    );
-  }
-}
-
-class _Summary extends StatelessWidget {
-  const _Summary({
-    required this.count,
-    required this.takings,
-    required this.currency,
-  });
-
-  final int count;
-  final int takings;
-  final String currency;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
-      child: Row(
-        children: [
-          Text(
-            '$count order${count == 1 ? '' : 's'} today',
-            style: theme.textTheme.titleSmall,
-          ),
-          const Spacer(),
-          Text(
-            money(takings, currency),
-            style: (theme.textTheme.titleSmall ?? const TextStyle()).tabular,
-            semanticsLabel: 'Takings ${money(takings, currency)}',
-          ),
-        ],
       ),
     );
   }
