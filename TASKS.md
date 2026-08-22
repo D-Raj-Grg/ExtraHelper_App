@@ -1345,6 +1345,15 @@ pressure and there is no room for a text field per share. Revisit if a cashier a
       Completed tab's select has exactly one FK path (`payments_bill_id_fkey`), so PostgREST cannot
       refuse it as ambiguous — the web already ships the identical string in production.
 
+- [x] **Shipped to TestFlight as 1.0.10+1** (2026-08-23). Note what the release exposed: `main` was
+      still at **1.0.7+6** and carried neither the auth fix ("stop sending a signed-in owner to Join
+      a restaurant") nor the 1.0.8/1.0.9 bumps — all three lived only on the local
+      `feat/add-items-to-unpaid-bill` branch, so two TestFlight builds had shipped from work that
+      was never merged. PR #7 lands them alongside this feature rather than leaving them orphaned a
+      third time. Verified before upload that `APP_URL` actually reached the binary by decoding
+      `DART_DEFINES` out of `ios/Flutter/Generated.xcconfig` — the documented trap is that a missing
+      key disables printing in total silence, and this build's whole point includes a print button.
+
 - [ ] **Device pass outstanding.** Not run on a phone: no `flutter run` here, and per the standing
       rule no TestFlight build without being asked. Worth checking on glass — the KPI value text
       uses `FittedBox` to survive long currency strings at large text scales, and the cash card is a
