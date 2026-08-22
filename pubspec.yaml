@@ -5,7 +5,7 @@ publish_to: 'none'
 # The build number after the + must strictly increase on every upload to App Store
 # Connect / Play — a number is burned the moment a build carrying it is accepted,
 # even if that build is later superseded.
-version: 1.0.8+1
+version: 1.0.8+2
 
 environment:
   sdk: ^3.10.7
