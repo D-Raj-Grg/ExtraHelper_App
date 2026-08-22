@@ -106,6 +106,30 @@ Future<String> reprintOrderKots(WidgetRef ref, String orderId) async {
   }
 }
 
+/// The day close (Z) on the thermal roll. Needs `reports.view`.
+///
+/// [day] is the business day as `YYYY-MM-DD`, taken from the report the screen
+/// is showing — never worked out here. The phone has no timezone database and
+/// the trading day can start at 4am, so the only correct answer is the one the
+/// server already gave.
+Future<String> printDayReport(WidgetRef ref, String day) async {
+  final repo = _repo(ref);
+  if (repo == null) return 'No restaurant selected.';
+  if (!await ref.read(connectivityProvider).isOnline()) return _offlineMessage;
+
+  try {
+    final outcome = await repo.enqueueDayReport(day: day);
+    return switch (outcome) {
+      PrintQueued(:final jobIds) when jobIds.isNotEmpty =>
+        'Day close sent to print.',
+      PrintQueued() => 'That day close could not be queued.',
+      PrintNoPrinter() => _noPrinterMessage,
+    };
+  } on PosFailure catch (e) {
+    return e.message;
+  }
+}
+
 Future<String> _enqueue(
   WidgetRef ref, {
   required String doc,

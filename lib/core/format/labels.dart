@@ -96,6 +96,22 @@ const _reservationStatusLabels = {
 String reservationStatusLabel(String status) =>
     _reservationStatusLabels[status] ?? _humanize(status);
 
+/// When the trading day turns over, said the way a person would.
+///
+/// 240 → "4:00 am". Null at zero, because "starts at midnight" is the ordinary
+/// case and saying it out loud only adds noise to a screen that has plenty.
+///
+/// 12-hour on screen deliberately, matching the web sheet; the thermal slip
+/// prints 24-hour, where column width matters more than familiarity.
+String? cutoffLabel(int minutes) {
+  if (minutes <= 0) return null;
+  final hour24 = minutes ~/ 60;
+  final minute = minutes % 60;
+  final period = hour24 < 12 ? 'am' : 'pm';
+  final hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
+  return '$hour12:${minute.toString().padLeft(2, '0')} $period';
+}
+
 /// Last resort for an enum this build doesn't know: "bill_requested" →
 /// "Bill requested". Better than showing the raw value, worse than a real
 /// label — add the label when you meet one of these.

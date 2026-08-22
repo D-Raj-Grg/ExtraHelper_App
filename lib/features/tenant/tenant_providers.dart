@@ -29,14 +29,26 @@ final identityCacheProvider = Provider<IdentityCache>(
 /// **Cache first**: a cold start with no coverage must still land the waiter in
 /// their restaurant. A failed refresh keeps the cached answer rather than
 /// signing them out of a shift.
-final membershipsProvider = FutureProvider<List<Membership>>((ref) async {
-  ref.watch(authStateProvider);
+///
+/// **Null means "not known yet", an empty list means "no restaurant".** They
+/// are different answers and the router acts on them differently. Returning an
+/// empty list while auth was still settling is what put an owner on the "Join a
+/// restaurant" screen on a restored session, and took the identity cache with
+/// it: several rebuilds run at once on a cold start (auth stream, connectivity,
+/// prefs) and whichever finished last decided the shell.
+final membershipsProvider = FutureProvider<List<Membership>?>((ref) async {
+  final auth = ref.watch(authStateProvider);
   final user = ref.watch(currentUserProvider);
   final cache = ref.watch(identityCacheProvider);
+
   if (user == null) {
+    // Auth has not spoken yet: unknown. Do not answer for it, and above all do
+    // not clear the cache — that is the offline identity of a signed-in user.
+    if (!auth.hasValue) return null;
     await cache.clear();
     return const [];
   }
+
   final isOnline = _connectivity(ref);
   return cacheBackedRead<List<Membership>>(
     isOnline: isOnline,

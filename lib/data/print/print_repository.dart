@@ -165,6 +165,69 @@ class PrintRepository {
     }
   }
 
+  /// Queue the day-close (Z) report for a business day.
+  ///
+  /// A **sibling** of [enqueue] rather than another branch inside it, because
+  /// `enqueue_day_report_job` is a different function with a different arity:
+  /// it takes the business day and no subject id. Adding an argument to
+  /// `enqueue_print_job` instead would silently create an *overload* and leave
+  /// the old body live (see `CLAUDE.md`), and its permission map falls through
+  /// to `settings.edit`, which is the wrong gate for a report.
+  ///
+  /// **Routing falls back to the receipt printer.** Nobody assigns a brand-new
+  /// document before their first close, so a `day_report` with no assignment
+  /// would silently have nowhere to go; the web does the same fallback for the
+  /// same reason. One target, one copy — a Z-report is not a two-up ticket.
+  ///
+  /// Permission is the server's: the RPC requires `reports.view` and raises
+  /// otherwise.
+  Future<EnqueueOutcome> enqueueDayReport({required String day}) async {
+    try {
+      final targets = await _dayReportTargets();
+      if (targets.isEmpty) return const PrintNoPrinter();
+
+      final target = targets.first;
+      final id = await _client.rpc<dynamic>(
+        'enqueue_day_report_job',
+        params: {
+          '_tenant': _tenantId,
+          '_printer_id': target.printerId,
+          '_day': day,
+          '_copies': 1,
+          // Null for the same reason every other hand-queued document passes
+          // null: pressing the button again means "print it again", and an
+          // idempotency key would swallow the second slip.
+          '_idem': null,
+        },
+      );
+      return PrintQueued([if (id is String) id]);
+    } on PostgrestException catch (e) {
+      throw PosFailure(e.message);
+    } on PosFailure {
+      rethrow;
+    } catch (_) {
+      throw const PosTransientFailure("Couldn't reach the print queue.");
+    }
+  }
+
+  /// Printers carrying `day_report`, else the receipt roll, else the bill roll.
+  ///
+  /// No branch filter: a day close is the tenant's whole day, which is also why
+  /// the RPC leaves `branch_id` null on the job.
+  Future<List<PrintTarget>> _dayReportTargets() async {
+    for (final doc in const ['day_report', 'receipt', 'bill']) {
+      final rows = await _client
+          .from('printer_documents')
+          .select('printer_id, copies, printers!inner(is_active, branch_id)')
+          .eq('tenant_id', _tenantId)
+          .eq('doc', doc);
+
+      final targets = printerDocumentTargets(rows);
+      if (targets.isNotEmpty) return targets;
+    }
+    return const [];
+  }
+
   /// Which printers this document is bound for, and what it is really called.
   ///
   /// The reads are here; the rules are in `print_routing.dart`, where they can

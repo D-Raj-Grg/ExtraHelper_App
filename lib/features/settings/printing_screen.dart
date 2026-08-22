@@ -594,6 +594,7 @@ class _JobTile extends ConsumerWidget {
     'order_slip': 'Order slip',
     'bill': 'Bill',
     'receipt': 'Receipt',
+    'day_report': 'Day close (Z)',
     'test': 'Test page',
   };
 

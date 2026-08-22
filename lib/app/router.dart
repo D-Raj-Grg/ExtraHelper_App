@@ -14,10 +14,12 @@ import '../features/menu/menu_screen.dart';
 import '../features/pos/bill_view_screen.dart';
 import '../features/pos/checkout_screen.dart';
 import '../features/pos/manager_ops.dart';
+import '../features/reports/day_close_screen.dart';
 import '../features/settings/printing_screen.dart';
 import '../features/tenant/account_screen.dart';
 import '../features/tenant/home_shell.dart';
 import '../features/tenant/tenant_providers.dart';
+import 'redirect.dart';
 
 /// Routes. Kept as constants so a typo is a compile error, not a 404.
 abstract final class Routes {
@@ -26,6 +28,7 @@ abstract final class Routes {
   static const join = '/join';
   static const kds = '/kitchen';
   static const dashboard = '/dashboard';
+  static const dayClose = '/day-close';
   static const inventory = '/store-room';
   static const menu = '/menu';
   static const managerLog = '/manager-log';
@@ -67,42 +70,12 @@ final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: Routes.home,
     refreshListenable: refresh,
-    redirect: (context, state) {
-      final signedIn = ref.read(currentUserProvider) != null;
-      final loc = state.matchedLocation;
-
-      if (!signedIn) {
-        return loc == Routes.login ? null : Routes.login;
-      }
-
-      // Signed in. Memberships may still be loading — hold position rather than
-      // bouncing someone to /join for the second it takes to answer.
-      final memberships = ref.read(membershipsProvider);
-      if (memberships.isLoading && !memberships.hasValue) return null;
-
-      final hasRestaurant = (memberships.valueOrNull ?? const []).isNotEmpty;
-
-      if (!hasRestaurant) {
-        return loc == Routes.join ? null : Routes.join;
-      }
-      // In a restaurant: /login and /join are behind them now.
-      if (loc == Routes.login || loc == Routes.join) return Routes.home;
-
-      // Home is the POS, which a kitchen role cannot use — `Kitchen` holds
-      // `kds.view` and `kds.bump` and nothing else, so before this the app
-      // opened on "No ordering access" and was a dead end for exactly the
-      // person you want holding the kitchen tablet. Send them to their board.
-      if (loc == Routes.home) {
-        final permissions = ref.read(permissionsProvider).valueOrNull;
-        if (permissions != null) {
-          final canUsePos =
-              permissions.contains('tables.view') ||
-              permissions.contains('order.create');
-          if (!canUsePos && permissions.contains('kds.view')) return Routes.kds;
-        }
-      }
-      return null;
-    },
+    redirect: (context, state) => resolveRedirect(
+      signedIn: ref.read(currentUserProvider) != null,
+      memberships: ref.read(membershipsProvider),
+      permissions: ref.read(permissionsProvider).valueOrNull,
+      location: state.matchedLocation,
+    ),
     routes: [
       GoRoute(
         path: Routes.home,
@@ -122,6 +95,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: Routes.dashboard,
         builder: (context, state) => const DashboardScreen(),
+      ),
+      GoRoute(
+        path: Routes.dayClose,
+        builder: (context, state) => const DayCloseScreen(),
       ),
       GoRoute(
         path: Routes.inventory,

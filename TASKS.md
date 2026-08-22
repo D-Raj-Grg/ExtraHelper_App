@@ -1242,6 +1242,118 @@ pressure and there is no room for a text field per share. Revisit if a cashier a
       time), and the name hint now reads "Half, 1 kg, Large, Mutton". Copy only — no schema, no
       RPC, no behaviour. Tests renamed with it. Suite green (314), analyze clean.
 
+## Day close (Z-report) on the phone (2026-08-23)
+
+- [x] **The phone could take the money but not close the till.** No reports screen, no cash screen,
+      no day close — recorded as deliberate above ("Cash sessions / day-close. Web-only.") — so a
+      manager standing at the counter had to open a laptop to sign a day off. New **Day close**
+      screen at `/day-close`, drawer entry gated on `reports.view`, rendering `daily_report` — the
+      same RPC the web sheet and the thermal slip read, so the three cannot disagree about a day.
+      Revenue/bills/avg/tax/service/discounts/voids/cancellations/refunds tiles, sales breakdown,
+      payment split, cash drawer per closed session, top items, counts, and every order of the day
+      with a tap-through detail sheet. **No migrations and no web changes** — the SQL shipped last
+      session and this is purely a second client for it.
+- [x] **The awkward part is that the phone cannot work out what day it is.** `intl` carries no IANA
+      database (`core/format/when.dart`) and the trading day can start at 4am, so there is no Dart
+      answer to "which business day is now". Asking `daily_report` for a **null** day gets the
+      server's own answer back in the payload, and that is the only way the screen learns today;
+      `DayCursor` records it, and prev/next is pure `YYYY-MM-DD` string arithmetic (`shiftDay`,
+      ported from the web) because a date string names a *day*, not an instant, so no zone belongs
+      near it. Next is disabled while today is unknown — failing safe rather than paging into a day
+      that has not happened. **No `showDatePicker`**: Material's returns a device-local `DateTime`,
+      which is exactly the boundary this feature must never let the phone decide. The orders list is
+      bounded by the payload's own `from`/`to`, so the ledger and the totals cannot describe
+      different days.
+- [x] **`carried_cents` is carried over verbatim, in words.** Revenue buckets on the bill's date and
+      payments on the payment's date, so cash taken today against yesterday's bill lands in one and
+      not the other — the fixture day (2026-08-22) genuinely shows 838,000 tendered against 577,000
+      revenue. The sheet says which way and why rather than showing two totals that refuse to add
+      up. Same reason the orders list states that Amount (ordered, at menu prices) is not Revenue
+      (settled, after tax and discounts).
+- [x] **Print day close (Z) from the phone.** `PrintService` needed **no change at all** — it parses
+      a job's `doc` and never reads it (`print_service.dart`: *"Nothing here knows what a KOT looks
+      like"*), so a `day_report` job was already claimable; the bytes come from the web's
+      `/api/print/render`. Added a **sibling** `PrintRepository.enqueueDayReport` rather than a
+      parameter, because `enqueue_day_report_job` has a different arity and changing
+      `enqueue_print_job`'s would silently create an overload (`CLAUDE.md`), and its permission map
+      falls through to `settings.edit` — the wrong gate for a report. The app picks the printer:
+      `day_report` → `receipt` → `bill`, mirroring the web, because nobody assigns a brand-new
+      document before their first close. **This tenant's only printer carries kot/bot/bill and
+      nothing else, so the fallback is the live path, not a theoretical one.**
+- [x] **`_docLabels` now has `day_report`** — closes the drift logged in `../extrahelper/TASKS.md`;
+      the phone's queue showed the raw enum string for day-close jobs.
+- [x] **The day cutoff is editable on the phone**, on the day-close sheet itself rather than in a
+      settings screen — it is where the setting is legible, and this app has no general settings
+      surface (printing is explicitly read-only, account is text). The app's **first
+      `tenant_settings` write**, and it needed no RPC: `tenant_settings_owner_write` already limits
+      writes to owner/manager, which is the same set `isManagerProvider` gates the UI on, and the
+      column's own `check (>= 0 and < 720)` is the backstop. Same seven options the web offers,
+      validated in Dart against the same list. Confirms first, naming the real consequence — the
+      change is **retroactive**, every past day re-buckets — then invalidates the day report, the
+      completed-orders list and the bills list, all of which read `tenant_day_start`.
+- [x] **`isEarlierDay` was wrong under a cutoff, and it is a POS bug, not a reports one.** It
+      compared *device-local calendar days*, so with a 4am cutoff an order rung up at 23:00 would be
+      branded "carried over" at 01:00 — mid-shift, on the card the cashier is holding, while the
+      business day it belongs to is still running. It now takes the server's `tenant_day_start`, via
+      a new `EarlierDayMark` widget that owns the decision so the three cards using it cannot answer
+      it differently, and falls back to the old calendar comparison when the boundary is unknown
+      (offline). Three call sites: two in `pos_screen.dart`, one in `bill_view_screen.dart`.
+- [x] **POS Completed tab gained a day summary bar** — takings, order count and the payment split,
+      computed from the rows already loaded rather than fetched, because a second query would be a
+      second source of truth for "today's takings". **Deduped by `bill_id` before summing**:
+      `add_order_to_bill` merges tables, so one bill's payments hang off every order sharing it.
+      Totals are summed from the full list, never the filtered subset — a figure that moved when you
+      tapped "Cancelled" would be answering a different question from the one its label asks.
+- [x] **Verified against the live database, every write inside `begin … rollback`.** A waiter gets
+      `null` from `daily_report` (so the forbidden branch is a real contract, not a guess) and
+      `42501 not authorized to print this` from the enqueue RPC, and changes **0 rows** attempting
+      the cutoff write. As owner: revenue ties to the fixture, `_day: null` resolves to today,
+      setting the cutoff to 240 moves `tenant_day_start` to 04:00 local and re-buckets "today" from
+      Aug 23 to Aug 22 (it was past midnight and before 4am in Kathmandu — the exact case the
+      setting exists for), and an enqueued job lands with `doc='day_report'`, the right
+      `business_day`, and renders 577,000 through `daily_report_for_print`. Nothing survived the
+      rollbacks. The payload fixture in `test/day_report_test.dart` is a **real** response, and the
+      cash block is the one real short drawer in the database (−54,500). Suite green, analyze clean,
+      `dart format` applied.
+- [x] **Five defects in the above, found on a code review of it** (2026-08-23). (1) **The screen
+      fetched every day twice.** `dayReportProvider` watched the whole `dayCursorProvider`, and the
+      thing that records the server's answer to "what day is it?" writes a new cursor state — same
+      day selected, new object — so landing a payload invalidated the provider that had just
+      produced it. Self-limiting (the second payload records the same date and stops), so it showed
+      up as a doubled request rather than a hang, which is exactly why it would have survived a
+      device pass. Now `select((c) => c.selected)`, with a test asserting the invariant that makes
+      that correct: recording today must not change which day is asked for. (2) **A settings write
+      that changed nothing reported success.** RLS does not raise on an `update` matching zero rows,
+      so anyone without owner/manager would have been told "the trading day now starts at 4:00 am"
+      while nothing moved — the UI gate is not the boundary, and `CLAUDE.md` says as much. The
+      update now `.select()`s its rows back and fails loudly when none come. (3) **A dead chevron.**
+      "Previous day" was always enabled, but before the first payload there is no day to subtract
+      from, so it silently did nothing — against the app's own rule about never leaving someone
+      wondering whether a tap registered. Disabled until a day is known. (4) **Every order card
+      grew a permanent gap.** Replacing the conditional carried-over chip with a widget that
+      collapses to `SizedBox.shrink()` left the caller's sibling spacer behind, so ordinary orders —
+      almost all of them — got 12px of nothing. The mark now owns its own padding. (5) **Order
+      lines came back unordered**, so the same order could list its items differently on two
+      openings; the embed now orders on `created_at` like the web's does. Suite green (360, up 22 —
+      the new ones cover the merged-bill payment dedupe, which is the only money arithmetic added
+      here and had nothing on it), analyze clean.
+- [x] **Checked rather than assumed, on the live database:** `claim_print_jobs` matches on
+      `(_branch is null or c.branch_id is null or ...)`, so a day-close job — which deliberately
+      carries no branch — is claimable by any drainer, which is what makes "the print queue needs no
+      changes" true rather than hopeful. This tenant's only printer is `network`/`text`/80mm, which
+      is what the phone claims and can drive. And the nested `bills → payments` embed added to the
+      Completed tab's select has exactly one FK path (`payments_bill_id_fkey`), so PostgREST cannot
+      refuse it as ambiguous — the web already ships the identical string in production.
+
+- [ ] **Device pass outstanding.** Not run on a phone: no `flutter run` here, and per the standing
+      rule no TestFlight build without being asked. Worth checking on glass — the KPI value text
+      uses `FittedBox` to survive long currency strings at large text scales, and the cash card is a
+      stack of rows rather than a 7-column table for the same reason.
+- [ ] **A real Z-report on paper.** The queue path is proven to the job row and the rendered payload;
+      no slip has come out of a printer. Note there is one **failed** `day_report` job in the
+      database from 2026-08-21 (business day 2026-08-17) — it predates the render-permission fix
+      that shipped with it, and would now succeed; retrying it is the cheapest end-to-end paper test.
+
 ## Open Questions
 
 - [x] Confirm bundle id `com.extrahelper.app` before the first signed build. Confirmed and shipped in

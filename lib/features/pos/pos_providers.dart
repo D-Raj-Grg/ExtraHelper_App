@@ -486,3 +486,22 @@ final orderProvider = FutureProvider.family<PosOrder?, String>((
   if (repo == null) return null;
   return repo.order(orderId);
 });
+
+/// When this restaurant's trading day began, as the server reckons it.
+///
+/// Asked of Postgres, never computed: `intl` carries no IANA database and the
+/// day can start at 4am, so `tenant_day_start` is the only correct answer. The
+/// same boundary the Completed tab and the bills list are bound by.
+///
+/// Null rather than an error when it cannot be fetched — this only decides
+/// whether a "carried over" chip appears, and a chip is not worth failing a
+/// board over.
+final tenantDayStartProvider = FutureProvider<DateTime?>((ref) async {
+  final repo = ref.watch(posRepoProvider);
+  if (repo == null) return null;
+  try {
+    return await repo.tenantDayStart();
+  } catch (_) {
+    return null;
+  }
+});

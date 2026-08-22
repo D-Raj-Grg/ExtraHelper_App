@@ -51,6 +51,11 @@ class AccountScreen extends ConsumerWidget {
                     '${tenant.currency}  ·  ${money(123456, tenant.currency)}',
               ),
               _Row(label: 'Timezone', value: tenant.timezone),
+              // Where the trading day turns over is set on the day-close
+              // sheet, beside the figures it decides. Named here because this
+              // is the screen people look at when they want to know what the
+              // restaurant is configured as.
+              _Row(label: 'Day starts at', value: 'Set on the day close sheet'),
               const SizedBox(height: 20),
             ],
             Text('Appearance', style: theme.textTheme.titleMedium),

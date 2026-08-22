@@ -144,7 +144,7 @@ class PosRepository {
   /// started accepting items on a `billed` order whose bill is still `open`,
   /// the order's own status no longer says whether it can be added to. The
   /// `!orders_bill_id_fkey` hint is load-bearing for the same reason it is on
-  /// [_completedSelect] — more than one path reaches `bills`, and PostgREST
+  /// [completedSelect] — more than one path reaches `bills`, and PostgREST
   /// refuses the embed rather than guessing.
   static const _orderSelect =
       'id, status, order_type, created_at, table_id, guests, bill_id, '
@@ -175,11 +175,14 @@ class PosRepository {
   /// The hints are load-bearing: `orders` reaches `restaurant_tables` and
   /// `bills` by more than one path, and without naming the constraint PostgREST
   /// refuses the embed rather than guessing.
-  static const _completedSelect =
+  ///
+  /// Public because the day-close report reads the same rows over a different
+  /// window — one shape for "a finished order", not two that drift apart.
+  static const completedSelect =
       'id, order_type, status, created_at, guests, table_id, bill_id, '
       'restaurant_tables!orders_table_id_fkey(label), '
-      'order_items(id, name_snapshot, qty, unit_price_cents, is_void), '
-      'bills!orders_bill_id_fkey(id, status, total_cents)';
+      'order_items(id, name_snapshot, qty, unit_price_cents, is_void, notes), '
+      'bills!orders_bill_id_fkey(id, status, total_cents, payments(method, amount_cents, status))';
 
   /// Where this restaurant's trading day began, in its own timezone.
   ///
@@ -213,7 +216,7 @@ class PosRepository {
     try {
       final rows = await _client
           .from('orders')
-          .select(_completedSelect)
+          .select(completedSelect)
           .eq('tenant_id', _tenantId)
           .inFilter('status', const ['billed', 'closed', 'cancelled'])
           .gte('created_at', dayStart.toUtc().toIso8601String())

@@ -257,6 +257,7 @@ class PosCompletedOrder {
     this.billStatus,
     this.billTotalCents,
     this.lines = const [],
+    this.billPayments = const [],
   });
 
   final String id;
@@ -274,6 +275,14 @@ class PosCompletedOrder {
   final int? billTotalCents;
 
   final List<PosOrderLine> lines;
+
+  /// What was tendered against this order's **bill**.
+  ///
+  /// The bill's, not the order's — so two orders merged onto one bill each
+  /// report the same payments, and anything summing these has to dedupe by
+  /// [billId] first or it counts the money twice. `PosCompletedOrder` cannot
+  /// do that for you: it only knows about itself.
+  final List<PosBillPayment> billPayments;
 
   /// This order's own money, void lines excluded — they were taken off the
   /// bill and charging for them would be wrong.
@@ -313,8 +322,37 @@ class PosCompletedOrder {
       billStatus: bill?['status'] as String?,
       billTotalCents: (bill?['total_cents'] as num?)?.toInt(),
       lines: lines,
+      billPayments: ((bill?['payments'] as List<dynamic>?) ?? const [])
+          .map((p) => PosBillPayment.fromRow(p as Map<String, dynamic>))
+          .toList(),
     );
   }
+}
+
+/// One payment against a bill, as the Completed tab reads it.
+class PosBillPayment {
+  const PosBillPayment({
+    required this.method,
+    required this.amountCents,
+    required this.status,
+  });
+
+  /// `cash` | `card` | `esewa` | … — rendered through `paymentMethodLabel`.
+  final String method;
+
+  final int amountCents;
+
+  /// Only `completed` is money that arrived. A pending or failed attempt is
+  /// still a row, and counting it would overstate the till.
+  final String status;
+
+  bool get isCompleted => status == 'completed';
+
+  static PosBillPayment fromRow(Map<String, dynamic> r) => PosBillPayment(
+    method: (r['method'] as String?) ?? '',
+    amountCents: (r['amount_cents'] as num?)?.toInt() ?? 0,
+    status: (r['status'] as String?) ?? '',
+  );
 }
 
 class PosOrder {
