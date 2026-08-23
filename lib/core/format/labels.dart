@@ -85,6 +85,20 @@ const _roleLabels = {
 
 String roleLabel(String role) => _roleLabels[role] ?? _humanize(role);
 
+/// Where a team member stands.
+///
+/// `pending` deliberately reads longer than the web's bare "Pending": the
+/// roster is read at a glance on a phone, and this names the action the person
+/// looking at it has to take.
+const _memberStatusLabels = {
+  'active': 'Active',
+  'pending': 'Waiting for approval',
+  'invited': 'Invited',
+};
+
+String memberStatusLabel(String status) =>
+    _memberStatusLabels[status] ?? _humanize(status);
+
 const _reservationStatusLabels = {
   'pending': 'Not confirmed',
   'confirmed': 'Confirmed',

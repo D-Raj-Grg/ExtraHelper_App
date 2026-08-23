@@ -15,6 +15,15 @@ import 'router.dart';
 /// is in no restaurant. A null value, an error, or a first load still in flight
 /// all mean *unknown*, and the honest response to unknown is to hold position.
 ///
+/// The routes a signed-out user is allowed to stand on.
+///
+/// Before in-app signup existed this was just `/login`, and the rule was "not
+/// signed in → login". Creating an account needs two more screens that by
+/// definition happen before there is a session, so the rule is now a set. Keep
+/// it a set: an `if` per public route is how one of them ends up bouncing to
+/// login and nobody notices until someone cannot finish signing up.
+const _publicRoutes = {Routes.login, Routes.signup, Routes.verify};
+
 /// Returns the location to redirect to, or null to stay put.
 String? resolveRedirect({
   required bool signedIn,
@@ -23,7 +32,7 @@ String? resolveRedirect({
   required String location,
 }) {
   if (!signedIn) {
-    return location == Routes.login ? null : Routes.login;
+    return _publicRoutes.contains(location) ? null : Routes.login;
   }
 
   // Unknown: hold. A failed read is a failed read — not a demotion.
@@ -34,8 +43,10 @@ String? resolveRedirect({
     return location == Routes.join ? null : Routes.join;
   }
 
-  // In a restaurant: /login and /join are behind them now.
-  if (location == Routes.login || location == Routes.join) return Routes.home;
+  // In a restaurant: signing up and joining are behind them now.
+  if (_publicRoutes.contains(location) || location == Routes.join) {
+    return Routes.home;
+  }
 
   // Home is the POS, which a kitchen role cannot use — `Kitchen` holds
   // `kds.view` and `kds.bump` and nothing else, so before this the app opened

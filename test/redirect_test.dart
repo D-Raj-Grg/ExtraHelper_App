@@ -140,4 +140,76 @@ void main() {
       );
     });
   });
+
+  group('signing up happens before there is a session', () {
+    // Signup and email verification are the only two screens that must work
+    // with no session at all. Before in-app signup existed the signed-out rule
+    // was "anywhere but /login → /login", which would bounce someone out of
+    // signup the instant they got there.
+    test('signup is reachable signed out', () {
+      expect(
+        resolveRedirect(
+          signedIn: false,
+          memberships: const AsyncValue.data(null),
+          permissions: null,
+          location: Routes.signup,
+        ),
+        isNull,
+      );
+    });
+
+    test('email verification is reachable signed out', () {
+      expect(
+        resolveRedirect(
+          signedIn: false,
+          memberships: const AsyncValue.data(null),
+          permissions: null,
+          location: Routes.verify,
+        ),
+        isNull,
+      );
+    });
+
+    test('everything else still bounces to login', () {
+      for (final location in [Routes.home, Routes.join, Routes.kds]) {
+        expect(
+          resolveRedirect(
+            signedIn: false,
+            memberships: const AsyncValue.data(null),
+            permissions: null,
+            location: location,
+          ),
+          Routes.login,
+          reason: '$location should not be reachable signed out',
+        );
+      }
+    });
+
+    test('a verified user with no restaurant lands on onboarding', () {
+      expect(
+        resolveRedirect(
+          signedIn: true,
+          memberships: const AsyncValue.data([]),
+          permissions: null,
+          location: Routes.verify,
+        ),
+        Routes.join,
+      );
+    });
+
+    test('signup and verify are behind a user who has a restaurant', () {
+      for (final location in [Routes.signup, Routes.verify]) {
+        expect(
+          resolveRedirect(
+            signedIn: true,
+            memberships: const AsyncValue.data([_member]),
+            permissions: null,
+            location: location,
+          ),
+          Routes.home,
+          reason: '$location should be behind an onboarded user',
+        );
+      }
+    });
+  });
 }

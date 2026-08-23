@@ -29,6 +29,13 @@ class AppDrawer extends ConsumerWidget {
     // those two, so it is the honest key to hang the manager log on.
     final canReview = ref.watch(hasPermissionProvider('order.void'));
     final canSeeMenu = ref.watch(hasPermissionProvider('menu.view'));
+    // Owner and manager by default. False while permissions load, which is the
+    // right way round: a door that appears late is better than one that
+    // vanishes under a thumb already moving towards it.
+    // `staff.view` is Owner/Manager by default; `staff.edit` gates the
+    // controls inside, so a viewer gets the roster without the levers.
+    final canSeeTeam = ref.watch(hasPermissionProvider('staff.view'));
+    final canSeeSettings = ref.watch(hasPermissionProvider('settings.view'));
 
     final location = GoRouterState.of(context).matchedLocation;
 
@@ -102,7 +109,23 @@ class AppDrawer extends ConsumerWidget {
                 route: Routes.managerLog,
                 location: location,
               ),
+            if (canSeeTeam)
+              _DrawerItem(
+                icon: Icons.groups_outlined,
+                selectedIcon: Icons.groups,
+                label: 'Team',
+                route: Routes.team,
+                location: location,
+              ),
             const Divider(height: 1),
+            if (canSeeSettings)
+              _DrawerItem(
+                icon: Icons.settings_outlined,
+                selectedIcon: Icons.settings,
+                label: 'Settings',
+                route: Routes.settings,
+                location: location,
+              ),
             // No permission gate: whether this phone prints is a property of the
             // phone, not of the person holding it, and the screen itself is
             // read-only against the registry.
@@ -156,7 +179,12 @@ class _DrawerItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final selected = location == route;
+    // Prefix match so a pushed leaf still highlights the destination it came
+    // from — standing on `/settings/general` is still standing in Settings.
+    // `/` is excluded explicitly: it prefixes everything.
+    final selected =
+        location == route ||
+        (route != Routes.home && location.startsWith('$route/'));
     final theme = Theme.of(context);
     return ListTile(
       minTileHeight: Tokens.tapTarget + 8,

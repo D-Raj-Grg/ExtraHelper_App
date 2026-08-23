@@ -1103,7 +1103,7 @@ class _BillsTab extends ConsumerWidget {
             title: 'No checkout access',
             body:
                 "Your role doesn't include taking payment. An owner or manager "
-                'can change that on the web app under Team.',
+                'can change that under Team.',
           ),
         ],
       );

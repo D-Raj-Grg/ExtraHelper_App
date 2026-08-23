@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../app/app_scaffold.dart';
+import '../../app/router.dart';
 import '../../core/env.dart';
 import '../../core/theme/tokens.dart';
 import '../../data/print/print_models.dart';
@@ -24,17 +26,13 @@ class PrintingScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final enabled = ref.watch(printEnabledProvider);
-    final printers = ref.watch(printersProvider);
     final jobs = ref.watch(printJobsProvider);
-    final tenant = ref.watch(activeTenantProvider);
 
     return AppScaffold(
       title: 'Printing',
       body: RefreshIndicator(
         onRefresh: () async {
-          ref
-            ..invalidate(printersProvider)
-            ..invalidate(printJobsProvider);
+          ref.invalidate(printJobsProvider);
         },
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
@@ -67,38 +65,21 @@ class PrintingScreen extends ConsumerWidget {
             const _CapabilityRows(),
             const SizedBox(height: 24),
 
-            Text('Printers', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 4),
-            Text(
-              'Set up on the web, in Settings → Printers. Assigning a document '
-              'there is what makes a printer fire on its own.',
-              style: theme.textTheme.bodySmall,
-            ),
-            const SizedBox(height: 12),
-            printers.when(
-              loading: () => const _Loading(),
-              error: (e, _) => _Problem(
-                message: "Couldn't load the printers.",
-                detail: '$e',
-                onRetry: () => ref.invalidate(printersProvider),
+            // The registry itself lives in Settings → Printers. This screen is
+            // about *this phone*; which printers exist is a property of the
+            // restaurant, and mixing the two made one screen answer two
+            // questions badly.
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.print_outlined),
+              title: const Text('Printers'),
+              subtitle: const Text(
+                'See the registry and send a test page.',
               ),
-              data: (list) => list.isEmpty
-                  ? const _Empty(
-                      icon: Icons.print_disabled_outlined,
-                      title: 'No printers yet',
-                      body:
-                          'Add one on the web in Settings → Printers. For a WiFi '
-                          'printer you need its IP address; press its feed button '
-                          'while switching it on and it prints one.',
-                    )
-                  : Column(
-                      children: [
-                        for (final p in list)
-                          _PrinterTile(printer: p, tenantId: tenant?.tenantId),
-                      ],
-                    ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => context.push(Routes.settingsPrinters),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
 
             const _PairedBluetooth(),
             const SizedBox(height: 24),
@@ -335,146 +316,8 @@ class _CapabilityRow extends StatelessWidget {
   }
 }
 
-class _PrinterTile extends ConsumerStatefulWidget {
-  const _PrinterTile({required this.printer, required this.tenantId});
-
-  final PrintPrinter printer;
-  final String? tenantId;
-
-  @override
-  ConsumerState<_PrinterTile> createState() => _PrinterTileState();
-}
-
-class _PrinterTileState extends ConsumerState<_PrinterTile> {
-  bool _busy = false;
-
-  /// Queue a test page rather than printing it here directly.
-  ///
-  /// It goes through the same claim → render → send path as a real ticket, so a
-  /// successful test proves the whole chain, not just that this phone can open
-  /// a socket.
-  Future<void> _test() async {
-    final tenantId = widget.tenantId;
-    if (tenantId == null) return;
-    setState(() => _busy = true);
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      await ref
-          .read(printRepositoryProvider(tenantId))
-          .enqueueTest(widget.printer.id);
-      if (!mounted) return;
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            'Test page queued for ${widget.printer.name}. '
-            'It prints on whichever device is set up to drive it.',
-          ),
-        ),
-      );
-      ref.invalidate(printJobsProvider);
-    } catch (e) {
-      if (!mounted) return;
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final p = widget.printer;
-    final theme = Theme.of(context);
-    final semantic = context.semantic;
-    final icon = switch (p.connection) {
-      PrinterConnection.network => Icons.wifi,
-      PrinterConnection.bluetooth => Icons.bluetooth,
-      PrinterConnection.usb => Icons.usb,
-      PrinterConnection.system => Icons.print,
-    };
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon, size: 20),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    p.name,
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                if (!p.isActive)
-                  Text(
-                    'Off',
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: semantic.neutral,
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 2),
-            Text(
-              '${printerConnectionLabel(p.connection)}  ·  ${p.target}  ·  ${p.paperWidth}mm',
-              style: theme.textTheme.bodySmall,
-            ),
-            if (!p.drivableHere)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  'This phone cannot drive it — a computer prints this one.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: semantic.neutral,
-                  ),
-                ),
-              ),
-            if (p.renderMode == PrinterRenderMode.image)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  'Set to image mode, which needs a browser. This phone leaves '
-                  'those tickets alone.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: semantic.infoText,
-                  ),
-                ),
-              ),
-            const SizedBox(height: 6),
-            // `enqueue_print_job` gates a test page on `settings.edit`, so a
-            // waiter would only ever get a 42501 out of this button. Say who
-            // can, rather than offering a door that will not open.
-            if (ref.watch(hasPermissionProvider('settings.edit')))
-              Align(
-                alignment: Alignment.centerLeft,
-                child: OutlinedButton.icon(
-                  onPressed: _busy || widget.tenantId == null ? null : _test,
-                  icon: const Icon(Icons.description_outlined),
-                  label: Text(_busy ? 'Queueing…' : 'Test print'),
-                ),
-              )
-            else
-              Text(
-                'An owner or manager can send a test page.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: semantic.neutral,
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// Printers this phone is paired with, so the address can be copied into the
-/// web form rather than typed off the label with a digit wrong.
+/// printer form rather than typed off the label with a digit wrong.
 class _PairedBluetooth extends ConsumerStatefulWidget {
   const _PairedBluetooth();
 
@@ -587,17 +430,6 @@ class _JobTile extends ConsumerWidget {
 
   final PrintJob job;
 
-  static const _docLabels = {
-    'kot': 'Kitchen ticket',
-    'bot': 'Bar ticket',
-    'full_kot': 'Full ticket',
-    'order_slip': 'Order slip',
-    'bill': 'Bill',
-    'receipt': 'Receipt',
-    'day_report': 'Day close (Z)',
-    'test': 'Test page',
-  };
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
@@ -625,7 +457,7 @@ class _JobTile extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${_docLabels[job.doc] ?? job.doc} · $word',
+                  '${printDocLabel(job.doc)} · $word',
                   style: theme.textTheme.bodyMedium,
                 ),
                 Text(

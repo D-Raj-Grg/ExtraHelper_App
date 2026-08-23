@@ -4,8 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/supabase/supabase_providers.dart';
-import '../features/auth/join_code_screen.dart';
 import '../features/auth/login_screen.dart';
+import '../features/auth/onboarding_screen.dart';
+import '../features/auth/signup_screen.dart';
+import '../features/auth/verify_email_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/dev/design_gallery.dart';
 import '../features/inventory/inventory_screen.dart';
@@ -15,7 +17,19 @@ import '../features/pos/bill_view_screen.dart';
 import '../features/pos/checkout_screen.dart';
 import '../features/pos/manager_ops.dart';
 import '../features/reports/day_close_screen.dart';
+import '../features/settings/appearance_screen.dart';
+import '../features/settings/branches_screen.dart';
+import '../features/settings/charges_settings_screen.dart';
+import '../features/settings/danger_reset_screen.dart';
+import '../features/settings/danger_screen.dart';
+import '../features/settings/general_settings_screen.dart';
+import '../features/settings/plan_usage_screen.dart';
+import '../features/settings/printers_screen.dart';
 import '../features/settings/printing_screen.dart';
+import '../features/settings/profile_screen.dart';
+import '../features/settings/receipt_settings_screen.dart';
+import '../features/settings/settings_hub_screen.dart';
+import '../features/team/team_screen.dart';
 import '../features/tenant/account_screen.dart';
 import '../features/tenant/home_shell.dart';
 import '../features/tenant/tenant_providers.dart';
@@ -25,14 +39,42 @@ import 'redirect.dart';
 abstract final class Routes {
   static const home = '/';
   static const login = '/login';
+  static const signup = '/signup';
+
+  /// Email confirmation. Carries `?email=` because there is no session yet to
+  /// read the address back from.
+  static const verify = '/verify';
+
+  /// Where a signed-in user with no restaurant lands. Still `/join` — the
+  /// screen grew a "create a restaurant" branch, but nothing is served by
+  /// renaming a path that other code and muscle memory already know.
   static const join = '/join';
   static const kds = '/kitchen';
   static const dashboard = '/dashboard';
   static const dayClose = '/day-close';
   static const inventory = '/store-room';
   static const menu = '/menu';
+
+  /// Staff and roles. A destination rather than a settings leaf: on the web it
+  /// is its own top-level page, and on a phone the job — approve the person
+  /// standing in front of you — is not a settings errand.
+  static const team = '/team';
   static const managerLog = '/manager-log';
   static const printing = '/printing';
+
+  /// Settings. A hub of pushed leaves rather than the web's six tabs — see
+  /// `features/settings/settings_hub_screen.dart` for why.
+  static const settings = '/settings';
+  static const settingsGeneral = '/settings/general';
+  static const settingsCharges = '/settings/charges';
+  static const settingsReceipt = '/settings/receipt';
+  static const settingsBranches = '/settings/branches';
+  static const settingsPrinters = '/settings/printers';
+  static const settingsPlan = '/settings/plan';
+  static const settingsProfile = '/settings/profile';
+  static const settingsAppearance = '/settings/appearance';
+  static const settingsDanger = '/settings/danger';
+  static const settingsDangerReset = '/settings/danger/reset';
   static const account = '/account';
   static const designGallery = '/dev/design';
 
@@ -86,8 +128,17 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const LoginScreen(),
       ),
       GoRoute(
+        path: Routes.signup,
+        builder: (context, state) => const SignupScreen(),
+      ),
+      GoRoute(
+        path: Routes.verify,
+        builder: (context, state) =>
+            VerifyEmailScreen(email: state.uri.queryParameters['email'] ?? ''),
+      ),
+      GoRoute(
         path: Routes.join,
-        builder: (context, state) => const JoinCodeScreen(),
+        builder: (context, state) => const OnboardingScreen(),
       ),
       // Drawer destinations. Real routes rather than imperative pushes, so the
       // drawer can say which one you are on without tracking it itself.
@@ -109,6 +160,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const MenuScreen(),
       ),
       GoRoute(
+        path: Routes.team,
+        builder: (context, state) => const TeamScreen(),
+      ),
+      GoRoute(
         path: Routes.managerLog,
         builder: (context, state) => const ManagerLogScreen(),
       ),
@@ -119,6 +174,62 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: Routes.account,
         builder: (context, state) => const AccountScreen(),
+      ),
+      // Settings. Nested so the sub-screens are leaves of one destination —
+      // back from any of them lands on the hub, and the drawer highlights
+      // Settings the whole way down.
+      //
+      // No permission branch in the redirect, for the reason spelled out on the
+      // bill route below: it resolves before permissions load and would bounce
+      // an owner off their own settings. Each row is gated where it is drawn,
+      // and every write behind it is gated again by RLS.
+      GoRoute(
+        path: Routes.settings,
+        builder: (context, state) => const SettingsHubScreen(),
+        routes: [
+          GoRoute(
+            path: 'general',
+            builder: (context, state) => const GeneralSettingsScreen(),
+          ),
+          GoRoute(
+            path: 'charges',
+            builder: (context, state) => const ChargesSettingsScreen(),
+          ),
+          GoRoute(
+            path: 'receipt',
+            builder: (context, state) => const ReceiptSettingsScreen(),
+          ),
+          GoRoute(
+            path: 'branches',
+            builder: (context, state) => const BranchesScreen(),
+          ),
+          GoRoute(
+            path: 'printers',
+            builder: (context, state) => const PrintersScreen(),
+          ),
+          GoRoute(
+            path: 'plan',
+            builder: (context, state) => const PlanUsageScreen(),
+          ),
+          GoRoute(
+            path: 'profile',
+            builder: (context, state) => const ProfileScreen(),
+          ),
+          GoRoute(
+            path: 'appearance',
+            builder: (context, state) => const AppearanceScreen(),
+          ),
+          GoRoute(
+            path: 'danger',
+            builder: (context, state) => const DangerScreen(),
+            routes: [
+              GoRoute(
+                path: 'reset',
+                builder: (context, state) => const DangerResetScreen(),
+              ),
+            ],
+          ),
+        ],
       ),
       // No permission branch in the redirect for this one. Someone without
       // `checkout.view` is never shown a way in, and every RPC behind the

@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
-import '../../core/theme/tokens.dart';
+import '../../app/router.dart';
+import '../../core/widgets/notice.dart';
 import '../../data/supabase/auth_repository.dart';
 
 /// Email + password sign-in, matching the web.
 ///
-/// No sign-up here: creating a restaurant is an owner-at-a-desk task with
-/// currency, tax and branding steps. A waiter who needs in uses a join code
-/// (see [JoinCodeScreen]) after someone creates their account.
+/// Creating an account starts here too, on [SignupScreen] — it used to be
+/// web-only because confirming an email meant following a link back into an
+/// app that had no URL scheme. Verifying with a typed code removed that, so
+/// there is no longer a reason to send someone to a laptop to get started.
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
@@ -120,7 +123,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
                     if (_error != null) ...[
                       const SizedBox(height: 16),
-                      _ErrorNotice(message: _error!),
+                      ErrorNotice(message: _error!),
                     ],
 
                     const SizedBox(height: 24),
@@ -135,12 +138,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           : const Text('Sign in'),
                     ),
 
-                    const SizedBox(height: 20),
-                    Text(
-                      'New restaurants are set up on the web app — currency, tax '
-                      'and branding are easier at a desk.',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodySmall,
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: _busy ? null : () => context.go(Routes.signup),
+                      child: const Text('New here? Create an account'),
                     ),
                   ],
                 ),
@@ -148,41 +149,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-/// An error the user can act on. Icon **and** colour, never colour alone.
-class _ErrorNotice extends StatelessWidget {
-  const _ErrorNotice({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: scheme.error.withValues(alpha: 0.1),
-        border: Border.all(color: scheme.error, width: 1.5),
-        borderRadius: BorderRadius.circular(Tokens.radiusMd),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.error_outline, size: 20, color: scheme.error),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              message,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: scheme.error),
-            ),
-          ),
-        ],
       ),
     );
   }

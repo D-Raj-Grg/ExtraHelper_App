@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../app/app_scaffold.dart';
+import '../../app/router.dart';
 import '../../core/format/money.dart';
 import '../../core/theme/theme_mode_provider.dart';
 import '../../core/theme/tokens.dart';
-import '../../core/widgets/choice_chip.dart';
 import '../../data/supabase/auth_repository.dart';
 import '../../data/supabase/supabase_providers.dart';
 import 'tenant_providers.dart';
@@ -16,6 +17,64 @@ import 'tenant_providers.dart';
 /// mid-service, which is why it is a drawer destination rather than chrome.
 class AccountScreen extends ConsumerWidget {
   const AccountScreen({super.key});
+
+  /// Confirm, then delete.
+  ///
+  /// The server refuses while the caller is the only owner of a restaurant, or
+  /// while their account is attached to cash records that have to be kept. Both
+  /// messages tell the user what to do instead, so they are shown as written
+  /// rather than flattened into "couldn't delete account".
+  static Future<void> _confirmDelete(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete your account?'),
+        content: const Text(
+          'This removes your ExtraHelper login and your membership of every '
+          'restaurant you are in. Orders, bills and cash records you took stay '
+          'with the restaurant. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Keep my account'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete account'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await ref.read(authRepositoryProvider).deleteAccount();
+      // Deleting signs the user out, and the router takes them to login.
+    } on AuthFailure catch (e) {
+      if (!context.mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text("Can't delete yet"),
+          content: Text(e.message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -51,34 +110,34 @@ class AccountScreen extends ConsumerWidget {
                     '${tenant.currency}  ·  ${money(123456, tenant.currency)}',
               ),
               _Row(label: 'Timezone', value: tenant.timezone),
-              // Where the trading day turns over is set on the day-close
-              // sheet, beside the figures it decides. Named here because this
-              // is the screen people look at when they want to know what the
-              // restaurant is configured as.
-              _Row(label: 'Day starts at', value: 'Set on the day close sheet'),
-              const SizedBox(height: 20),
+              // Named here because this is the screen people look at when they
+              // want to know what the restaurant is configured as. Changing it
+              // is Settings' job — this screen is a mirror, not a control
+              // panel.
+              _Row(label: 'Day starts at', value: 'Set in Settings → General'),
+              const SizedBox(height: 12),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.settings_outlined),
+                title: const Text('Restaurant settings'),
+                subtitle: const Text(
+                  'Currency, timezone, charges, receipt and printers.',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => context.push(Routes.settings),
+              ),
+              const SizedBox(height: 8),
             ],
-            Text('Appearance', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 4),
-            Text(
-              'Kept on this device. Light unless you say otherwise, so a phone '
-              'that darkens itself in the evening cannot change the till '
-              'mid-service.',
-              style: theme.textTheme.bodySmall,
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final mode in ThemeMode.values)
-                  AppChoiceChip(
-                    label: themeModeLabel(mode),
-                    selected: themeMode == mode,
-                    onSelect: () =>
-                        ref.read(themeModeProvider.notifier).set(mode),
-                  ),
-              ],
+            // Appearance moved to Settings → Appearance, where it sits beside
+            // the other per-device choices instead of in the middle of a page
+            // about who you are signed in as.
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.palette_outlined),
+              title: const Text('Appearance'),
+              subtitle: Text('${themeModeLabel(themeMode)} · set per device'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => context.push(Routes.settingsAppearance),
             ),
             const SizedBox(height: 24),
 
@@ -119,6 +178,32 @@ class AccountScreen extends ConsumerWidget {
                       ],
                     ),
             ),
+
+            const SizedBox(height: 32),
+            const Divider(),
+            const SizedBox(height: 12),
+            Text('Delete account', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(
+              'Removes your login and your membership of every restaurant. '
+              'What you recorded stays with the restaurant.',
+              style: theme.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: theme.colorScheme.error,
+                  side: BorderSide(color: theme.colorScheme.error),
+                  minimumSize: const Size(0, 44),
+                ),
+                icon: const Icon(Icons.delete_forever_outlined),
+                label: const Text('Delete my account'),
+                onPressed: () => _confirmDelete(context, ref),
+              ),
+            ),
+            const SizedBox(height: 24),
           ],
         ),
       ),

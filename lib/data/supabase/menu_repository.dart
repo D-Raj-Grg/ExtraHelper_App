@@ -197,7 +197,7 @@ String _friendly(String raw) {
   final m = raw.toLowerCase();
   if (m.contains('require') && m.contains('manager')) {
     return "Your role can't change the menu. An owner or manager can grant "
-        'that under Team on the web app.';
+        'that under Team.';
   }
   if (m.contains('permission denied')) {
     return "You don't have permission to edit the menu.";

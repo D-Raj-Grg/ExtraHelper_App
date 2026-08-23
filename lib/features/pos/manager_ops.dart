@@ -701,6 +701,7 @@ class _LogRow extends StatelessWidget {
       ),
       'item_unset_86' => (Icons.restart_alt, semantic.goodText, 'Back on'),
       'table_state' => (Icons.table_restaurant, semantic.infoText, 'Table'),
+      'role_change' => (Icons.badge_outlined, semantic.infoText, 'Team'),
       _ => (Icons.article_outlined, semantic.neutral, entry.action),
     };
 

@@ -30,6 +30,7 @@ const _owner = {
   'order.void',
   'reports.view',
   'inventory.view',
+  'settings.view',
 };
 
 /// A waiter takes orders and sees the floor. Nothing else.
@@ -99,6 +100,7 @@ void main() {
       expect(find.text('Dashboard'), findsOneWidget);
       expect(find.text('Store room'), findsOneWidget);
       expect(find.text('Manager log'), findsOneWidget);
+      expect(find.text('Settings'), findsOneWidget);
       expect(find.text('Account'), findsOneWidget);
     });
 
@@ -113,6 +115,11 @@ void main() {
       expect(find.text('Dashboard'), findsNothing);
       expect(find.text('Store room'), findsNothing);
       expect(find.text('Manager log'), findsNothing);
+      // `settings.view` is owner and manager by default. Printing stays
+      // ungated beside it: whether this phone drives a printer is a property
+      // of the phone, not of the person holding it.
+      expect(find.text('Settings'), findsNothing);
+      expect(find.text('Printing'), findsOneWidget);
     });
 
     testWidgets('tapping a destination navigates to it', (tester) async {

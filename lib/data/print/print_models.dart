@@ -246,3 +246,67 @@ class RenderedPrinter {
     btAddress: j['btAddress'] as String?,
   );
 }
+
+/// What each print document is called on screen. Mirrors the web's `DOC_LABELS`
+/// (`lib/print/types.ts`) — a ticket is described the same way whichever client
+/// someone is looking at when they ring up about it.
+const printDocLabels = <String, String>{
+  'kot': 'Kitchen ticket',
+  'bot': 'Bar ticket',
+  'full_kot': 'Full ticket',
+  'order_slip': 'Order slip',
+  'bill': 'Bill',
+  'receipt': 'Receipt',
+  'day_report': 'Day close (Z)',
+  'test': 'Test page',
+};
+
+String printDocLabel(String doc) => printDocLabels[doc] ?? doc;
+
+/// One document a printer is set to fire on its own, and how many copies.
+///
+/// **Assigning a document to a printer is the auto-print switch.** A printer
+/// with no documents still exists and can be picked by hand; it simply never
+/// fires by itself.
+class PrinterDocAssignment {
+  const PrinterDocAssignment({required this.doc, required this.copies});
+
+  final String doc;
+  final int copies;
+
+  static PrinterDocAssignment fromJson(Map<String, dynamic> j) =>
+      PrinterDocAssignment(
+        doc: (j['doc'] as String?) ?? '',
+        copies: switch (j['copies']) {
+          int n => n,
+          num n => n.round(),
+          _ => 1,
+        },
+      );
+
+  String get label =>
+      copies > 1 ? '${printDocLabel(doc)} ×$copies' : printDocLabel(doc);
+}
+
+/// A printer as the settings screen shows it: the printer plus the documents it
+/// is bound to. The print loop uses the narrower [PrintPrinter] — it does not
+/// care what a printer is *for*, only how to reach it.
+class PrinterRegistryRow {
+  const PrinterRegistryRow({required this.printer, required this.docs});
+
+  final PrintPrinter printer;
+  final List<PrinterDocAssignment> docs;
+
+  static PrinterRegistryRow fromJson(Map<String, dynamic> j) {
+    final docs = j['printer_documents'];
+    return PrinterRegistryRow(
+      printer: PrintPrinter.fromJson(j),
+      docs: docs is List
+          ? docs
+                .whereType<Map<String, dynamic>>()
+                .map(PrinterDocAssignment.fromJson)
+                .toList()
+          : const [],
+    );
+  }
+}

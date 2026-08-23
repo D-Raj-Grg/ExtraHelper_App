@@ -324,7 +324,7 @@ String _friendly(String raw) {
   final m = raw.toLowerCase();
   if (m.contains('not authorized')) {
     return "Your role can't change stock here. An owner or manager can grant "
-        'that under Team on the web app.';
+        'that under Team.';
   }
   if (m.contains('already posted')) {
     return 'That count was already posted, so it can no longer be edited.';

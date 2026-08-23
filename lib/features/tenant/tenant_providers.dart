@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/prefs.dart';
 import '../../data/local/cache_backed.dart';
 import '../../data/local/identity_cache.dart';
 import '../../data/supabase/supabase_providers.dart';
@@ -13,10 +13,6 @@ import '../../data/sync/sync_providers.dart';
 /// stored id is **validated against live memberships** before it's used — a
 /// stale id from a membership that was revoked must never select a tenant.
 const _activeTenantKey = 'active_tenant_id';
-
-final _prefsProvider = FutureProvider<SharedPreferences>(
-  (ref) => SharedPreferences.getInstance(),
-);
 
 final identityCacheProvider = Provider<IdentityCache>(
   (ref) => IdentityCache(ref.watch(appDatabaseProvider)),
@@ -96,7 +92,7 @@ class ActiveTenantSelection extends Notifier<String?> {
   String? build() {
     // Load the stored choice once prefs resolve; until then the first
     // membership is used, which is the same answer for the single-tenant case.
-    ref.listen(_prefsProvider, (_, next) {
+    ref.listen(sharedPreferencesProvider, (_, next) {
       final prefs = next.valueOrNull;
       if (prefs != null && state == null) {
         state = prefs.getString(_activeTenantKey);
@@ -107,13 +103,13 @@ class ActiveTenantSelection extends Notifier<String?> {
 
   Future<void> select(String tenantId) async {
     state = tenantId;
-    final prefs = await ref.read(_prefsProvider.future);
+    final prefs = await ref.read(sharedPreferencesProvider.future);
     await prefs.setString(_activeTenantKey, tenantId);
   }
 
   Future<void> clear() async {
     state = null;
-    final prefs = await ref.read(_prefsProvider.future);
+    final prefs = await ref.read(sharedPreferencesProvider.future);
     await prefs.remove(_activeTenantKey);
   }
 }

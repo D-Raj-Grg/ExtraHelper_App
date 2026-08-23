@@ -1162,9 +1162,14 @@ pressure and there is no room for a text field per share. Revisit if a cashier a
             rejection. Never a real tenant's data.
       - [ ] Privacy policy URL + support URL, both live and reachable.
       - [ ] App Store Connect privacy nutrition labels — email and user content at minimum.
-      - [ ] Guideline 5.1.1(v) account deletion. There is no in-app signup (login + join code only),
-            which is the exemption argument, but accounts are created on the web. Decide the answer
-            before submitting rather than in a rejection reply.
+      - [x] Guideline 5.1.1(v) account deletion. The exemption argument is gone — the app now
+            creates accounts, so deletion has to be in-app, and it is: `delete_my_account()` behind
+            a confirm on the account screen. It refuses in two cases and says why: sole owner of a
+            restaurant (would orphan it), and an account attached to `cash_movements` or
+            `supplier_payments`, whose `created_by` is `not null ... on delete restrict` so a cash
+            record keeps the person who made it. If App Review objects to the second refusal, the
+            answer is to make those two columns nullable and `on delete set null` — a schema change
+            to live financial tables, so decide it deliberately rather than in a rejection reply.
       - [ ] Screenshots: iPhone and iPad, since the binary is universal.
       - [ ] External TestFlight testers need Beta App Review — same demo-account requirement.
 - [ ] **Play internal testing track.** `android/app/build.gradle.kts` still signs release with the
@@ -1362,6 +1367,137 @@ pressure and there is no room for a text field per share. Revisit if a cashier a
       no slip has come out of a printer. Note there is one **failed** `day_report` job in the
       database from 2026-08-21 (business day 2026-08-17) — it predates the render-permission fix
       that shipped with it, and would now succeed; retrying it is the cheapest end-to-end paper test.
+
+## Signup and onboarding on the phone (2026-08-23)
+
+The app was login-only by an explicit decision: creating a restaurant is an owner-at-a-desk task,
+and confirming an email meant a link, which meant Universal Links, App Links and a signed domain
+file for a flow that happens once per account. **Verifying with a typed code removes that whole
+cost**, so the decision no longer holds and a new owner can start on a phone.
+
+- [x] `signUp` / `verifyOTP(OtpType.signup)` / `resend` in `data/supabase/auth_repository.dart`.
+      No URL scheme is configured on either platform and none was added.
+- [x] `SignupScreen` → `VerifyEmailScreen` (6-digit code, resend) → onboarding.
+- [x] `OnboardingScreen` replaces the join-only screen at `/join`, and leads with the choice:
+      **create a restaurant** or **join one**. The old screen offered only a join code, which left
+      an owner who signed up on their phone with no way forward and no explanation.
+- [x] `provisionTenant` in `data/supabase/tenant_repository.dart` — calls `provision_tenant`, then
+      applies tax rules and service charge as a follow-up update exactly as
+      `app/onboarding/actions.ts` does. A failure on that second write reports itself without
+      discarding the restaurant that was created.
+- [x] Reuses the settings screens' `TaxRule`, `TaxRuleDraft`, `showTaxRuleSheet`,
+      `describeTaxRule` and `validateServiceCharge` rather than growing a second tax editor.
+- [x] `AppNotice` / `ErrorNotice` in `core/widgets/notice.dart` — the login and join screens had
+      each grown a private copy of the same box; signup made it three.
+- [x] `resolveRedirect` now holds a `_publicRoutes` set instead of an equality check on `/login`.
+      The tri-state memberships logic is untouched.
+- [x] Account deletion — see the App Store checklist above.
+- [x] 390 tests pass, `flutter analyze` clean for every file this touched.
+
+**Found on the way:** the app never called `claim_invites`. The web calls it after every sign-in
+(`app/auth/actions.ts`), so a staff member invited **by email** who only ever opened the phone app
+was left on the join screen waiting for a code nobody was going to issue. Now called after sign-in
+and after verification, plus a manual "Check for invites" on the join step.
+
+- [ ] **Supabase dashboard, before any of this can be tested:** the "Confirm signup" email template
+      renders only `{{ .ConfirmationURL }}`. Add `{{ .Token }}` so the same email carries the code.
+      The link stays — the web flow uses it.
+- [ ] **Apply `20260823090000_delete_my_account.sql`.** Written, not applied. There is no staging
+      project, so it lands on production.
+- [ ] End-to-end on a real device, both platforms. Nothing here has been run against a live
+      Supabase project yet.
+
+## Settings on the phone (2026-08-23)
+
+The web has a whole Settings page — six tabs — and the app had nothing. What little existed was
+scattered: the day cutoff lived on the day-close sheet with a comment saying it was there only
+because there was no settings screen, currency and timezone were read-only text on Account, and the
+printer registry was stapled to the device printing screen. A restaurant running on phones alone
+could not change its own currency, tax rules, service charge, receipt wording, branches or branding.
+
+**Shape: a `/settings` hub of pushed leaves, not the web's tabs.** The web fuses General, Charges and
+Receipt into one `<form>` behind one Save button — fine at a desk, six screens of scrolling on a
+360dp phone. Each surface here is its own screen with its own save, its own permission and its own
+set of providers to invalidate.
+
+- [x] `/settings` hub — rows gated on `settings.view`, `isManagerProvider` and `role == 'owner'`.
+      Reads `permissionsProvider` directly rather than `hasPermissionProvider`, which answers false
+      while loading and would draw an empty page that then pops rows in.
+- [x] **General** — name, currency, timezone, day cutoff, payment gateway, `qr_auto_fire`,
+      `block_negative_stock`. The cutoff confirms first: it is retroactive on both clients.
+- [x] **Charges & tax** — service charge %, packaging fee, `tax_rules` list with an add/edit sheet.
+- [x] **Receipt & branding** — header/footer/terms/QR caption through `merge_receipt_template`,
+      plus **logo and payment QR upload, baked on the phone**.
+- [x] **Branches** — list, add, edit, delete. The default branch is unarmed: everything without a
+      branch of its own belongs to it.
+- [x] **Printers** — read-only registry with document assignments and a test page. Deliberately not
+      editable: a phone cannot enumerate USB devices or system print queues, so an editor here could
+      only ever create a printer nothing can drive. `printing_screen.dart` shrank to device-only
+      concerns and links here.
+- [x] **Plan & usage** — read-only. No billing flow: selling a subscription in-app drags in StoreKit
+      and App Review's IAP rules for a product the web already sells.
+- [x] **Dangerous area** — owner-only reset / transfer / delete, each behind a retype-the-name
+      guard. Reset also wipes the Drift POS cache and purges the outbox, or queued writes retry
+      against ids the server has forgotten, forever, into dead.
+- [x] **Profile** and **Appearance** — the theme chips moved off Account.
+
+**The image baker is the interesting part.** `lib/data/print/bake_image.dart` is a line-for-line port
+of the web's `components/print/bake-image.ts`: Floyd–Steinberg for a logo, Otsu threshold for a QR,
+packed MSB-first at 384/416/576 dots, and the baked QR is decoded back with `zxing2` to prove it
+still scans. A QR that survives no roll width is refused outright; one that survives some warns and
+names the widths. Three new dependencies (`image`, `zxing2`, `image_picker`) and `compute` to keep
+the pixel loops off the UI isolate.
+
+**The two must stay byte-identical.** Same restaurant, either client, same logo on the same paper.
+The `<=` in the Otsu threshold and the MSB-first packing are the two places a subtle port error goes
+unnoticed until paper comes out blank — both are commented, and `bake_image_test.dart` guards them.
+
+**Read-back on every table write.** RLS does not raise on an update matching zero rows, so
+`tenant_settings`, `tenants` and `branches` writes all append `.select('<pk>')` and treat an empty
+result as a permission failure. `tenants.name` is owner-only while the rest of General is
+owner-or-manager, so the name field is disabled for a manager *and* the rename is a separate call
+after the settings save — a fused write would half-succeed invisibly.
+
+- [x] One `sharedPreferencesProvider` in `core/prefs.dart`. Four features had grown their own private
+      copy, so a test mocking storage for one silently left the others reading the real thing.
+- [x] Theme now syncs to `user_preferences`, the row the web writes. Device value paints the first
+      frame (a staff app renders its own theme on dead wifi); the account value is adopted only on a
+      device that has never been told. `ThemeMode.system` is deliberately not synced — the column
+      checks `('light','dark')` and the web has no System option.
+- [x] Currency and timezone lists deduplicated against `core/region_options.dart`, which the
+      onboarding form already owned.
+- [x] 82 tests across `settings_models`, `charges_form`, `bake_image`, `settings_screens`,
+      `settings_lists` and `danger_zone`; drawer cases added to `shell_chrome_test`.
+
+**Not done, deliberately:** printer editing (above), QZ Tray setup, USB/system printer enumeration,
+billing checkout, and `set_station_printer` / `set_station_kind` — the app has no kitchen-station
+editor to hang the last two on.
+
+- [ ] End-to-end against the live tenant: upload a real payment QR, print the bill, scan the slip.
+      Nothing here has been run against a real printer yet.
+- [ ] Reset and delete have been exercised only through the widget tests. Do not try them against
+      Sekuwa Station.
+
+## TestFlight 1.0.11+1 (2026-08-23)
+
+Shipped on command. Carries three sessions' work: in-app signup + onboarding (this session), the
+Settings feature, and Team/staff/roles. `flutter analyze` clean, 511 tests green, dart-defines
+verified in the archive (`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `APP_URL` — the last one
+decoded out of `ios/Flutter/Generated.xcconfig`, because a missing `APP_URL` disables printing in
+silence). Upload succeeded, build processed **VALID** on App Store Connect.
+
+Marketing version bumped to **1.0.11**, not just the build number: 1.0.10 had already reached App
+Store Connect, and a train that has been through review rejects a re-used marketing version on
+upload.
+
+- [ ] **Signup cannot be completed by a tester until the Supabase email template is edited.** The
+      "Confirm signup" template still renders only `{{ .ConfirmationURL }}`. The app verifies with
+      the 6-digit code, so until `{{ .Token }}` is added a new account reaches the verify screen and
+      the code never arrives — "Send again" will not help, because the resend uses the same
+      template. Everything either side of that step works; this one dashboard edit is what makes the
+      feature testable. Sign-in, join-code and the whole existing app are unaffected.
+- [ ] Account deletion is live in this build and `delete_my_account()` is applied to production, so
+      Guideline 5.1.1(v) is answered whenever the next App Store submission happens.
 
 ## Open Questions
 

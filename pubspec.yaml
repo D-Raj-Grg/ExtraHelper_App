@@ -5,7 +5,7 @@ publish_to: 'none'
 # The build number after the + must strictly increase on every upload to App Store
 # Connect / Play — a number is burned the moment a build carrying it is accepted,
 # even if that build is later superseded.
-version: 1.0.10+1
+version: 1.0.11+1
 
 environment:
   sdk: ^3.10.7
@@ -50,6 +50,18 @@ dependencies:
   # AGP 8.11.1. Bumping the Android toolchain to suit one permission is not worth
   # the blast radius.
   permission_handler: ^12.0.1
+
+  # Receipt branding. The web bakes a logo or payment QR into 1-bit ESC/POS
+  # bitmaps in a browser canvas; these three are the canvas replacement, so the
+  # phone can do the same job to the same bytes. See
+  # lib/data/print/bake_image.dart, which is a line-for-line port of
+  # extrahelper/components/print/bake-image.ts.
+  #
+  # `image` does decode/resize/pixel access, `zxing2` re-reads a baked QR to
+  # prove it still scans, `image_picker` is the gallery/camera source.
+  image: ^4.5.4
+  zxing2: ^0.2.3
+  image_picker: ^1.1.2
 
 dev_dependencies:
   flutter_test:

@@ -1,9 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/prefs.dart';
 import '../../data/supabase/kds_repository.dart';
 import '../../data/supabase/supabase_providers.dart';
 import '../../data/sync/order_queue.dart';
@@ -37,7 +37,7 @@ const _stationKey = 'kds_station';
 class KdsStationFilter extends Notifier<String> {
   @override
   String build() {
-    ref.listen(_prefsProvider, (_, next) {
+    ref.listen(sharedPreferencesProvider, (_, next) {
       final prefs = next.valueOrNull;
       if (prefs != null && state == kdsAllStations) {
         state = prefs.getString(_stationKey) ?? kdsAllStations;
@@ -48,14 +48,10 @@ class KdsStationFilter extends Notifier<String> {
 
   Future<void> select(String station) async {
     state = station;
-    final prefs = await ref.read(_prefsProvider.future);
+    final prefs = await ref.read(sharedPreferencesProvider.future);
     await prefs.setString(_stationKey, station);
   }
 }
-
-final _prefsProvider = FutureProvider<SharedPreferences>(
-  (ref) => SharedPreferences.getInstance(),
-);
 
 final kdsStationProvider = NotifierProvider<KdsStationFilter, String>(
   KdsStationFilter.new,

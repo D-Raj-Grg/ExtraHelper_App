@@ -104,7 +104,7 @@ class _NoPosAccess extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               "Your role in this restaurant doesn't include taking orders. An "
-              'owner or manager can change that on the web app under Team.',
+              'owner or manager can change that under Team.',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall,
             ),

@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'settings_repository.dart' show TaxRule;
 import 'supabase_providers.dart';
 
 /// A restaurant the signed-in user belongs to, with the settings every money
@@ -151,6 +152,80 @@ class TenantRepository {
         "Couldn't reach the server. Check your connection and try again.",
       );
     }
+  }
+
+  /// Create a restaurant and make the caller its owner.
+  ///
+  /// `provision_tenant` is `security definer` and does all of it in one call:
+  /// the tenant, its settings row, a default `Main` branch, the owner
+  /// membership and the seeded system roles. Authenticated users cannot INSERT
+  /// into `tenants` directly under RLS, which is exactly why the RPC exists —
+  /// do not try to assemble this client-side.
+  ///
+  /// Tax rules and service charge are applied **after**, as a plain update, the
+  /// same way `app/onboarding/actions.ts` does it: they are not RPC arguments,
+  /// and by this point the owner membership exists so RLS permits the write.
+  /// A failure there leaves a usable restaurant with default tax settings
+  /// rather than no restaurant at all, so it is reported without discarding the
+  /// tenant that was created.
+  ///
+  /// Returns the new tenant's id.
+  Future<String> provisionTenant({
+    required String name,
+    required String currency,
+    required String timezone,
+    double serviceCharge = 0,
+    List<TaxRule> taxRules = const [],
+    bool forceNew = false,
+  }) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      throw const TenantFailure('Restaurant name is required.');
+    }
+
+    final String tenantId;
+    try {
+      tenantId =
+          await _client.rpc(
+                'provision_tenant',
+                params: {
+                  '_name': trimmed,
+                  '_currency': currency,
+                  '_timezone': timezone,
+                  '_force_new': forceNew,
+                },
+              )
+              as String;
+    } on PostgrestException catch (e) {
+      throw TenantFailure(switch (e.code) {
+        '22023' => 'Restaurant name is required.',
+        '28000' => "You're signed out — sign in again.",
+        _ => e.message,
+      });
+    } catch (_) {
+      throw const TenantFailure(
+        "Couldn't reach the server. Check your connection and try again.",
+      );
+    }
+
+    if (taxRules.isNotEmpty || serviceCharge > 0) {
+      try {
+        await _client
+            .from('tenant_settings')
+            .update({
+              'tax_rules': taxRules.map((r) => r.toJson()).toList(),
+              'service_charge': serviceCharge,
+            })
+            .eq('tenant_id', tenantId);
+      } catch (_) {
+        throw TenantFailure(
+          'Created "$trimmed", but the tax and service charge settings did not '
+          'save. Set them in Settings.',
+        );
+      }
+    }
+
+    return tenantId;
   }
 
   /// Granular permission keys for this tenant.

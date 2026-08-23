@@ -25,6 +25,47 @@ class PrintRepository {
       'id, name, connection, host, port, system_name, bt_address, '
       'paper_width, render_mode, is_active, branch_id';
 
+  /// The registry as a settings screen shows it — every printer with the
+  /// documents it fires on its own.
+  ///
+  /// Separate from [printers] on purpose: the print loop asks that one, and it
+  /// has no business paying for a join it never reads.
+  Future<List<PrinterRegistryRow>> registry() async {
+    try {
+      final rows = await _client
+          .from('printers')
+          .select('$_printerCols, printer_documents(doc, copies)')
+          .eq('tenant_id', _tenantId)
+          .order('name');
+      return rows.map(PrinterRegistryRow.fromJson).toList();
+    } catch (_) {
+      throw const PosTransientFailure("Couldn't load the printers.");
+    }
+  }
+
+  /// How many printers this restaurant's plan allows. Null means no ceiling —
+  /// either the plan does not name one, or the restaurant is on trial.
+  ///
+  /// Read only to say "3 of 10" on screen. The number that actually decides is
+  /// the one `save_printer` checks at write time, on the web.
+  Future<int?> printerLimit() async {
+    try {
+      final result = await _client.rpc<dynamic>(
+        'tenant_limit',
+        params: {'_tenant': _tenantId, '_key': 'printers'},
+      );
+      return switch (result) {
+        int n => n,
+        num n => n.round(),
+        _ => null,
+      };
+    } catch (_) {
+      // A limit that cannot be read is shown as no limit rather than as an
+      // error: the count above it is still true and still useful.
+      return null;
+    }
+  }
+
   Future<List<PrintPrinter>> printers() async {
     try {
       final rows = await _client

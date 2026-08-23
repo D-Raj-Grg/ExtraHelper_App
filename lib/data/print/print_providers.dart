@@ -3,10 +3,10 @@ import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/env.dart';
+import '../../core/prefs.dart';
 import '../../features/tenant/tenant_providers.dart';
 import '../supabase/supabase_providers.dart';
 import 'print_models.dart';
@@ -25,10 +25,6 @@ import 'transports/print_transport.dart';
 /// owner is on the bus is the failure this avoids.
 const _printEnabledKey = 'print_from_this_device';
 
-final _prefsProvider = FutureProvider<SharedPreferences>(
-  (ref) => SharedPreferences.getInstance(),
-);
-
 class PrintEnabled extends Notifier<bool> {
   /// Whether the stored value has had its say. Without this, a tap made while
   /// SharedPreferences was still opening is silently undone the moment it
@@ -37,7 +33,7 @@ class PrintEnabled extends Notifier<bool> {
 
   @override
   bool build() {
-    ref.listen(_prefsProvider, (_, next) {
+    ref.listen(sharedPreferencesProvider, (_, next) {
       final prefs = next.valueOrNull;
       if (prefs == null || _settled) return;
       _settled = true;
@@ -50,7 +46,7 @@ class PrintEnabled extends Notifier<bool> {
     // A deliberate tap outranks whatever is on disk.
     _settled = true;
     state = value;
-    final prefs = await ref.read(_prefsProvider.future);
+    final prefs = await ref.read(sharedPreferencesProvider.future);
     await prefs.setBool(_printEnabledKey, value);
   }
 }
