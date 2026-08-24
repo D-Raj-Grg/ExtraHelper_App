@@ -1557,14 +1557,13 @@ front of login on a fresh install, and only on a fresh install.
   by the shared frame, and the two rows inside them that could not take a second line are `Wrap`s
   now. A `Row` that does not fit clips; a `Wrap` that does not fit wraps.
 
-**Beyond this feature, and deliberate:** `main.dart` now awaits `SharedPreferences.getInstance()`
-before `runApp` and overrides `sharedPreferencesProvider` with the instance, because the router's
-redirect is synchronous and has to answer "has this device seen the welcome?" before the first
-frame is painted. That makes prefs synchronous for the other four consumers too
-(`theme_mode_provider`, `tenant_providers`, `print_providers`, `kds_providers`). Their `_settled`
-guards still hold and their tests build their own containers without the override, so nothing
-changed for them — but the visible side effect is that a dark-mode phone stops painting one light
-frame at launch, and the stored tenant choice is right on frame one rather than a beat later.
+**Beyond this feature, and it broke four settings — see the 1.0.13 entry below.** `main.dart` now
+awaits `SharedPreferences.getInstance()` before `runApp` and overrides `sharedPreferencesProvider`
+with the instance, because the router's redirect is synchronous and has to answer "has this device
+seen the welcome?" before the first frame is painted. The claim originally recorded here — that the
+other four consumers were unaffected because "their `_settled` guards still hold and their tests
+build their own containers without the override" — was wrong, and the second half of that sentence
+is exactly *why* it went unnoticed: the tests exercised a code path production no longer used.
 
 - [ ] On a real device, both platforms: install fresh → carousel; skip → login; force-quit and
       relaunch → login, no carousel; delete and reinstall → carousel again. Then the same on a
@@ -1684,6 +1683,48 @@ vtool -show-build /tmp/ipacheck/Payload/Runner.app/Frameworks/sqlite3.framework/
 
 **Never run a simulator build and an IPA build from the same tree without a `flutter clean`
 between them.**
+
+## TestFlight 1.0.13+1 — the preference regression 1.0.12 shipped (2026-08-24)
+
+Reported from a phone within the hour: "Print from this device" turned itself back off after
+closing and reopening the app. Not the printer screen. **1.0.12 broke it**, along with three other
+per-device settings, and the app said nothing about any of them.
+
+**Cause.** Pre-resolving `SharedPreferences` in `main()` — added so the welcome gate could answer on
+the first frame — changed storage from resolving a frame or two *after* launch to resolving
+*immediately*. Four notifiers adopted their stored value inside
+`ref.listen(sharedPreferencesProvider, ..., fireImmediately: true)` and **assigned to `state` from
+the callback**. On the old timing the first fire found nothing and bailed out; the real assignment
+happened later, safely. On the new timing the first fire carries data, so the assignment lands
+*during* `build()`, before the notifier has a state to assign to. It goes nowhere, `build()` returns
+the default, and the stored choice is discarded on every launch.
+
+Four settings, all silent:
+
+| Setting | Symptom |
+| --- | --- |
+| `print_from_this_device` | reverts to off — no toggle, no error, no tickets |
+| `theme_mode` | a dark phone repaints itself light every launch |
+| `active_tenant_id` | a two-restaurant user is put back in the first one |
+| `kds_station` | the station filter resets to All |
+
+- [x] **All four now return the stored value from `build()` instead of assigning `state` inside it**
+      (`print_providers.dart`, `theme_mode_provider.dart`, `tenant_providers.dart`,
+      `kds_providers.dart`). Each keeps a private `_value` so a decision already made — a tap while
+      storage was still opening — still outranks the disk, which is what the old `_settled` guard
+      was for.
+- [x] `test/device_prefs_test.dart` — every preference restored through the wiring `main()` actually
+      ships, plus the tap-before-storage case.
+- [x] 580 tests pass, `flutter analyze` clean.
+
+**The lesson worth more than the fix: the whole suite stayed green through this.** Every existing
+preference test built a `ProviderContainer` with no override and awaited the future, exercising the
+slow path — the one production had just stopped using. A test that constructs its own wiring proves
+the wiring it constructed, not the one that ships. When `main()` changes how a dependency is
+provided, the tests that mock that dependency are the *least* likely to notice.
+
+**Never assign `state` from inside `build()`**, including indirectly from a `fireImmediately`
+listener. Read the value and return it.
 
 ## Open Questions
 

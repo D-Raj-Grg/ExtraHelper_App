@@ -35,18 +35,24 @@ const kdsExpo = 'expo';
 const _stationKey = 'kds_station';
 
 class KdsStationFilter extends Notifier<String> {
+  /// See [PrintEnabled] for why this is returned from `build()` rather than
+  /// assigned to `state` from a listener: an assignment during `build()` is
+  /// dropped, and the station a kitchen picked reverted on every launch.
+  String? _value;
+
   @override
   String build() {
-    ref.listen(sharedPreferencesProvider, (_, next) {
-      final prefs = next.valueOrNull;
-      if (prefs != null && state == kdsAllStations) {
-        state = prefs.getString(_stationKey) ?? kdsAllStations;
-      }
-    }, fireImmediately: true);
-    return kdsAllStations;
+    final decided = _value;
+    if (decided != null) return decided;
+
+    final prefs = ref.watch(sharedPreferencesProvider).valueOrNull;
+    if (prefs == null) return kdsAllStations;
+
+    return _value = prefs.getString(_stationKey) ?? kdsAllStations;
   }
 
   Future<void> select(String station) async {
+    _value = station;
     state = station;
     final prefs = await ref.read(sharedPreferencesProvider.future);
     await prefs.setString(_stationKey, station);

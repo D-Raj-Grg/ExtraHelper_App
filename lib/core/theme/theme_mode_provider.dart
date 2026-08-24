@@ -46,14 +46,21 @@ ThemeMode _decode(String? raw) => switch (raw) {
 };
 
 class AppThemeMode extends Notifier<ThemeMode> {
-  /// Whether a stored value has had its say — the same guard [PrintEnabled]
-  /// carries. SharedPreferences resolves a frame or two after launch, so
-  /// without this a choice made in between is silently overwritten when it
-  /// lands and the setting appears to change itself.
-  bool _settled = false;
+  /// The palette once anything has decided it — a tap, the stored value, or
+  /// the account's.
+  ///
+  /// **Returned from `build()`, never assigned to `state` from inside it.**
+  /// This used to adopt the stored value in a `ref.listen(...,
+  /// fireImmediately: true)` callback, which held only while
+  /// SharedPreferences resolved a frame or two *after* launch. Once `main()`
+  /// began pre-resolving it, the first fire carried data and the assignment
+  /// landed during `build()`, before there was a state to assign to: it went
+  /// nowhere, the default was returned, and a phone set to dark repainted
+  /// itself light on every launch.
+  ThemeMode? _value;
 
-  /// Whether the person using this device has chosen since launch. Separate
-  /// from [_settled] because the account's value may arrive *after* the
+  /// Whether the person using this device has chosen since launch. Kept
+  /// separate from [_value] because the account's value may arrive *after* the
   /// device's, and it must not undo a tap that happened in between.
   bool _chosenHere = false;
 
@@ -63,26 +70,26 @@ class AppThemeMode extends Notifier<ThemeMode> {
 
   @override
   ThemeMode build() {
-    ref.listen(sharedPreferencesProvider, (_, next) {
-      final prefs = next.valueOrNull;
-      if (prefs == null || _settled) return;
-      _settled = true;
-      final stored = prefs.getString(_themeModeKey);
-      state = _decode(stored);
-      // Nothing stored means this device has never been told. That is the one
-      // case where the account's value is strictly better than the default, so
-      // go and ask for it.
-      if (stored == null) unawaited(_adoptAccountValue());
-    }, fireImmediately: true);
+    final decided = _value;
+    if (decided != null) return decided;
+
+    final prefs = ref.watch(sharedPreferencesProvider).valueOrNull;
     // Light while storage opens. Starting at `system` instead would paint the
     // first frame dark on a dark-mode phone and then snap to light.
-    return ThemeMode.light;
+    if (prefs == null) return ThemeMode.light;
+
+    final stored = prefs.getString(_themeModeKey);
+    // Nothing stored means this device has never been told. That is the one
+    // case where the account's value is strictly better than the default, so
+    // go and ask for it.
+    if (stored == null) unawaited(_adoptAccountValue());
+    return _value = _decode(stored);
   }
 
   Future<void> set(ThemeMode mode) async {
     // A deliberate choice outranks whatever is still loading from disk, and
     // anything still in flight from the server.
-    _settled = true;
+    _value = mode;
     _chosenHere = true;
     state = mode;
     final prefs = await ref.read(sharedPreferencesProvider.future);
@@ -111,6 +118,7 @@ class AppThemeMode extends Notifier<ThemeMode> {
     }
     if (prefs == null || _chosenHere) return;
     final mode = _decode(prefs.theme);
+    _value = mode;
     state = mode;
     final store = await ref.read(sharedPreferencesProvider.future);
     await store.setString(_themeModeKey, _encode(mode));

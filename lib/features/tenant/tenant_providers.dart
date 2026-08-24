@@ -90,26 +90,36 @@ final pendingMembershipsProvider = FutureProvider<List<PendingMembership>>((
 /// The user's explicit tenant choice, if any. Null means "not chosen" — which
 /// resolves to the first membership, not to "no tenant".
 class ActiveTenantSelection extends Notifier<String?> {
+  /// The chosen restaurant once anything has decided it.
+  ///
+  /// Returned from `build()`, never assigned to `state` from inside it — see
+  /// [PrintEnabled] for the failure that shape caused once storage began
+  /// resolving before the first frame. Here it meant someone with two
+  /// restaurants was silently put back into the first one on every launch.
+  String? _value;
+
   @override
   String? build() {
+    final decided = _value;
+    if (decided != null) return decided;
+
     // Load the stored choice once prefs resolve; until then the first
     // membership is used, which is the same answer for the single-tenant case.
-    ref.listen(sharedPreferencesProvider, (_, next) {
-      final prefs = next.valueOrNull;
-      if (prefs != null && state == null) {
-        state = prefs.getString(_activeTenantKey);
-      }
-    }, fireImmediately: true);
-    return null;
+    final prefs = ref.watch(sharedPreferencesProvider).valueOrNull;
+    if (prefs == null) return null;
+
+    return _value = prefs.getString(_activeTenantKey);
   }
 
   Future<void> select(String tenantId) async {
+    _value = tenantId;
     state = tenantId;
     final prefs = await ref.read(sharedPreferencesProvider.future);
     await prefs.setString(_activeTenantKey, tenantId);
   }
 
   Future<void> clear() async {
+    _value = null;
     state = null;
     final prefs = await ref.read(sharedPreferencesProvider.future);
     await prefs.remove(_activeTenantKey);

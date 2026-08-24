@@ -26,25 +26,39 @@ import 'transports/print_transport.dart';
 const _printEnabledKey = 'print_from_this_device';
 
 class PrintEnabled extends Notifier<bool> {
-  /// Whether the stored value has had its say. Without this, a tap made while
-  /// SharedPreferences was still opening is silently undone the moment it
-  /// resolves — the switch flicks back on its own and the phone stops printing.
-  bool _settled = false;
+  /// The value once anything has decided it — a tap, or the stored answer.
+  ///
+  /// **`build()` returns this; it never assigns `state` from inside itself.**
+  /// It used to adopt the stored value in a `ref.listen(..., fireImmediately:
+  /// true)` callback, which worked only for as long as SharedPreferences
+  /// resolved a frame or two *after* launch: the first fire found no value and
+  /// bailed out, and the real assignment happened later, safely. The moment
+  /// `main()` began pre-resolving storage, that first fire arrived with data
+  /// and the assignment landed *during* `build()` — before the notifier had an
+  /// initial state at all. The write went nowhere, `build()` returned the
+  /// default, and the setting silently reverted on every launch. Printing
+  /// turned itself off overnight and said nothing, which is precisely the
+  /// failure this app has a rule about.
+  bool? _value;
 
   @override
   bool build() {
-    ref.listen(sharedPreferencesProvider, (_, next) {
-      final prefs = next.valueOrNull;
-      if (prefs == null || _settled) return;
-      _settled = true;
-      state = prefs.getBool(_printEnabledKey) ?? false;
-    }, fireImmediately: true);
-    return false;
+    // A decision already made outranks the disk — including a tap that
+    // happened while storage was still opening.
+    final decided = _value;
+    if (decided != null) return decided;
+
+    // Watched, not listened: when storage resolves this rebuilds and returns
+    // the real answer, instead of trying to push one in from a callback.
+    final prefs = ref.watch(sharedPreferencesProvider).valueOrNull;
+    if (prefs == null) return false;
+
+    return _value = prefs.getBool(_printEnabledKey) ?? false;
   }
 
   Future<void> set(bool value) async {
     // A deliberate tap outranks whatever is on disk.
-    _settled = true;
+    _value = value;
     state = value;
     final prefs = await ref.read(sharedPreferencesProvider.future);
     await prefs.setBool(_printEnabledKey, value);
