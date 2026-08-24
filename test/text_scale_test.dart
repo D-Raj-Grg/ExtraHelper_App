@@ -1,3 +1,4 @@
+import 'package:extrahelper/core/prefs.dart';
 import 'package:extrahelper/core/widgets/earlier_day_chip.dart';
 import 'package:extrahelper/data/supabase/tenant_repository.dart';
 import 'package:extrahelper/data/sync/sync_providers.dart';
@@ -6,9 +7,12 @@ import 'package:extrahelper/features/pos/bill_providers.dart';
 import 'package:extrahelper/features/pos/bill_view_screen.dart';
 import 'package:extrahelper/features/pos/checkout_screen.dart';
 import 'package:extrahelper/features/tenant/tenant_providers.dart';
+import 'package:extrahelper/features/welcome/welcome_screen.dart';
+import 'package:extrahelper/features/welcome/welcome_slides.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// The bill surfaces at double text size on a small phone.
 ///
@@ -141,6 +145,36 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(tester.takeException(), isNull);
+  });
+
+  // The first thing a new install sees, at the size someone who needs it reads
+  // at. The art gives way here rather than pushing the sentence off the screen;
+  // what must survive is the sentence.
+  testWidgets('the welcome carousel survives it, first slide and last', (
+    tester,
+  ) async {
+    _smallPhone(tester);
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    await tester.pumpWidget(
+      _scaled(const WelcomeScreen(), [
+        sharedPreferencesProvider.overrideWith((ref) => prefs),
+      ]),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text(welcomeSlides.first.headline), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    for (var i = 0; i < welcomeSlides.length - 1; i++) {
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+    }
+
+    expect(find.text(welcomeSlides.last.headline), findsOneWidget);
+    expect(find.text('Get started'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

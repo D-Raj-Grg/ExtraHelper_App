@@ -22,16 +22,37 @@ import 'router.dart';
 /// definition happen before there is a session, so the rule is now a set. Keep
 /// it a set: an `if` per public route is how one of them ends up bouncing to
 /// login and nobody notices until someone cannot finish signing up.
-const _publicRoutes = {Routes.login, Routes.signup, Routes.verify};
+const _publicRoutes = {
+  Routes.welcome,
+  Routes.login,
+  Routes.signup,
+  Routes.verify,
+};
 
 /// Returns the location to redirect to, or null to stay put.
+///
+/// [welcomeSeen] defaults to **true** rather than being required, and both
+/// halves of that are deliberate. Required would mean every existing caller
+/// stating a value for a question most of them have no stake in; and "seen" is
+/// the honest answer to an unknown here, because the cost of guessing wrong
+/// that way is one person missing an intro, while guessing the other way puts
+/// the carousel in front of someone who is already typing a password.
 String? resolveRedirect({
   required bool signedIn,
   required AsyncValue<List<Membership>?> memberships,
   required Set<String>? permissions,
   required String location,
+  bool welcomeSeen = true,
 }) {
   if (!signedIn) {
+    // First launch: the pitch comes before the form, and nothing else is
+    // reachable until it is dismissed. There is no pre-login deep link to
+    // preserve — email verification is a typed code, not a URL.
+    if (!welcomeSeen) {
+      return location == Routes.welcome ? null : Routes.welcome;
+    }
+    // Seen once, and the door closes behind it.
+    if (location == Routes.welcome) return Routes.login;
     return _publicRoutes.contains(location) ? null : Routes.login;
   }
 

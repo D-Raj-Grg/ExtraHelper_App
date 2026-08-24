@@ -3490,6 +3490,234 @@ class CachedPermissionsCompanion extends UpdateCompanion<CachedPermission> {
   }
 }
 
+class $CachedPermissionMetaTable extends CachedPermissionMeta
+    with TableInfo<$CachedPermissionMetaTable, CachedPermissionMetaData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CachedPermissionMetaTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _tenantIdMeta = const VerificationMeta(
+    'tenantId',
+  );
+  @override
+  late final GeneratedColumn<String> tenantId = GeneratedColumn<String>(
+    'tenant_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _fetchedAtMeta = const VerificationMeta(
+    'fetchedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> fetchedAt = GeneratedColumn<DateTime>(
+    'fetched_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [tenantId, fetchedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'cached_permission_meta';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CachedPermissionMetaData> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('tenant_id')) {
+      context.handle(
+        _tenantIdMeta,
+        tenantId.isAcceptableOrUnknown(data['tenant_id']!, _tenantIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_tenantIdMeta);
+    }
+    if (data.containsKey('fetched_at')) {
+      context.handle(
+        _fetchedAtMeta,
+        fetchedAt.isAcceptableOrUnknown(data['fetched_at']!, _fetchedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_fetchedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {tenantId};
+  @override
+  CachedPermissionMetaData map(
+    Map<String, dynamic> data, {
+    String? tablePrefix,
+  }) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CachedPermissionMetaData(
+      tenantId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}tenant_id'],
+      )!,
+      fetchedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}fetched_at'],
+      )!,
+    );
+  }
+
+  @override
+  $CachedPermissionMetaTable createAlias(String alias) {
+    return $CachedPermissionMetaTable(attachedDatabase, alias);
+  }
+}
+
+class CachedPermissionMetaData extends DataClass
+    implements Insertable<CachedPermissionMetaData> {
+  final String tenantId;
+  final DateTime fetchedAt;
+  const CachedPermissionMetaData({
+    required this.tenantId,
+    required this.fetchedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['tenant_id'] = Variable<String>(tenantId);
+    map['fetched_at'] = Variable<DateTime>(fetchedAt);
+    return map;
+  }
+
+  CachedPermissionMetaCompanion toCompanion(bool nullToAbsent) {
+    return CachedPermissionMetaCompanion(
+      tenantId: Value(tenantId),
+      fetchedAt: Value(fetchedAt),
+    );
+  }
+
+  factory CachedPermissionMetaData.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CachedPermissionMetaData(
+      tenantId: serializer.fromJson<String>(json['tenantId']),
+      fetchedAt: serializer.fromJson<DateTime>(json['fetchedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'tenantId': serializer.toJson<String>(tenantId),
+      'fetchedAt': serializer.toJson<DateTime>(fetchedAt),
+    };
+  }
+
+  CachedPermissionMetaData copyWith({String? tenantId, DateTime? fetchedAt}) =>
+      CachedPermissionMetaData(
+        tenantId: tenantId ?? this.tenantId,
+        fetchedAt: fetchedAt ?? this.fetchedAt,
+      );
+  CachedPermissionMetaData copyWithCompanion(
+    CachedPermissionMetaCompanion data,
+  ) {
+    return CachedPermissionMetaData(
+      tenantId: data.tenantId.present ? data.tenantId.value : this.tenantId,
+      fetchedAt: data.fetchedAt.present ? data.fetchedAt.value : this.fetchedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CachedPermissionMetaData(')
+          ..write('tenantId: $tenantId, ')
+          ..write('fetchedAt: $fetchedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(tenantId, fetchedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CachedPermissionMetaData &&
+          other.tenantId == this.tenantId &&
+          other.fetchedAt == this.fetchedAt);
+}
+
+class CachedPermissionMetaCompanion
+    extends UpdateCompanion<CachedPermissionMetaData> {
+  final Value<String> tenantId;
+  final Value<DateTime> fetchedAt;
+  final Value<int> rowid;
+  const CachedPermissionMetaCompanion({
+    this.tenantId = const Value.absent(),
+    this.fetchedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CachedPermissionMetaCompanion.insert({
+    required String tenantId,
+    required DateTime fetchedAt,
+    this.rowid = const Value.absent(),
+  }) : tenantId = Value(tenantId),
+       fetchedAt = Value(fetchedAt);
+  static Insertable<CachedPermissionMetaData> custom({
+    Expression<String>? tenantId,
+    Expression<DateTime>? fetchedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (tenantId != null) 'tenant_id': tenantId,
+      if (fetchedAt != null) 'fetched_at': fetchedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CachedPermissionMetaCompanion copyWith({
+    Value<String>? tenantId,
+    Value<DateTime>? fetchedAt,
+    Value<int>? rowid,
+  }) {
+    return CachedPermissionMetaCompanion(
+      tenantId: tenantId ?? this.tenantId,
+      fetchedAt: fetchedAt ?? this.fetchedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (tenantId.present) {
+      map['tenant_id'] = Variable<String>(tenantId.value);
+    }
+    if (fetchedAt.present) {
+      map['fetched_at'] = Variable<DateTime>(fetchedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CachedPermissionMetaCompanion(')
+          ..write('tenantId: $tenantId, ')
+          ..write('fetchedAt: $fetchedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $CachedInventoryItemsTable extends CachedInventoryItems
     with TableInfo<$CachedInventoryItemsTable, CachedInventoryItem> {
   @override
@@ -4688,6 +4916,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $CachedMembershipsTable(this);
   late final $CachedPermissionsTable cachedPermissions =
       $CachedPermissionsTable(this);
+  late final $CachedPermissionMetaTable cachedPermissionMeta =
+      $CachedPermissionMetaTable(this);
   late final $CachedInventoryItemsTable cachedInventoryItems =
       $CachedInventoryItemsTable(this);
   late final $OutboxRowsTable outboxRows = $OutboxRowsTable(this);
@@ -4706,6 +4936,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     cachedTables,
     cachedMemberships,
     cachedPermissions,
+    cachedPermissionMeta,
     cachedInventoryItems,
     outboxRows,
   ];
@@ -6728,6 +6959,165 @@ typedef $$CachedPermissionsTableProcessedTableManager =
       CachedPermission,
       PrefetchHooks Function()
     >;
+typedef $$CachedPermissionMetaTableCreateCompanionBuilder =
+    CachedPermissionMetaCompanion Function({
+      required String tenantId,
+      required DateTime fetchedAt,
+      Value<int> rowid,
+    });
+typedef $$CachedPermissionMetaTableUpdateCompanionBuilder =
+    CachedPermissionMetaCompanion Function({
+      Value<String> tenantId,
+      Value<DateTime> fetchedAt,
+      Value<int> rowid,
+    });
+
+class $$CachedPermissionMetaTableFilterComposer
+    extends Composer<_$AppDatabase, $CachedPermissionMetaTable> {
+  $$CachedPermissionMetaTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get tenantId => $composableBuilder(
+    column: $table.tenantId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get fetchedAt => $composableBuilder(
+    column: $table.fetchedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CachedPermissionMetaTableOrderingComposer
+    extends Composer<_$AppDatabase, $CachedPermissionMetaTable> {
+  $$CachedPermissionMetaTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get tenantId => $composableBuilder(
+    column: $table.tenantId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get fetchedAt => $composableBuilder(
+    column: $table.fetchedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CachedPermissionMetaTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CachedPermissionMetaTable> {
+  $$CachedPermissionMetaTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get tenantId =>
+      $composableBuilder(column: $table.tenantId, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get fetchedAt =>
+      $composableBuilder(column: $table.fetchedAt, builder: (column) => column);
+}
+
+class $$CachedPermissionMetaTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CachedPermissionMetaTable,
+          CachedPermissionMetaData,
+          $$CachedPermissionMetaTableFilterComposer,
+          $$CachedPermissionMetaTableOrderingComposer,
+          $$CachedPermissionMetaTableAnnotationComposer,
+          $$CachedPermissionMetaTableCreateCompanionBuilder,
+          $$CachedPermissionMetaTableUpdateCompanionBuilder,
+          (
+            CachedPermissionMetaData,
+            BaseReferences<
+              _$AppDatabase,
+              $CachedPermissionMetaTable,
+              CachedPermissionMetaData
+            >,
+          ),
+          CachedPermissionMetaData,
+          PrefetchHooks Function()
+        > {
+  $$CachedPermissionMetaTableTableManager(
+    _$AppDatabase db,
+    $CachedPermissionMetaTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CachedPermissionMetaTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CachedPermissionMetaTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$CachedPermissionMetaTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> tenantId = const Value.absent(),
+                Value<DateTime> fetchedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CachedPermissionMetaCompanion(
+                tenantId: tenantId,
+                fetchedAt: fetchedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String tenantId,
+                required DateTime fetchedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => CachedPermissionMetaCompanion.insert(
+                tenantId: tenantId,
+                fetchedAt: fetchedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CachedPermissionMetaTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CachedPermissionMetaTable,
+      CachedPermissionMetaData,
+      $$CachedPermissionMetaTableFilterComposer,
+      $$CachedPermissionMetaTableOrderingComposer,
+      $$CachedPermissionMetaTableAnnotationComposer,
+      $$CachedPermissionMetaTableCreateCompanionBuilder,
+      $$CachedPermissionMetaTableUpdateCompanionBuilder,
+      (
+        CachedPermissionMetaData,
+        BaseReferences<
+          _$AppDatabase,
+          $CachedPermissionMetaTable,
+          CachedPermissionMetaData
+        >,
+      ),
+      CachedPermissionMetaData,
+      PrefetchHooks Function()
+    >;
 typedef $$CachedInventoryItemsTableCreateCompanionBuilder =
     CachedInventoryItemsCompanion Function({
       required String tenantId,
@@ -7338,6 +7728,8 @@ class $AppDatabaseManager {
       $$CachedMembershipsTableTableManager(_db, _db.cachedMemberships);
   $$CachedPermissionsTableTableManager get cachedPermissions =>
       $$CachedPermissionsTableTableManager(_db, _db.cachedPermissions);
+  $$CachedPermissionMetaTableTableManager get cachedPermissionMeta =>
+      $$CachedPermissionMetaTableTableManager(_db, _db.cachedPermissionMeta);
   $$CachedInventoryItemsTableTableManager get cachedInventoryItems =>
       $$CachedInventoryItemsTableTableManager(_db, _db.cachedInventoryItems);
   $$OutboxRowsTableTableManager get outboxRows =>

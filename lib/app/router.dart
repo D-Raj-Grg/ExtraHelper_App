@@ -33,11 +33,17 @@ import '../features/team/team_screen.dart';
 import '../features/tenant/account_screen.dart';
 import '../features/tenant/home_shell.dart';
 import '../features/tenant/tenant_providers.dart';
+import '../features/welcome/welcome_providers.dart';
+import '../features/welcome/welcome_screen.dart';
 import 'redirect.dart';
 
 /// Routes. Kept as constants so a typo is a compile error, not a 404.
 abstract final class Routes {
   static const home = '/';
+
+  /// The first-launch pitch. A real route rather than a modal over login, so
+  /// the one place that decides where a user belongs keeps deciding it.
+  static const welcome = '/welcome';
   static const login = '/login';
   static const signup = '/signup';
 
@@ -103,10 +109,15 @@ final routerProvider = Provider<GoRouter>((ref) {
   // that expires while backgrounded, an approval that lands, a tenant switch.
   // Permissions too: they decide whether the POS is even a place this person
   // can stand, and they arrive after the memberships do.
+  //
+  // Dismissing the welcome carousel is none of those — it is not an auth state
+  // change at all — so it needs its own bump, or the screen sets the flag and
+  // nothing moves.
   ref
     ..listen(authStateProvider, (_, _) => refresh.value++)
     ..listen(membershipsProvider, (_, _) => refresh.value++)
     ..listen(permissionsProvider, (_, _) => refresh.value++)
+    ..listen(welcomeSeenProvider, (_, _) => refresh.value++)
     ..onDispose(refresh.dispose);
 
   return GoRouter(
@@ -117,11 +128,16 @@ final routerProvider = Provider<GoRouter>((ref) {
       memberships: ref.read(membershipsProvider),
       permissions: ref.read(permissionsProvider).valueOrNull,
       location: state.matchedLocation,
+      welcomeSeen: ref.read(welcomeSeenProvider),
     ),
     routes: [
       GoRoute(
         path: Routes.home,
         builder: (context, state) => const HomeShell(),
+      ),
+      GoRoute(
+        path: Routes.welcome,
+        builder: (context, state) => const WelcomeScreen(),
       ),
       GoRoute(
         path: Routes.login,

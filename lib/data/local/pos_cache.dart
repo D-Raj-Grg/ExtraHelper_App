@@ -58,6 +58,11 @@ class PosCache {
     await (_db.delete(
       _db.cacheMeta,
     )..where((t) => t.tenantId.equals(tenantId).not())).go();
+    // The fetched marker follows its keys out. A marker without rows would
+    // claim the other tenant's empty permission set was an answer.
+    await (_db.delete(
+      _db.cachedPermissionMeta,
+    )..where((t) => t.tenantId.equals(tenantId).not())).go();
   });
 
   Future<void> wipe() => _db.transaction(() async {
@@ -69,6 +74,7 @@ class PosCache {
     await _db.delete(_db.cachedFloors).go();
     await _db.delete(_db.cachedTables).go();
     await _db.delete(_db.cachedPermissions).go();
+    await _db.delete(_db.cachedPermissionMeta).go();
     await _db.delete(_db.cachedInventoryItems).go();
     await _db.delete(_db.cacheMeta).go();
   });

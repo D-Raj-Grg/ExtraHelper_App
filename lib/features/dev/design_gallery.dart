@@ -7,6 +7,7 @@ import '../../core/widgets/choice_chip.dart';
 import '../../core/widgets/menu_tile.dart';
 import '../../core/widgets/table_glyph.dart';
 import '../../core/widgets/veg_mark.dart';
+import '../welcome/welcome_slides.dart';
 
 /// Debug-only gallery of the ported design system.
 ///
@@ -158,6 +159,22 @@ class _DesignGalleryState extends State<DesignGallery> {
                   currency: 'NPR',
                   onTap: () {},
                 ),
+              ],
+            ),
+          ),
+          _Section(
+            title: 'Welcome vignettes',
+            note:
+                'Filled vs outlined, solid vs dashed, plain vs hatched. Greyscale '
+                'these — no drawing here may depend on hue. Shown inline rather '
+                'than linked: /welcome is unreachable while signed in.',
+            child: Column(
+              children: [
+                for (final slide in welcomeSlides)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: SizedBox(height: 130, child: slide.art),
+                  ),
               ],
             ),
           ),

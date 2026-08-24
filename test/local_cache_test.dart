@@ -427,6 +427,66 @@ void main() {
     });
   });
 
+  /// "Never asked" and "asked, and the answer was nothing" store the same zero
+  /// rows, and reading them the same way is what let an offline cold start
+  /// decide that a waiter may do nothing. The marker is the difference.
+  group('permissions: absence vs an empty answer', () {
+    test('a restaurant never fetched reads as absence', () async {
+      final cache = IdentityCache(db);
+      expect(await cache.permissionsIfFetched('t1'), isNull);
+    });
+
+    test(
+      'a fetched but genuinely empty set is an answer, not absence',
+      () async {
+        final cache = IdentityCache(db);
+        await cache.savePermissions('t1', const {});
+
+        // The user really does hold no keys here. Serving that is what stops the
+        // shell erroring and locking the phone out of a restaurant it has been
+        // online for.
+        expect(await cache.permissionsIfFetched('t1'), isEmpty);
+        expect(await cache.permissionsIfFetched('t1'), isNotNull);
+      },
+    );
+
+    test('keys come back with the marker', () async {
+      final cache = IdentityCache(db);
+      await cache.savePermissions('t1', {'order.create', 'kds.view'});
+      expect(await cache.permissionsIfFetched('t1'), {
+        'order.create',
+        'kds.view',
+      });
+    });
+
+    test('the marker is per restaurant', () async {
+      final cache = IdentityCache(db);
+      await cache.savePermissions('t1', {'order.create'});
+      expect(await cache.permissionsIfFetched('t2'), isNull);
+    });
+
+    test('sign-out takes the marker with the keys', () async {
+      final cache = IdentityCache(db);
+      await cache.savePermissions('t1', const {});
+      await cache.clear();
+
+      // Left behind, it would tell the next person to sign in on this phone
+      // that their empty permission set was real, and hand them a shut app.
+      expect(await cache.permissionsIfFetched('t1'), isNull);
+    });
+
+    test('adopting a tenant takes the other one marker too', () async {
+      final identity = IdentityCache(db);
+      final pos = PosCache(db);
+
+      await identity.savePermissions('t1', {'order.create'});
+      await pos.adoptTenant('t2');
+
+      // A marker whose rows were deleted would claim an empty set was an answer.
+      expect(await identity.permissionsIfFetched('t1'), isNull);
+    });
+  });
+
   group('housekeeping', () {
     test('pruning drops old done rows and keeps dead ones', () async {
       final store = DriftOutboxStore(db);

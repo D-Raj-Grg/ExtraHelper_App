@@ -30,94 +30,112 @@ class SettingsHubScreen extends ConsumerWidget {
     return AppScaffold(
       title: 'Settings',
       subtitle: tenant?.name,
-      body: permissions.when(
-        loading: () => const _LoadingRows(),
-        error: (e, _) => _Problem(message: '$e', onRetry: () => ref.invalidate(permissionsProvider)),
-        data: (perms) {
-          final canSee = perms.contains('settings.view');
-          return ListView(
-            padding: const EdgeInsets.only(bottom: 24),
-            children: [
-              if (canSee) ...[
-                const _SectionLabel('Restaurant'),
-                const _SettingsRow(
-                  icon: Icons.storefront_outlined,
-                  label: 'General',
-                  detail: 'Name, currency, timezone, day start',
-                  route: Routes.settingsGeneral,
-                ),
-                const _SettingsRow(
-                  icon: Icons.receipt_long_outlined,
-                  label: 'Charges & tax',
-                  detail: 'Service charge, packaging fee, tax rules',
-                  route: Routes.settingsCharges,
-                ),
-                const _SettingsRow(
-                  icon: Icons.description_outlined,
-                  label: 'Receipt & branding',
-                  detail: 'Header, footer, logo, payment QR',
-                  route: Routes.settingsReceipt,
-                ),
-                const _SettingsRow(
-                  icon: Icons.location_on_outlined,
-                  label: 'Branches',
-                  detail: 'Where this restaurant trades',
-                  route: Routes.settingsBranches,
-                ),
-                const _SettingsRow(
-                  icon: Icons.print_outlined,
-                  label: 'Printers',
-                  detail: 'The registry, as the web set it up',
-                  route: Routes.settingsPrinters,
-                ),
-                if (isManager)
+      // Identity, not just permissions. Permissions hold in `loading` while
+      // memberships are unresolved — deliberately, since answering an empty set
+      // would draw this page as "you may see nothing" — so a *memberships*
+      // failure would otherwise leave these rows loading forever with no way
+      // out. The status collapses both reads into the one question this screen
+      // is asking: do we know yet, and if not, can the user do anything.
+      body: switch (ref.watch(identityStatusProvider)) {
+        IdentityStatus.unknown => const _LoadingRows(),
+        IdentityStatus.unavailable => _Problem(
+          message: '${ref.watch(identityErrorProvider)}',
+          onRetry: () => ref
+            ..invalidate(membershipsProvider)
+            ..invalidate(permissionsProvider),
+        ),
+        _ => permissions.when(
+          loading: () => const _LoadingRows(),
+          error: (e, _) => _Problem(
+            message: '$e',
+            onRetry: () => ref.invalidate(permissionsProvider),
+          ),
+          data: (perms) {
+            final canSee = perms.contains('settings.view');
+            return ListView(
+              padding: const EdgeInsets.only(bottom: 24),
+              children: [
+                if (canSee) ...[
+                  const _SectionLabel('Restaurant'),
                   const _SettingsRow(
-                    icon: Icons.workspace_premium_outlined,
-                    label: 'Plan & usage',
-                    detail: 'What this restaurant is using',
-                    route: Routes.settingsPlan,
+                    icon: Icons.storefront_outlined,
+                    label: 'General',
+                    detail: 'Name, currency, timezone, day start',
+                    route: Routes.settingsGeneral,
                   ),
-              ],
-              const _SectionLabel('This device'),
-              const _SettingsRow(
-                icon: Icons.print_disabled_outlined,
-                label: 'Printing from this device',
-                detail: 'Whether this phone drives printers',
-                route: Routes.printing,
-              ),
-              const _SettingsRow(
-                icon: Icons.palette_outlined,
-                label: 'Appearance',
-                detail: 'Light, dark, text size',
-                route: Routes.settingsAppearance,
-              ),
-              const _SectionLabel('You'),
-              const _SettingsRow(
-                icon: Icons.badge_outlined,
-                label: 'Profile',
-                detail: 'Your name and handle',
-                route: Routes.settingsProfile,
-              ),
-              const _SettingsRow(
-                icon: Icons.person_outline,
-                label: 'Account & permissions',
-                detail: 'Who you are signed in as',
-                route: Routes.account,
-              ),
-              if (isOwner) ...[
-                const _SectionLabel('Danger'),
+                  const _SettingsRow(
+                    icon: Icons.receipt_long_outlined,
+                    label: 'Charges & tax',
+                    detail: 'Service charge, packaging fee, tax rules',
+                    route: Routes.settingsCharges,
+                  ),
+                  const _SettingsRow(
+                    icon: Icons.description_outlined,
+                    label: 'Receipt & branding',
+                    detail: 'Header, footer, logo, payment QR',
+                    route: Routes.settingsReceipt,
+                  ),
+                  const _SettingsRow(
+                    icon: Icons.location_on_outlined,
+                    label: 'Branches',
+                    detail: 'Where this restaurant trades',
+                    route: Routes.settingsBranches,
+                  ),
+                  const _SettingsRow(
+                    icon: Icons.print_outlined,
+                    label: 'Printers',
+                    detail: 'The registry, as the web set it up',
+                    route: Routes.settingsPrinters,
+                  ),
+                  if (isManager)
+                    const _SettingsRow(
+                      icon: Icons.workspace_premium_outlined,
+                      label: 'Plan & usage',
+                      detail: 'What this restaurant is using',
+                      route: Routes.settingsPlan,
+                    ),
+                ],
+                const _SectionLabel('This device'),
                 const _SettingsRow(
-                  icon: Icons.warning_amber_outlined,
-                  label: 'Dangerous area',
-                  detail: 'Reset, transfer ownership, delete',
-                  route: Routes.settingsDanger,
-                  danger: true,
+                  icon: Icons.print_disabled_outlined,
+                  label: 'Printing from this device',
+                  detail: 'Whether this phone drives printers',
+                  route: Routes.printing,
                 ),
+                const _SettingsRow(
+                  icon: Icons.palette_outlined,
+                  label: 'Appearance',
+                  detail: 'Light, dark, text size',
+                  route: Routes.settingsAppearance,
+                ),
+                const _SectionLabel('You'),
+                const _SettingsRow(
+                  icon: Icons.badge_outlined,
+                  label: 'Profile',
+                  detail: 'Your name and handle',
+                  route: Routes.settingsProfile,
+                ),
+                const _SettingsRow(
+                  icon: Icons.person_outline,
+                  label: 'Account & permissions',
+                  detail: 'Who you are signed in as',
+                  route: Routes.account,
+                ),
+                if (isOwner) ...[
+                  const _SectionLabel('Danger'),
+                  const _SettingsRow(
+                    icon: Icons.warning_amber_outlined,
+                    label: 'Dangerous area',
+                    detail: 'Reset, transfer ownership, delete',
+                    route: Routes.settingsDanger,
+                    danger: true,
+                  ),
+                ],
               ],
-            ],
-          );
-        },
-      ),
+            );
+          },
+        ),
+      },
     );
   }
 }
@@ -237,7 +255,10 @@ class _Problem extends StatelessWidget {
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
-            FilledButton.tonal(onPressed: onRetry, child: const Text('Try again')),
+            FilledButton.tonal(
+              onPressed: onRetry,
+              child: const Text('Try again'),
+            ),
           ],
         ),
       ),

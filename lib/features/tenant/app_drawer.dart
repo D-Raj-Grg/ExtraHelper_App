@@ -38,6 +38,11 @@ class AppDrawer extends ConsumerWidget {
     final canSeeSettings = ref.watch(hasPermissionProvider('settings.view'));
 
     final location = GoRouterState.of(context).matchedLocation;
+    // The gates above are fail-closed, which is right for a door: one that
+    // appears late beats one that vanishes. But an empty drawer is not a
+    // statement, and on a poor connection that is exactly what this became —
+    // every destination gone, with nothing saying why or offering a way back.
+    final status = ref.watch(identityStatusProvider);
 
     return Drawer(
       child: SafeArea(
@@ -151,6 +156,8 @@ class AppDrawer extends ConsumerWidget {
                 route: Routes.designGallery,
                 location: location,
               ),
+            if (status == IdentityStatus.unknown) const _CheckingRow(),
+            if (status == IdentityStatus.unavailable) const _UnavailableRow(),
           ],
         ),
       ),
@@ -217,5 +224,60 @@ class _DrawerItem extends StatelessWidget {
       router.pop();
     }
     router.go(route);
+  }
+}
+
+/// Identity is still resolving, so the gated doors are not absent — they are
+/// unanswered. Say so rather than letting the gap speak for itself.
+class _CheckingRow extends StatelessWidget {
+  const _CheckingRow();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListTile(
+      enabled: false,
+      leading: const SizedBox(
+        width: 22,
+        height: 22,
+        child: Center(
+          child: SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      ),
+      title: Text(
+        'Checking your access\u2026',
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+/// Identity could not be read. The doors stay shut — the server would refuse
+/// them anyway — but the reason is now on screen, with the retry beside it.
+class _UnavailableRow extends ConsumerWidget {
+  const _UnavailableRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    return ListTile(
+      leading: Icon(Icons.error_outline, color: theme.colorScheme.error),
+      title: Text(
+        "Couldn't load your access",
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: theme.colorScheme.error,
+        ),
+      ),
+      subtitle: Text('Tap to try again', style: theme.textTheme.bodySmall),
+      onTap: () => ref
+        ..invalidate(membershipsProvider)
+        ..invalidate(permissionsProvider),
+    );
   }
 }

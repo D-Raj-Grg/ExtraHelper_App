@@ -15,21 +15,38 @@ import 'dart:async';
 /// The rule, the same one the offline bugs in Milestone F all came down to:
 /// **ask connectivity first, and cap the wait even when the answer is yes.**
 ///
+/// **Ask the cache first of all, though.** `connectivity_plus` only reports
+/// whether an interface exists, so a phone on restaurant wifi whose line is
+/// down reads as *online* — it takes the network path and pays the full cap,
+/// twice over as the shell reads memberships and then permissions. The cache is
+/// a sub-millisecond sqlite read and it cannot lie about whether an answer
+/// exists, so it, not the interface state, decides how long we are willing to
+/// wait:
+///
 /// * Offline with something cached → serve the cache, attempt nothing.
 /// * Offline with an empty cache → attempt anyway. An empty cache is not an
 ///   answer, and the attempt's failure is what tells the user why.
-/// * Online → attempt, but no longer than [timeout]; a failure or an overrun
-///   falls back to the cache, and only an empty cache lets the error through.
+/// * Online with something cached → attempt, but only for [warmTimeout]. We
+///   already hold a truthful answer; the only thing at stake is freshness, and
+///   freshness is not worth a spinner.
+/// * Online with an empty cache → attempt for the full [timeout]. Here the wait
+///   *is* the message, because its failure is what the user gets told.
+///
+/// An explicitly shorter [timeout] always wins over [warmTimeout] — a caller
+/// that asked for a tighter cap meant it.
 ///
 /// [cached] returns null for "nothing cached" — an empty list of memberships
-/// is absence, not an answer.
+/// is absence, not an answer. It is consulted exactly once per call.
 Future<T> cacheBackedRead<T>({
   required Future<bool> Function() isOnline,
   required Future<T> Function() fetch,
   required Future<T?> Function() cached,
   Duration timeout = const Duration(seconds: 6),
+  Duration warmTimeout = const Duration(seconds: 2),
   Duration connectivityTimeout = const Duration(seconds: 2),
 }) async {
+  final fallback = await cached();
+
   // An unanswered or broken connectivity check is treated as online: attempt
   // the read and let its own cap decide, rather than serving stale data on a
   // hunch. The check must never become the thing that blocks.
@@ -40,15 +57,15 @@ Future<T> cacheBackedRead<T>({
     online = true;
   }
 
-  if (!online) {
-    final fallback = await cached();
-    if (fallback != null) return fallback;
-  }
+  if (!online && fallback != null) return fallback;
+
+  final cap = fallback == null
+      ? timeout
+      : (timeout < warmTimeout ? timeout : warmTimeout);
 
   try {
-    return await fetch().timeout(timeout);
+    return await fetch().timeout(cap);
   } on Object {
-    final fallback = await cached();
     if (fallback != null) return fallback;
     rethrow;
   }

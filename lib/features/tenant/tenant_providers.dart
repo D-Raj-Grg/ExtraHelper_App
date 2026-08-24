@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/prefs.dart';
@@ -119,6 +121,12 @@ final activeTenantSelectionProvider =
 
 /// The active restaurant, or null when the user belongs to none.
 ///
+/// **Null here does not mean "no restaurant".** It also covers memberships
+/// still loading or failed, because this provider answers one question — which
+/// restaurant am I in — and roughly fifty call sites read `?.tenantId` off it.
+/// Anything that needs to tell "nowhere" from "not yet" reads
+/// [identityStatusProvider], which takes it from [membershipsProvider] direct.
+///
 /// A stored selection that no longer matches a live membership falls back to
 /// the first one rather than selecting nothing — being dropped from a
 /// restaurant should not look like being signed out.
@@ -135,12 +143,38 @@ final activeTenantProvider = Provider<Membership?>((ref) {
   return memberships.first;
 });
 
+/// A future that never completes, so a provider with nothing honest to say
+/// stays in [AsyncLoading] instead of resolving to a lie.
+///
+/// The same rule `app/redirect.dart` keeps for memberships: **unknown is not an
+/// answer.** An error would be wrong here — an error must say the recovery, and
+/// there is no recovery from "auth has not spoken yet, wait a frame". Holding
+/// is the honest state, and the provider rebuilds the moment memberships move,
+/// which discards this.
+///
+/// Holds no timer, so it does not keep `pumpAndSettle` awake. Do note that
+/// `await ref.read(permissionsProvider.future)` with no override will now wait
+/// forever rather than resolving to `{}` — which is the point, but it is a
+/// footgun worth knowing about.
+Future<T> _unknown<T>() => Completer<T>().future;
+
 /// Granular permissions for the active tenant, straight from the server —
 /// cached only so the app still draws the right surfaces with no coverage. The
 /// RPCs enforce the same keys, so this is never the boundary.
 final permissionsProvider = FutureProvider<Set<String>>((ref) async {
   final tenant = ref.watch(activeTenantProvider);
-  if (tenant == null) return const {};
+  if (tenant == null) {
+    // A null tenant has two very different causes and they must not share an
+    // answer. Genuinely in no restaurant is a fact — no restaurant, no keys —
+    // and `redirect.dart` is already sending them to `/join`. Everything else
+    // (memberships loading, auth not settled, the read failed) is *unknown*,
+    // and answering `{}` for unknown is what emptied the drawer and put the
+    // shell on a permanent spinner every time coverage was poor: an empty set
+    // reads to all 43 gates as "loaded, and you may do nothing".
+    final known = ref.watch(membershipsProvider).valueOrNull;
+    if (known != null && known.isEmpty) return const {};
+    return _unknown();
+  }
   final cache = ref.watch(identityCacheProvider);
   final isOnline = _connectivity(ref);
   return cacheBackedRead<Set<String>>(
@@ -152,11 +186,59 @@ final permissionsProvider = FutureProvider<Set<String>>((ref) async {
       await cache.savePermissions(tenant.tenantId, fresh);
       return fresh;
     },
-    cached: () async {
-      final keys = await cache.permissions(tenant.tenantId);
-      return keys.isEmpty ? null : keys;
-    },
+    cached: () async => cache.permissionsIfFetched(tenant.tenantId),
   );
+});
+
+/// What the shell actually knows about who this person is.
+///
+/// [hasPermissionProvider] is fail-closed and stays that way — for an *action*,
+/// "we don't know" and "you may not" lead to the same correct behaviour, and a
+/// door that appears a moment late beats one that vanishes under a thumb.
+///
+/// For a **surface** they are not the same at all. A screen that renders "No
+/// ordering access" because a read has not landed yet is lying to a waiter
+/// mid-service, and one that spins forever is worse: it gives them nothing to
+/// do about it. Whole-screen verdicts read this instead.
+enum IdentityStatus {
+  /// Still resolving. Say so, and never draw a verdict.
+  unknown,
+
+  /// Signed in, belonging to no restaurant. `redirect.dart` owns this one.
+  noRestaurant,
+
+  /// A read failed. There is nothing cached to fall back on, so this needs a
+  /// person: say what happened and offer the retry.
+  unavailable,
+
+  /// Memberships and permissions have both answered.
+  ready,
+}
+
+/// Derived from the two identity reads — deliberately **not** from
+/// [activeTenantProvider], whose null is ambiguous and which at least one test
+/// overrides directly.
+final identityStatusProvider = Provider<IdentityStatus>((ref) {
+  final memberships = ref.watch(membershipsProvider);
+  final permissions = ref.watch(permissionsProvider);
+
+  // A failure outranks everything: it is the only state with a recovery.
+  if (memberships.hasError || permissions.hasError) {
+    return IdentityStatus.unavailable;
+  }
+
+  final known = memberships.valueOrNull;
+  if (known == null) return IdentityStatus.unknown;
+  if (known.isEmpty) return IdentityStatus.noRestaurant;
+  if (permissions.valueOrNull == null) return IdentityStatus.unknown;
+  return IdentityStatus.ready;
+});
+
+/// The failure behind [IdentityStatus.unavailable], for a screen that wants to
+/// print the detail the way the account screen does.
+final identityErrorProvider = Provider<Object?>((ref) {
+  return ref.watch(membershipsProvider).error ??
+      ref.watch(permissionsProvider).error;
 });
 
 /// Whether the user holds a permission key in the active tenant.

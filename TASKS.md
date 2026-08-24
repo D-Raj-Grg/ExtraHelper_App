@@ -1499,6 +1499,192 @@ upload.
 - [ ] Account deletion is live in this build and `delete_my_account()` is applied to production, so
       Guideline 5.1.1(v) is answered whenever the next App Store submission happens.
 
+## Welcome screen before the login form (2026-08-24)
+
+A cold install opened on a password field. The app is for restaurant **staff** — not for guests
+ordering dinner — and nothing said so until someone was already inside. Four slides now stand in
+front of login on a fresh install, and only on a fresh install.
+
+- [x] `features/welcome/` — `welcome_screen.dart` (the carousel), `welcome_slides.dart` (the copy
+      as data, so the widget test and the design gallery name a slide without a second copy of the
+      words), `welcome_art.dart` (the drawings), `welcome_providers.dart` (the flag).
+- [x] `Routes.welcome` joins `_publicRoutes`, and `resolveRedirect` gained
+      `bool welcomeSeen = true` — **optional with a safe default, not required**. Required would
+      mean every existing caller stating a value for a question it has no stake in, and "seen" is
+      the honest answer to an unknown: guessing wrong that way costs one person an intro, guessing
+      the other way puts a carousel in front of someone typing a password.
+- [x] **The screen does not navigate.** It sets the flag and stops; the router listens to
+      `welcomeSeenProvider`, re-resolves, and moves to `/login`. Dismissing is not an auth-state
+      change, so without that fourth listener on `refreshListenable` the flag flips and nothing
+      moves. One exit, `/login` — "Get started" deliberately does **not** go to `/signup`, because
+      the redirect fires on the bump while the location is still `/welcome` and would race the
+      screen's own `go`. Login already carries "New here? Create an account".
+- [x] Drawn, not shipped: no lottie, rive, flutter_svg or flutter_animate, and still no `assets:`
+      block — the bundle is one font. Slide 2 renders the real `TableGlyph` rather than a second
+      drawing of a table. `RevenueChart` was **not** reusable for slide 3: it takes `RevenueDay`
+      models and draws a line, so the bars are their own painter.
+- [x] Every vignette carries filled-vs-outlined, solid-vs-dashed or plain-vs-hatched, so all four
+      survive a greyscale screenshot. They render inline in `/dev/design` for that check — the
+      route itself is not linked from the gallery, which is only reachable signed in, and a
+      signed-in user sent to `/welcome` is redirected home.
+- [x] Reduce motion honoured for the first time in this app: `jumpToPage` and `Duration.zero`
+      under `MediaQuery.disableAnimationsOf`. Otherwise two animated properties, both size, both
+      ease-out, 180–220ms.
+- [x] 542 tests pass (was 511), `flutter analyze` clean.
+
+**Three traps paid for, every one caught by a test rather than by reading:**
+
+- **"Storage has not answered" is not "storage is empty."** The flag first read
+  `prefs?.getBool(key) ?? true`, which collapses the two — and a fresh install, where the key is
+  simply absent, therefore read as *seen* and never showed the carousel at all. Unresolved prefs
+  mean unknown (→ do not interrupt); a resolved store with nothing in it is a real answer (→ this
+  is a fresh install). The same distinction `redirect.dart` already draws about memberships.
+- **A test that only exercises 2.0 does not cover a screen that hides things at 1.375.** The
+  text-scale suite runs everything at double size, and at double size this screen drops its
+  illustrations — so the drawings were never rendered under test at any size where they are
+  actually drawn, and neither was the last slide's wider "Get started" button. Both overflowed on a
+  320px phone, one of them at **normal** text size. `welcome_screen_test.dart` now renders every
+  slide at 1.0/1.15/1.3/1.37 on two narrow phones; 1.37 sits deliberately just under the threshold
+  where the art stops being drawn, so the covered range is the whole range where it exists.
+- **Measure the words; do not guess a threshold for them.** The controls row first stacked above a
+  hardcoded text scale, which missed the case that actually bites: "Get started" is wider than
+  "Next", so the last slide overflowed at normal text size while the threshold sat unfired. It now
+  measures both labels with a `TextPainter` at the real scale and style and stacks when they do not
+  fit — because the two things that move that width, the user's text size and whichever font
+  resolves, are exactly what a constant cannot see. Stacking rather than shrinking: answering a
+  request for bigger text with smaller text is not an answer.
+- Same lesson in the drawings themselves: each is composed at its own fixed size and scaled to fit
+  by the shared frame, and the two rows inside them that could not take a second line are `Wrap`s
+  now. A `Row` that does not fit clips; a `Wrap` that does not fit wraps.
+
+**Beyond this feature, and deliberate:** `main.dart` now awaits `SharedPreferences.getInstance()`
+before `runApp` and overrides `sharedPreferencesProvider` with the instance, because the router's
+redirect is synchronous and has to answer "has this device seen the welcome?" before the first
+frame is painted. That makes prefs synchronous for the other four consumers too
+(`theme_mode_provider`, `tenant_providers`, `print_providers`, `kds_providers`). Their `_settled`
+guards still hold and their tests build their own containers without the override, so nothing
+changed for them — but the visible side effect is that a dark-mode phone stops painting one light
+frame at launch, and the stored tenant choice is right on frame one rather than a beat later.
+
+- [ ] On a real device, both platforms: install fresh → carousel; skip → login; force-quit and
+      relaunch → login, no carousel; delete and reinstall → carousel again. Then the same on a
+      dark-mode phone, at maximum text size, and with Reduce Motion on.
+- [ ] Screenshots for App Review — slides 1 and 2 are the first two the submission checklist above
+      still wants, and they are the only screens that show the product without a real tenant's data
+      in them.
+- [ ] **Look at the four drawings on a real screen, light and dark.** They are proven to *lay out*
+      without clipping at every size they are drawn at, and every colour in them is a `colorScheme`
+      role or a semantic tone — but nothing automated says they are handsome, or that the hatched
+      bar and the torn receipt edge read at 130px in the gallery. That is an eyes job.
+- [ ] The debug design gallery itself is still rendered by no test — it sits behind `AppScaffold`,
+      which wants a router above it. The vignettes it shows are covered directly at gallery size.
+
+## Offline stopped looking like a lockout (2026-08-24)
+
+Reported from the floor: the app promises it keeps taking orders when the wifi dies, but on a weak
+signal staff got the opposite — an empty drawer, no POS, and a spinner that could sit there
+indefinitely. It read as "I have been stripped of my permissions."
+
+The identity cache was never at fault. Milestone L's work is all real and all still passing. The
+fault was that **three places turned "we don't know yet" into "you may do nothing"** — the exact
+unknown-vs-empty rule `app/redirect.dart` keeps for memberships, never applied to permissions.
+
+- [x] **`permissionsProvider` stops fabricating an answer.** It returned `const {}` whenever the
+      active tenant had not resolved, and an empty set reads to all 43 permission gates as "loaded,
+      and you may do nothing". It now returns `{}` only for a user genuinely in no restaurant, and
+      otherwise holds in `AsyncLoading` via `_unknown()`. **Note the footgun this creates:**
+      `await ref.read(permissionsProvider.future)` with no override now waits forever instead of
+      resolving to `{}`. That is the point, but it will bite someone.
+- [x] **`IdentityStatus` + `identityStatusProvider`** (`features/tenant/tenant_providers.dart`) —
+      unknown / noRestaurant / unavailable / ready, derived from the two identity reads and
+      deliberately **not** from `activeTenantProvider`, whose null is ambiguous and which
+      `day_cursor_test.dart` overrides directly. Surfaces read it; **actions do not**.
+- [x] **`hasPermissionProvider` is unchanged, on purpose.** Fail-closed is right for a control —
+      one that appears late beats one that vanishes under a thumb already moving — and the RPC
+      refuses anyway. 34 of the 43 call sites were not touched.
+- [x] **"Never asked" vs "asked, and the answer was nothing."** `CachedPermissions` is keyed
+      `(tenantId, key)`, so a user who genuinely holds no keys stored zero rows — identical on disk
+      to a restaurant this phone has never been online for, and both read as absence, which errored
+      the whole shell. New `CachedPermissionMeta` marker table, **schemaVersion 4 → 5**, additive
+      migration only. Deliberately not a column on `CacheMeta`: that is the POS menu stamp, and
+      sharing it would make "the menu refreshed" imply "permissions were fetched" — which is
+      precisely how the `adoptTenant` bug happened. `IdentityCache.clear()` and
+      `PosCache.adoptTenant`/`wipe()` all take the marker with the keys; a marker outliving its rows
+      would claim an empty set was an answer and shut the app silently.
+- [x] **A warm cache is no longer worth waiting on.** `connectivity_plus` is interface-level, so a
+      phone on restaurant wifi with a dead line reads as *online*, skips serve-the-cache, and paid
+      the full 6s cap — twice, memberships then permissions, **even with both caches warm**.
+      `cacheBackedRead` now reads the cache first and caps a warm read at `warmTimeout` (2s) while a
+      cold one keeps the full 6s, because there the wait *is* the message. `min(timeout,
+      warmTimeout)` is load-bearing: an explicitly tighter cap still wins, which is what keeps the
+      existing 50ms test honest.
+- [x] **The two surfaces that lied.** `home_shell` had an unrecoverable spinner; it now names the
+      wait, and on a failed read says so with a retry — with distinct wording for offline, which is
+      a state and not an error. `app_drawer` silently dropped every door; it now says it is
+      checking, or that it could not load, with the retry attached. **"No ordering access" is
+      reachable only from `ready`.** `settings_hub_screen` reads the status too, or a *memberships*
+      failure would have left it loading forever.
+- [x] `_ErrorState` lifted out of `account_screen` into `core/widgets/notice.dart` as `RetryNotice`
+      — it was the third hand-rolled copy of the same box.
+- [x] 573 tests pass (was 542), `flutter analyze` clean.
+
+**Found on the way, and it is not related to offline at all:** `_HomeShellState._tabs` was a lazy
+`late final TabController` initialiser. Anyone who never sees the tab bar — a kitchen or inventory
+role, and now any launch where identity has not resolved — never read the field, which made
+`dispose()` the first read: the controller was constructed while the element was already
+deactivated, and `createTicker` then looks up a `TickerMode` ancestor that is gone. It asserts in
+debug and builds a controller only to bin it in release. Now built in `initState`. This has been
+there since the tabs were added and hits exactly the roles this milestone is about.
+
+**Checked and dismissed:** an offline token refresh does *not* wipe the identity cache. gotrue
+2.26.0 (`gotrue_client.dart:1533-1545`) throws `AuthRetryableFetchException` on a network failure
+and explicitly does not `_removeSession()` or emit `signedOut`, so the `cache.clear()` in
+`membershipsProvider` is unreachable from being offline.
+
+- [ ] **True stale-while-revalidate for the identity reads** — serve the cache instantly and refresh
+      behind it, the shape `_CachedList` (`features/pos/pos_providers.dart`) already uses. It needs
+      an anti-loop memo keyed on tenant + connectivity transition, so it was deferred in favour of
+      the warm cap. Worth doing if ~4s still reads as slow on a real handset.
+- [ ] **The device pass this all points at**, still the open box from Milestone F below. Warm cache
+      in airplane mode → shell immediately. A wifi with no route out → shell in ~4s, **and that
+      figure is arithmetic, not a measurement** — only a stopwatch on real restaurant wifi settles
+      it. A cold permission cache offline → the "not saved to this phone yet" notice with a working
+      retry. A kitchen-only account offline → `/kds`, never a dead POS. And the v4→v5 migration on a
+      phone that already holds a queued outbox, which must survive in place.
+- [ ] **The Drift migration is not covered by a test.** Verifying v4→v5 properly needs `drift_dev`
+      schema dumps, which this repo does not keep. It rests on the migration being additive plus the
+      device pass above.
+
+## TestFlight 1.0.12+1 (2026-08-24)
+
+Build `bfb99259`, uploaded and processed `VALID`, distributed to the **Internal** group (4 testers).
+Internal groups skip Beta App Review, so it was available immediately. Carries the welcome carousel
+and the offline-permissions fix.
+
+- [x] `flutter analyze` clean, 573 tests green before the build.
+- [x] "What to Test" notes attached, leading with the offline steps — the fix is the whole point of
+      this build and it is the one thing a unit test cannot prove.
+- [ ] **The offline device pass is still owed.** Shipping it is not verifying it.
+
+**Trap paid for, and it will happen again:** the first upload was rejected —
+`STATE_ERROR.VALIDATION_ERROR`, "the `objective_c.framework` / `sqlite3.framework` executable
+references an unsupported platform in the arm64 slice". A `flutter build ios --simulator` run
+earlier in the session had left simulator slices in `build/`, and `flutter build ipa` packaged them
+into the archive. `flutter clean` plus dropping `ios/Pods` and the Runner DerivedData fixed it.
+
+**Two things worth knowing about the failure:** `altool` **exited 0** while printing
+`UPLOAD FAILED with 2 errors`, so the exit code cannot be trusted — grep the output for
+`UPLOAD SUCCEEDED`. And the check is cheap to do first:
+
+```bash
+unzip -q build/ios/ipa/ExtraHelper.ipa -d /tmp/ipacheck
+vtool -show-build /tmp/ipacheck/Payload/Runner.app/Frameworks/sqlite3.framework/sqlite3 | grep platform
+# must say IOS, never IOSSIMULATOR
+```
+
+**Never run a simulator build and an IPA build from the same tree without a `flutter clean`
+between them.**
+
 ## Open Questions
 
 - [x] Confirm bundle id `com.extrahelper.app` before the first signed build. Confirmed and shipped in

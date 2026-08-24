@@ -67,3 +67,69 @@ class ErrorNotice extends StatelessWidget {
     color: Theme.of(context).colorScheme.error,
   );
 }
+
+/// A notice you can act on: the message, the detail underneath, and the way
+/// out.
+///
+/// Lifted out of `account_screen.dart`, which had grown the third hand-rolled
+/// copy of [AppNotice]'s box when the shell needed the same thing. A failed
+/// read is not an empty result — it has a recovery, and the recovery belongs in
+/// the box that reports it.
+///
+/// [detail] is the raw failure. Kept, because "couldn't load" with nothing
+/// under it is a screen nobody can debug from a photo sent by a waiter.
+class RetryNotice extends StatelessWidget {
+  const RetryNotice({
+    super.key,
+    required this.message,
+    required this.onRetry,
+    this.detail,
+    this.icon = Icons.error_outline,
+    this.color,
+  });
+
+  final String message;
+  final VoidCallback onRetry;
+  final String? detail;
+  final IconData icon;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final tone = color ?? theme.colorScheme.error;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: 0.1),
+        border: Border.all(color: tone, width: 1.5),
+        borderRadius: BorderRadius.circular(Tokens.radiusMd),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, size: 20, color: tone),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  message,
+                  style: theme.textTheme.bodyMedium?.copyWith(color: tone),
+                ),
+              ),
+            ],
+          ),
+          if (detail != null) ...[
+            const SizedBox(height: 6),
+            Text(detail!, style: theme.textTheme.bodySmall),
+          ],
+          const SizedBox(height: 8),
+          OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
+        ],
+      ),
+    );
+  }
+}

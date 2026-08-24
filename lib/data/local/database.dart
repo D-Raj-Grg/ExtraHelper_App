@@ -130,6 +130,29 @@ class CachedPermissions extends Table with _TenantScoped {
   Set<Column<Object>> get primaryKey => {tenantId, key};
 }
 
+/// That permissions were once fetched for a restaurant, separate from what
+/// they were.
+///
+/// [CachedPermissions] is keyed `(tenantId, key)`, so a user who genuinely
+/// holds no keys stores zero rows — byte for byte identical on disk to a
+/// restaurant this phone has never been online for. The reader has to tell
+/// those apart: the first is an answer and must be served, the second is
+/// absence and must not be. Without this marker an offline cold start treated
+/// both as absence, the read errored, and every screen in the app read that as
+/// "you may do nothing".
+///
+/// Deliberately its own table rather than a column on [CacheMeta]: that one is
+/// the POS menu-cache stamp, and sharing its key would make "the menu
+/// refreshed" imply "permissions were fetched". Overloading one row with two
+/// meanings is exactly how the `adoptTenant` bug happened.
+class CachedPermissionMeta extends Table {
+  TextColumn get tenantId => text()();
+  DateTimeColumn get fetchedAt => dateTime()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {tenantId};
+}
+
 /// The store room, for reading with no coverage.
 ///
 /// A walk-in freezer or a back store room is exactly where the signal dies, and
@@ -182,6 +205,7 @@ class OutboxRows extends Table {
     CachedTables,
     CachedMemberships,
     CachedPermissions,
+    CachedPermissionMeta,
     CachedInventoryItems,
     OutboxRows,
   ],
@@ -193,10 +217,11 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.memory() : super(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   /// v2 added the identity cache, v3 the store room, v4 the variant display
-  /// order. A phone that already has an older file is upgraded in place —
+  /// order, v5 the marker that says permissions were fetched at all.
+  /// A phone that already has an older file is upgraded in place —
   /// dropping the file would take the outbox with it, and the outbox may be
   /// holding a real order.
   @override
@@ -212,6 +237,9 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 4) {
         await m.addColumn(cachedVariants, cachedVariants.sort);
+      }
+      if (from < 5) {
+        await m.createTable(cachedPermissionMeta);
       }
     },
   );

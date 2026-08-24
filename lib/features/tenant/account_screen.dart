@@ -6,7 +6,7 @@ import '../../app/app_scaffold.dart';
 import '../../app/router.dart';
 import '../../core/format/money.dart';
 import '../../core/theme/theme_mode_provider.dart';
-import '../../core/theme/tokens.dart';
+import '../../core/widgets/notice.dart';
 import '../../data/supabase/auth_repository.dart';
 import '../../data/supabase/supabase_providers.dart';
 import 'tenant_providers.dart';
@@ -154,7 +154,7 @@ class AccountScreen extends ConsumerWidget {
                 padding: EdgeInsets.symmetric(vertical: 24),
                 child: Center(child: CircularProgressIndicator()),
               ),
-              error: (e, _) => _ErrorState(
+              error: (e, _) => RetryNotice(
                 message: "Couldn't load your permissions.",
                 detail: '$e',
                 onRetry: () => ref.invalidate(permissionsProvider),
@@ -244,54 +244,6 @@ class _Row extends StatelessWidget {
             child: Text(label, style: theme.textTheme.labelMedium),
           ),
           Expanded(child: Text(value, style: theme.textTheme.bodyMedium)),
-        ],
-      ),
-    );
-  }
-}
-
-class _ErrorState extends StatelessWidget {
-  const _ErrorState({
-    required this.message,
-    required this.detail,
-    required this.onRetry,
-  });
-
-  final String message;
-  final String detail;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: scheme.error.withValues(alpha: 0.1),
-        border: Border.all(color: scheme.error, width: 1.5),
-        borderRadius: BorderRadius.circular(Tokens.radiusMd),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.error_outline, size: 20, color: scheme.error),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  message,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium?.copyWith(color: scheme.error),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(detail, style: Theme.of(context).textTheme.bodySmall),
-          const SizedBox(height: 8),
-          OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
         ],
       ),
     );
