@@ -81,8 +81,18 @@ class DayCursor extends Notifier<DayCursorState> {
     return const DayCursorState();
   }
 
-  /// Record the day the server resolved. Called when a payload lands.
+  /// Record the day the server resolved as *today*. Called when a payload lands.
+  ///
+  /// Only a payload for a **null** request answers "what day is it".
+  /// `DayReport.day` names the day the report covers, and the screen feeds every
+  /// payload through here — so without this guard a past day's report would
+  /// overwrite [DayCursorState.knownToday], collapse `canGoForward`, hide "Back
+  /// to today", and strand the user on the day they stepped back to.
+  ///
+  /// It also drops a stale today-response that lands after a step back, since by
+  /// then the cursor has already named a day.
   void rememberToday(String day) {
+    if (state.selected != null) return; // Not an answer about today.
     if (day.isEmpty || state.knownToday == day) return;
     state = state.copyWith(knownToday: day);
   }

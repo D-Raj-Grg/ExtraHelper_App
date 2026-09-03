@@ -157,6 +157,55 @@ void main() {
       expect(c.read(dayCursorProvider).knownToday, '2026-08-22');
     });
 
+    // The screen feeds *every* payload's `day` into `rememberToday`, and a past
+    // day's payload names that past day — not today. Recording it would collapse
+    // `canGoForward` and strand the user on the day they stepped back to.
+    test('a past day\'s payload does not become today', () {
+      final c = _container();
+      final cursor = c.read(dayCursorProvider.notifier);
+      cursor.rememberToday('2026-08-22'); // payload for the null request
+      cursor.previous();
+      cursor.rememberToday('2026-08-21'); // payload for the past day
+
+      final s = c.read(dayCursorProvider);
+      expect(s.knownToday, '2026-08-22');
+      expect(s.isToday, isFalse, reason: '"Back to today" must stay reachable');
+      expect(s.canGoForward, isTrue);
+    });
+
+    test('stepping back repeatedly still leaves a way forward', () {
+      final c = _container();
+      final cursor = c.read(dayCursorProvider.notifier);
+      cursor.rememberToday('2026-08-22');
+      for (var i = 0; i < 3; i++) {
+        cursor.previous();
+        // What the screen's listener does on every refetch.
+        cursor.rememberToday(c.read(dayCursorProvider).selected!);
+      }
+      expect(c.read(dayCursorProvider).selected, '2026-08-19');
+      expect(c.read(dayCursorProvider).canGoForward, isTrue);
+
+      for (var i = 0; i < 3; i++) {
+        cursor.next();
+        cursor.rememberToday(c.read(dayCursorProvider).selected!);
+      }
+      expect(c.read(dayCursorProvider).selected, '2026-08-22');
+      expect(c.read(dayCursorProvider).canGoForward, isFalse);
+    });
+
+    test('back to today re-learns the day after a boundary passes', () {
+      // The guard must not freeze `knownToday` forever: once the selection is
+      // cleared, the next payload is an answer about today again.
+      final c = _container();
+      final cursor = c.read(dayCursorProvider.notifier);
+      cursor.rememberToday('2026-08-22');
+      cursor.previous();
+      cursor.today();
+      cursor.rememberToday('2026-08-23');
+
+      expect(c.read(dayCursorProvider).knownToday, '2026-08-23');
+    });
+
     test('stepping back before any payload does nothing', () {
       final c = _container();
       c.read(dayCursorProvider.notifier).previous();
