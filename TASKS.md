@@ -1726,6 +1726,60 @@ provided, the tests that mock that dependency are the *least* likely to notice.
 **Never assign `state` from inside `build()`**, including indirectly from a `fireImmediately`
 listener. Read the value and return it.
 
+## Receipt branding and sending a receipt (2026-09-03)
+
+Two things the web had and the phone did not.
+
+**The day-close forward chevron was dead.** `DayCloseScreen` fed *every* report payload into
+`DayCursor.rememberToday`, but `DayReport.day` names the day the report covers, not today. One step
+back and `knownToday` was overwritten with the past day, so `canGoForward` (`selected < knownToday`)
+went false and `isToday` went true — which also hid "Back to today". No way forward at all. Fixed by
+guarding `rememberToday` on `state.selected == null`: only a payload for a null request is an answer
+about today. It also drops a stale today-response that lands after a step back. The old tests passed
+because they never re-fired the listener for the past day.
+
+**The receipt carried no branding.** `bill_view_screen.dart` titled itself "Receipt" but showed no
+logo, no footer, no terms and — the point — no **payment QR**, while `receipt-view.tsx` and the
+thermal slip both do. All of it was already on the device in `TenantSettings.receipt`; the app could
+even upload the QR and never displayed it. Now: logo (capped at 64), QR at **0.62** of the paper
+(the ratio `bake_image.dart` and the web both use), bold caption, footer falling back to
+"Thank you!", terms. Nothing renders when a restaurant has not uploaded one — a guest is looking at
+this. `header` stays paper-only, as on the web.
+
+**Sending it.** `_Paper` was the `ListView`; it is now `BillPaper`, a document with no scroller, and
+the share path mounts *that same widget* off-screen and photographs it — no second renderer to drift
+from the server-side template. Traps paid for:
+
+- **A `RepaintBoundary` inside a scrolling list is a trap.** A viewport only paints what is in its
+  extent and `toImage` throws on a boundary that was never painted. Today's single-child list would
+  work by accident. The export child is `Positioned` off-screen inside a `Stack` — painted but
+  invisible — because `Offstage`/`Visibility(false)`/`Opacity(0)` all skip painting. Ancestor clips
+  do not reach the boundary's own layer, so the picture is complete.
+- **`precacheImage` reports success when a fetch fails** unless `onError` rethrows. Without that the
+  logo and QR export as blank squares. Screen and export must also build the provider identically —
+  `NetworkImage` keys on `(url, scale)` — hence the single `brandImage` factory.
+- The export pins `TextScaler.noScaling` (the particulars restack above 1.3×), forces
+  `AppTheme.light()` (a dark capture is a black slip) and paints an opaque background (a
+  `RepaintBoundary` keeps its alpha, and transparent margins go black in a messenger's dark mode).
+  A golden under an ambient dark theme guards all three.
+- `exportPixelRatio` clamps on height: a 50-line bill loses sharpness rather than a texture
+  allocation. `image.dispose()` in a `finally` — tens of MB otherwise.
+- Files go to the **cache** dir (`receipt-<INVOICE8>-<stamp>.png`), swept at 6h on the way *in* to
+  the next export, never after sharing: Android hands the receiver a content URI and messengers read
+  it lazily.
+- Share stays enabled **offline** and on a **void** bill, unlike printing — the picture is made on
+  the device, and a voided bill in writing is evidence.
+- `share_plus` sits behind `fileSharerProvider` in one file. Its API broke across a major
+  (`Share.shareXFiles` → `SharePlus.instance.share(ShareParams(...))`); 13.3.0 is what resolved.
+  `sharePositionOrigin` is passed from the button's `GlobalKey` — without it the iPad popover points
+  at nothing.
+- Testing the capture needs alternating `tester.pump` and `tester.runAsync`: frames only advance
+  under the first, `toImage` and file writes only under the second. `path_provider` needs its
+  channel mocked.
+
+Not done, deliberately: a full-screen "scan to pay" mode, and opening the receipt automatically
+after payment.
+
 ## Open Questions
 
 - [x] Confirm bundle id `com.extrahelper.app` before the first signed build. Confirmed and shipped in
