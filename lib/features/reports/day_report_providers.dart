@@ -105,7 +105,16 @@ class DayCursor extends Notifier<DayCursorState> {
 
   void next() {
     if (!state.canGoForward) return;
-    state = state.copyWith(selected: shiftDay(state.selected!, 1));
+    final to = shiftDay(state.selected!, 1);
+    // Landing on today goes back to asking for *today* (a null day), not for a
+    // date string that happens to match it. Otherwise the cursor stays pinned
+    // to that date: a day boundary passing while the app is open would leave
+    // the sheet on yesterday, and it would not agree with `today()`.
+    if (to.compareTo(state.knownToday!) >= 0) {
+      today();
+      return;
+    }
+    state = state.copyWith(selected: to);
   }
 
   /// Back to today — by clearing the selection, not by naming a date, so the

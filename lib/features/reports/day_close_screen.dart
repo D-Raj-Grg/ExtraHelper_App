@@ -37,6 +37,10 @@ class DayCloseScreen extends ConsumerWidget {
     // state-write-during-build. This is the only way the app learns what
     // "today" is — it cannot work it out.
     ref.listen(dayReportProvider, (_, next) {
+      // Settled data only. While a new day loads, the AsyncValue still carries
+      // the *previous* day's report — after stepping forward or back to today
+      // that would record the day just left as "today".
+      if (next.isLoading) return;
       final day = next.valueOrNull?.day;
       if (day != null) ref.read(dayCursorProvider.notifier).rememberToday(day);
     });

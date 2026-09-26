@@ -138,10 +138,28 @@ void main() {
       cursor.rememberToday('2026-08-22');
       cursor.previous();
       cursor.next();
-      expect(c.read(dayCursorProvider).selected, '2026-08-22');
+      // Back on today means asking for today again, not for a pinned date.
+      expect(c.read(dayCursorProvider).selected, isNull);
+      expect(c.read(dayCursorProvider).isToday, isTrue);
 
       cursor.next(); // already there
-      expect(c.read(dayCursorProvider).selected, '2026-08-22');
+      expect(c.read(dayCursorProvider).selected, isNull);
+      expect(c.read(dayCursorProvider).knownToday, '2026-08-22');
+    });
+
+    test('back then forward can step back again', () {
+      final c = _container();
+      final cursor = c.read(dayCursorProvider.notifier);
+      cursor.rememberToday('2026-08-22');
+      cursor.previous();
+      cursor.next();
+      cursor.rememberToday('2026-08-22'); // today's payload lands
+      cursor.previous();
+
+      final s = c.read(dayCursorProvider);
+      expect(s.selected, '2026-08-21');
+      expect(s.canGoForward, isTrue);
+      expect(s.isToday, isFalse);
     });
 
     test('back to today clears the date so the server re-resolves it', () {
@@ -187,9 +205,11 @@ void main() {
 
       for (var i = 0; i < 3; i++) {
         cursor.next();
-        cursor.rememberToday(c.read(dayCursorProvider).selected!);
+        final s = c.read(dayCursorProvider);
+        cursor.rememberToday(s.selected ?? s.knownToday!);
       }
-      expect(c.read(dayCursorProvider).selected, '2026-08-22');
+      expect(c.read(dayCursorProvider).selected, isNull);
+      expect(c.read(dayCursorProvider).knownToday, '2026-08-22');
       expect(c.read(dayCursorProvider).canGoForward, isFalse);
     });
 
