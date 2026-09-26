@@ -12,45 +12,34 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 ## [Unreleased]
 
+_Nothing yet._
+
+---
+
+## [1.0.14] — 2026-09-26 · Expenses and order alerts
+
+TestFlight build **1.0.14+1**.
+
 ### Added
 - **Expenses on the phone.** A new **Expenses** entry in the menu for everyone on staff. Tap **Add expense**, type the amount, tap a category, write a few words, and choose where the money came from (Cash, Online / eSewa, Owner's pocket). You can add a receipt photo from the camera or gallery. **It works with no signal**: the expense is saved on the phone, shown greyed out as "Waiting to send", and sent once when the connection is back, never twice. Page back through earlier days; managers can add to them. Edit, void with a reason, and attach, view or remove a receipt photo from each entry's menu.
 - **Last 7 days and last 30 days.** Managers see rolling expense totals at the top of Expenses, with the category that cost the most, matching the web Reports page.
 - **Count cash & close the day.** Day close now has a **Cash book** card: what should be in hand (sales minus refunds minus cash expenses), the same for online, and a **Count cash & close the day** sheet for what you actually counted. It shows Balanced, Short or Over, and you can recount. Day close also lists the day's expenses. The shift-drawer section only appears for restaurants that use a drawer.
 - Owners and managers can manage expense categories from the tag icon on Expenses.
-
-### Added
 - **Order alerts on the phone.** The app now tells staff about every step of an order — **new order, preparing, ready to serve, served, billed, paid**, and cancelled — as a real phone notification with a banner and sound. A waiter hears that a table's food is up without watching the pass. Alerts come from other people's actions: tapping "Served" yourself doesn't buzz your own phone. The amount is shown in the restaurant's currency when there is one.
 - **Asked once, like other apps.** Shortly after you sign in, the app explains what the alerts are for and then shows the phone's own permission prompt. It asks once per device. After that, **Settings → Notifications** shows whether alerts are on, turns them on (or opens the phone's settings if they were blocked), and has a **Mute on this phone** switch for a shared counter tablet that shouldn't buzz.
 - **A bell in every screen's header** with an unread count, opening a **Notifications** screen: every update with an icon for each step, unread ones in bold, pull to refresh, and **Mark all read**. Tapping a phone notification opens this screen, including when the tap is what starts the app. Billed and paid updates open the bill for staff who can take payments.
 - Unread works the same as on the web: only the last 24 hours count, and your own actions never do, so the phone and the browser show the same number.
 - Kitchen and store-room roles get no bell, no alerts and no prompt.
-
-### Added
-- **Checkout on the phone.** A waiter or cashier can now settle a bill at the table instead of walking to the till. Tap **Bill** on an order (or a table that has asked for one) and the bill opens: the items, what they come to, and what is still owed. From there you can take cash, card or wallet in full or in part; split the check equally, by item, or across several tenders; discount the bill or a single line; add an extra charge; apply a coupon; add a tip or round the total off; attach a guest and spend their loyalty points; put another round onto the same tab; leave the bill unpaid on a guest's tab; and refund a settled one. A third **Bills** tab lists everything still owed, because opening a bill takes its order off the Orders board.
-- **The receipt prints itself.** Settling a bill on the phone queues the receipt exactly as settling one on the till does, and the phone's own printer picks it up. No new printing code was needed.
+- **The receipt on the phone looks like the real one, and can be sent.** The bill screen now carries the restaurant's logo, closing words, terms and the **payment QR** a guest scans, the same as the web receipt and the thermal slip. **Share** sends it as a picture, so a guest can get it on Viber or WhatsApp without a printer. Nothing extra shows for a restaurant that hasn't uploaded a logo or QR.
 
 ### Fixed
 - **Day close: stepping back a day and then forward again now lands on today properly.** Going forward to today used to pin the screen to that date instead of following "today", so if the trading day rolled over while the app was open, the sheet stayed on the previous day. It could also briefly treat the day you'd just left as today and disable the forward arrow.
-- **The menu on the phone could go stale and never recover — and it cost money.** The cached-list loader kicked off its background refresh while it was still building, which Riverpod refuses; the refresh died as an unhandled error every time, so whatever was saved on the first run was what the phone showed forever. On a real order this charged nothing: a dish whose price had moved onto size variants still showed the old flat price, was added without asking for a size, and the server snapshotted it at zero. The refresh now runs on the values the build already resolved and touches no providers, so it completes. Pull-to-refresh was never affected — this only ever hit the automatic one.
-- **Variants and add-ons appear again.** Same cause: the stale cache predated them, so dishes that should ask "which size?" were added straight to the order. A dish with options now shows its badge and price range and forces the choice, as it always should have.
-
-### Added
-- **Something off the menu.** A new button in the order screen adds a hand-typed line — a plating charge, today's special — with a name, a price, a quantity and a kitchen note. It matches the web: no `item_id`, so it can never stand in for a menu item's price; no stock comes off it; it prints on the expo ticket; and the typed price is clamped and recorded in the manager log. Works when composing a new order and when adding to one already with the kitchen.
-
-### Changed
-- **Coming back from an unpaid bill lands on the Bills tab.** Billing an order moves it off the Orders list by design, so backing out of a half-finished bill used to drop you on a list your order had just vanished from. The Orders empty state now says where billed orders go, too.
-- **Tapping a table that has asked for its bill opens the bill**, not a second order. Previously the app looked only at orders still on the floor, and a billed order is not one of them — so the tap would have started a fresh order on a table that was mid-payment.
+- **Day close could step back a day but never forward again.** The forward arrow stayed disabled once you left today; it now pages forward up to today.
 
 ### Known gaps
 - **Alerts need the app to be running.** They arrive while ExtraHelper is open. On Android that includes the background for as long as the phone keeps the app running; iOS pauses a backgrounded app soon after, and whatever came in meanwhile shows in the list when you come back, without a banner. With the app fully closed nothing arrives. That needs push notifications through Firebase/APNs, which is the next step.
 - Not yet checked on a real phone: the permission prompt, a banner while backgrounded, and tapping a notification to open the app.
-- **Checkout needs a connection.** Nothing is queued: an order taken with no coverage is safe and still syncs, but it cannot be billed until the phone is back on signal. Every entry point says so rather than hanging.
-- **Card (online) is web-only.** Charging a card through a payment gateway runs server-side on the web and has no RPC behind it, so the phone would record money it never collected. It offers cash, card (on a terminal), wallet and loyalty points. A settled bill that carries an online payment still shows it correctly.
-- **A refund cannot be retried safely.** `refund_payment` takes no idempotency key, so after a lost connection the app asks you to check the bill's payments rather than offering to try again.
-
-### Changed
-- **Taking an order sends it to the kitchen.** The order screen had a **Save draft** button beside **Send to kitchen**, and a saved draft never reached a kitchen screen or a printer. There is now one button. Orders taken with no coverage still queue and go to the kitchen by themselves the moment the phone is back on signal. Matches the same change on the web app.
-
+- Expenses not yet checked on a real phone either: logging in airplane mode and seeing it arrive once, and attaching a receipt photo from the camera.
 
 <details><summary>Technical — order alerts and day close</summary>
 
@@ -78,6 +67,34 @@ Server side: see `../extrahelper/CHANGELOG.md` → "daily expenses, receipts, ni
 
 </details>
 
+---
+
+## [1.0.8 – 1.0.13] — 2026-08-13 → 2026-08-24 · TestFlight builds
+
+Six TestFlight builds went out between 1.0.7 and 1.0.14 without their own entries here. They are gathered into one entry; the per-build notes are in `TASKS.md` under "TestFlight 1.0.11+1", "1.0.12+1" and "1.0.13+1".
+
+### Added
+- **Checkout on the phone.** A waiter or cashier can now settle a bill at the table instead of walking to the till. Tap **Bill** on an order (or a table that has asked for one) and the bill opens: the items, what they come to, and what is still owed. From there you can take cash, card or wallet in full or in part; split the check equally, by item, or across several tenders; discount the bill or a single line; add an extra charge; apply a coupon; add a tip or round the total off; attach a guest and spend their loyalty points; put another round onto the same tab; leave the bill unpaid on a guest's tab; and refund a settled one. A third **Bills** tab lists everything still owed, because opening a bill takes its order off the Orders board.
+- **The receipt prints itself.** Settling a bill on the phone queues the receipt exactly as settling one on the till does, and the phone's own printer picks it up. No new printing code was needed.
+- **Something off the menu.** A new button in the order screen adds a hand-typed line — a plating charge, today's special — with a name, a price, a quantity and a kitchen note. It matches the web: no `item_id`, so it can never stand in for a menu item's price; no stock comes off it; it prints on the expo ticket; and the typed price is clamped and recorded in the manager log. Works when composing a new order and when adding to one already with the kitchen.
+- **Day close on the phone.** The same Z-report as the web: sales, payments, cash drawer, top items and every order of the day, with back and forward through days. (1.0.10)
+- **Sign up, Settings and Team on the phone.** Create a restaurant or join one from the app; change general, charges, branches, printers and appearance settings; approve staff and edit roles. (1.0.11)
+- **A welcome screen before the login form,** and being offline no longer looks like being locked out. The app says it's offline and keeps working from what it has saved. (1.0.12)
+
+### Fixed
+- **The menu on the phone could go stale and never recover — and it cost money.** The cached-list loader kicked off its background refresh while it was still building, which Riverpod refuses; the refresh died as an unhandled error every time, so whatever was saved on the first run was what the phone showed forever. On a real order this charged nothing: a dish whose price had moved onto size variants still showed the old flat price, was added without asking for a size, and the server snapshotted it at zero. The refresh now runs on the values the build already resolved and touches no providers, so it completes. Pull-to-refresh was never affected — this only ever hit the automatic one.
+- **Variants and add-ons appear again.** Same cause: the stale cache predated them, so dishes that should ask "which size?" were added straight to the order. A dish with options now shows its badge and price range and forces the choice, as it always should have.
+- **Phone preferences reset on every launch** (theme, text size and similar). This regression shipped in 1.0.12 and was fixed in 1.0.13.
+
+### Changed
+- **Coming back from an unpaid bill lands on the Bills tab.** Billing an order moves it off the Orders list by design, so backing out of a half-finished bill used to drop you on a list your order had just vanished from. The Orders empty state now says where billed orders go, too.
+- **Tapping a table that has asked for its bill opens the bill**, not a second order. Previously the app looked only at orders still on the floor, and a billed order is not one of them — so the tap would have started a fresh order on a table that was mid-payment.
+- **Taking an order sends it to the kitchen.** The order screen had a **Save draft** button beside **Send to kitchen**, and a saved draft never reached a kitchen screen or a printer. There is now one button. Orders taken with no coverage still queue and go to the kitchen by themselves the moment the phone is back on signal. Matches the same change on the web app.
+
+### Known gaps
+- **Checkout needs a connection.** Nothing is queued: an order taken with no coverage is safe and still syncs, but it cannot be billed until the phone is back on signal. Every entry point says so rather than hanging.
+- **Card (online) is web-only.** Charging a card through a payment gateway runs server-side on the web and has no RPC behind it, so the phone would record money it never collected. It offers cash, card (on a terminal), wallet and loyalty points. A settled bill that carries an online payment still shows it correctly.
+- **A refund cannot be retried safely.** `refund_payment` takes no idempotency key, so after a lost connection the app asks you to check the bill's payments rather than offering to try again.
 ---
 
 ## [1.0.7] — 2026-08-07 · First build on a real phone
