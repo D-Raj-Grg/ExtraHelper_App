@@ -6,6 +6,7 @@ import '../../app/app_scaffold.dart';
 import '../../app/router.dart';
 import '../../core/format/money.dart';
 import '../../core/format/when.dart';
+import '../../core/widgets/photo_picker.dart';
 import '../../data/supabase/expenses_repository.dart';
 import '../../data/supabase/pos_repository.dart' show PosFailure;
 import '../../data/sync/outbox.dart';
@@ -14,7 +15,6 @@ import '../reports/day_report_providers.dart' show shiftDay;
 import '../tenant/tenant_providers.dart';
 import 'expense_sheet.dart';
 import 'expenses_providers.dart';
-import 'receipt_photo.dart';
 
 /// The daily book: rice, gas, a ride home for the dishwasher — logged by
 /// whoever paid, totalled for the night count on Day close.
@@ -134,7 +134,7 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
   Future<void> _attach(Expense e) async {
     final repo = _repo;
     if (repo == null || _busy) return;
-    final photo = await pickReceiptPhoto(context);
+    final photo = await pickPhoto(context);
     if (photo == null) return;
     await _run(
       () => repo.attachReceipt(
@@ -160,7 +160,7 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
     try {
       final url = await repo.receiptUrl(path);
       if (!mounted) return;
-      await showReceiptViewer(context, url);
+      await showPhotoViewer(context, url, title: 'Receipt');
     } on PosFailure catch (err) {
       _say(err.message);
     }

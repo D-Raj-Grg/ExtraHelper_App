@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/widgets/choice_chip.dart';
+import '../../core/widgets/photo_picker.dart';
 import '../../data/supabase/expenses_repository.dart';
-import 'receipt_photo.dart';
 
 /// An expense as typed, before it is saved.
 class ExpenseDraft {
@@ -22,7 +22,7 @@ class ExpenseDraft {
 
   /// Only offered when adding; an existing expense's photo is managed from
   /// its own menu.
-  final ReceiptPhoto? photo;
+  final PickedPhoto? photo;
 }
 
 /// Add or edit one expense: amount, tap a category, a few words, where the
@@ -71,7 +71,7 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
   late final TextEditingController _note;
   String? _category;
   late PaidFrom _paidFrom;
-  ReceiptPhoto? _photo;
+  PickedPhoto? _photo;
   String? _error;
 
   @override
@@ -134,7 +134,7 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
   }
 
   Future<void> _pickPhoto() async {
-    final photo = await pickReceiptPhoto(context);
+    final photo = await pickPhoto(context);
     if (photo != null && mounted) setState(() => _photo = photo);
   }
 

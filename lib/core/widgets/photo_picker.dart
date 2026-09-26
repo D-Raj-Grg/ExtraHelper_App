@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
-/// A receipt photo ready to upload.
-class ReceiptPhoto {
-  const ReceiptPhoto({
+/// A photo picked from the camera or gallery, ready to upload.
+class PickedPhoto {
+  const PickedPhoto({
     required this.bytes,
     required this.contentType,
     required this.ext,
@@ -26,7 +26,7 @@ const _types = {
 /// Camera or gallery, then a photo small enough to send over a poor
 /// connection. Downscaled on the phone: a receipt needs to be readable, not
 /// print-quality, and the bucket refuses anything over 5 MB.
-Future<ReceiptPhoto?> pickReceiptPhoto(BuildContext context) async {
+Future<PickedPhoto?> pickPhoto(BuildContext context) async {
   final source = await showModalBottomSheet<ImageSource>(
     context: context,
     showDragHandle: true,
@@ -67,23 +67,24 @@ Future<ReceiptPhoto?> pickReceiptPhoto(BuildContext context) async {
   if (!_types.containsKey(ext)) ext = 'jpg';
   if (ext == 'jpeg') ext = 'jpg';
   final bytes = await picked.readAsBytes();
-  return ReceiptPhoto(
+  return PickedPhoto(
     bytes: bytes,
     contentType: picked.mimeType ?? _types[ext]!,
     ext: ext,
   );
 }
 
-/// Full-screen look at a signed receipt URL, pinch to zoom.
-Future<void> showReceiptViewer(
+/// Full-screen look at a photo URL, pinch to zoom.
+Future<void> showPhotoViewer(
   BuildContext context,
-  String url,
-) => showDialog<void>(
+  String url, {
+  String title = 'Photo',
+}) => showDialog<void>(
   context: context,
   builder: (dialog) => Dialog.fullscreen(
     child: Scaffold(
       appBar: AppBar(
-        title: const Text('Receipt'),
+        title: Text(title),
         leading: IconButton(
           tooltip: 'Close',
           icon: const Icon(Icons.close),

@@ -1816,6 +1816,20 @@ Backend + web: see `../extrahelper/TASKS.md` → "Daily expenses + night cash co
       day" / "Recount" sheet → `close_day`, and an Expenses section. The drawer section is hidden when the drawer is off.
 - [ ] Real-device pass: log offline in airplane mode → reconnect → appears once; recount a closed day.
 
+## Menu editing on the phone (2026-09-26)
+
+- [x] Add / edit / delete a dish: name, price, category, station, veg mark, description (`item_edit_screen.dart`).
+- [x] Dish photo: camera or gallery → `menu-images` (same path as the web), change, remove. Thumbnails in the list.
+- [x] In stock / Sold out switch per dish via `set_item_86` through the outbox, and a sold-out count.
+- [x] Category filter chips, and a categories screen (add, rename, hide/show).
+- [ ] Real-device pass: camera permission prompt, upload on a slow connection, sold out with no signal → reconnect.
+- [x] Add-ons: link/unlink per dish with max qty, create from the dish, and a library screen (rename/reprice/delete).
+- [x] Availability windows per dish (every day or one day, start–end).
+- [x] Combos: create/edit/delete, on/off, dishes with quantities.
+- [x] Several kitchen stations per dish (set-difference save).
+- [x] Review fixes: a photo that fails after a new dish is saved no longer strands it; the delete copy names what cascades (sizes, add-ons, windows, recipe); the kitchen can use the stock switch on a read-only dish; saving no longer collapses multi-station dishes.
+- [ ] **Enforce availability windows and combos when ordering**, server-side in `place_staff_order` / QR / storefront menus plus both POS clients. Today (web and phone) they are data only.
+
 ## Open Questions
 
 - [x] Confirm bundle id `com.extrahelper.app` before the first signed build. Confirmed and shipped in

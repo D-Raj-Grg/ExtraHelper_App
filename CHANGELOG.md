@@ -16,6 +16,36 @@ _Nothing yet._
 
 ---
 
+## [1.0.15] — 2026-09-26 · The menu on the phone
+
+TestFlight build **1.0.15+1**.
+
+### Added
+- **Manage the menu from the phone.** The Menu screen could only fix a dish's sizes. Now it can:
+  - **Add a dish:** name, price, category, kitchen station, veg / non-veg / not marked, a description, and a photo.
+  - **Change one** the same way, or **delete** it. Past orders and bills keep a deleted dish.
+- **Dish photos.** Take one with the camera or pick one from the gallery, change it or remove it. It shows on the POS, the QR menu and the web, because it is the same photo the web editor uploads. Each dish in the menu list now shows its photo, or its initials when it has none.
+- **In stock / Sold out, one tap.** Every dish in the menu list has a switch, with the word beside it. Turning it off marks the dish sold out everywhere, so nobody can order it until it's turned back on. The screen counts how many dishes are sold out. It works with no signal too: the change is saved on the phone and sent when coverage returns. Owners, managers and the kitchen can change stock; the switch is disabled for everyone else.
+- **Categories.** Filter the menu by category with the chips at the top. From the new Categories screen, add, rename, and hide or show a whole section on ordering screens. You can also create a category while adding a dish.
+- **Add-ons.** From a dish, tick which add-ons it offers (extra cheese, no onion, a side of rice) and set the most a guest can have of each. You can create a new add-on right there. **Manage menu → Add-ons** renames, reprices or deletes an add-on across every dish, and shows how many dishes use each one.
+- **When it's sold.** Give a dish time windows — every day, or a single day, from one time until another (breakfast 07:00–11:00, a Saturday special). With no windows it's sold any time.
+- **Combos.** **Manage menu → Combos** builds a bundle: a name, a price, and the dishes in it with quantities. It shows what they would cost bought separately. Switch a combo on or off, edit it, or delete it; the dishes in it stay on the menu.
+- **Several kitchen stations per dish.** Pick every station a dish's ticket should go to.
+
+### Known gaps
+- **Time windows and combos are stored but not yet used when ordering, on the phone or the web.** A dish outside its window can still be ordered, and a combo can't be rung up as one line yet. Both need a server-side rule, which is the next step. Add-ons, stock and stations do take effect immediately.
+
+<details><summary>Technical — menu editing</summary>
+
+- No server change. `menu_items`, `menu_categories` and `item_station_routes` writes are plain table writes, gated on `menu.edit` by RLS, the same ones the web editor makes. Every write reads back its row, and zero rows is reported as a refusal. Stock goes through the existing `set_item_86` RPC via the outbox (`OutboxKind.menu86`). The switch keeps an optimistic value until the refreshed list arrives.
+- Photos use the web's path `menu-images/{tenant}/{item}.{ext}` (upsert, cache-busted URL), so the two clients replace each other's photo.
+- Stations are saved as a set difference (add the missing ones, delete the extras, leave matching ones alone), so a dish routed to several stations is never collapsed to one. Add-on links upsert on `(item_id, modifier_id)` like the web, and changing the maximum keeps `is_default`. Time windows go to `item_availability` (null day = every day; `HH:MM` local). Combos are `combos.items = [{item_id, qty}]`.
+- `lib/features/menu/`: `item_edit_screen.dart`, `item_addons_screen.dart` (per-dish links + library), `item_availability_screen.dart`, `combos_screen.dart`, `menu_categories_screen.dart`, `stock_toggle.dart`, reworked `menu_screen.dart`. The photo picker moved to `lib/core/widgets/photo_picker.dart` and is shared with expense receipts. Test: `test/menu_edit_item_test.dart`.
+
+</details>
+
+---
+
 ## [1.0.14] — 2026-09-26 · Expenses and order alerts
 
 TestFlight build **1.0.14+1**.
