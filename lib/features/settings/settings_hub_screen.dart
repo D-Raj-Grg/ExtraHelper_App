@@ -103,6 +103,12 @@ class SettingsHubScreen extends ConsumerWidget {
                   route: Routes.printing,
                 ),
                 const _SettingsRow(
+                  icon: Icons.notifications_outlined,
+                  label: 'Notifications',
+                  detail: 'Order alerts on this phone, mute',
+                  route: Routes.settingsNotifications,
+                ),
+                const _SettingsRow(
                   icon: Icons.palette_outlined,
                   label: 'Appearance',
                   detail: 'Light, dark, text size',

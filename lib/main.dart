@@ -7,8 +7,10 @@ import 'app/app.dart';
 import 'core/env.dart';
 import 'core/prefs.dart';
 import 'data/local/database.dart';
+import 'data/notifications/local_notifier.dart';
 import 'data/print/print_providers.dart';
 import 'data/sync/sync_providers.dart';
+import 'features/notifications/notify_loop.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -37,16 +39,27 @@ Future<void> main() async {
   // immediately, with no microtask in between.
   final prefs = await SharedPreferences.getInstance();
 
+  // Before the first frame too: if a tap on an order alert is what launched
+  // the app, the payload is only readable now, and the shell must know to open
+  // the feed once it is ready. Never prompts — the OS question is asked later,
+  // with a reason, by `NotifyLoop`.
+  final notifier = LocalNotifier();
+  await notifier.init();
+
   runApp(
     ProviderScope(
       overrides: [
         appDatabaseProvider.overrideWithValue(db),
         sharedPreferencesProvider.overrideWith((ref) => prefs),
+        localNotifierProvider.overrideWithValue(notifier),
       ],
-      // Two loops, one app: `SyncLoop` owes the server writes, `PrintLoop` owes
-      // the kitchen paper. Both are mounted above the router so neither depends
-      // on which screen happens to be open.
-      child: const SyncLoop(child: PrintLoop(child: ExtraHelperApp())),
+      // Three loops, one app: `SyncLoop` owes the server writes, `PrintLoop`
+      // owes the kitchen paper, `NotifyLoop` owes staff the order alerts. All
+      // are mounted above the router so none depends on which screen happens
+      // to be open.
+      child: const SyncLoop(
+        child: PrintLoop(child: NotifyLoop(child: ExtraHelperApp())),
+      ),
     ),
   );
 }
