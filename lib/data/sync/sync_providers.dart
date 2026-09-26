@@ -8,6 +8,7 @@ import '../../features/tenant/tenant_providers.dart';
 import '../local/database.dart';
 import '../local/drift_outbox_store.dart';
 import '../local/pos_cache.dart';
+import '../supabase/expenses_repository.dart';
 import '../supabase/inventory_repository.dart';
 import '../supabase/kds_repository.dart';
 import 'connectivity.dart';
@@ -53,6 +54,7 @@ final replayEngineProvider = Provider<ReplayEngine?>((ref) {
       repo,
       ref.watch(inventoryRepositoryProvider(tenant.tenantId)),
       ref.watch(kdsRepositoryProvider(tenant.tenantId)),
+      ref.watch(expensesRepositoryProvider(tenant.tenantId)),
     ),
     isOnline: watcher.isOnline,
   );

@@ -1,4 +1,5 @@
 import '../../features/kds/kds_constants.dart';
+import '../supabase/expenses_repository.dart';
 import '../supabase/inventory_repository.dart';
 import '../supabase/kds_repository.dart';
 import '../supabase/pos_repository.dart';
@@ -10,11 +11,17 @@ import 'transport.dart';
 /// gets retried; anything else the repository raised was a considered "no" from
 /// Postgres and must not be retried into a silent loop.
 class SupabaseTransport implements OutboxTransport {
-  const SupabaseTransport(this._repo, this._inventory, this._kds);
+  const SupabaseTransport(
+    this._repo,
+    this._inventory,
+    this._kds,
+    this._expenses,
+  );
 
   final PosRepository _repo;
   final InventoryRepository _inventory;
   final KdsRepository _kds;
+  final ExpensesRepository _expenses;
 
   @override
   Future<String> placeOrder({
@@ -148,6 +155,27 @@ class SupabaseTransport implements OutboxTransport {
   Future<void> markOrderServed(String orderId) async {
     try {
       await _kds.markOrderServed(orderId);
+    } on PosTransientFailure catch (e) {
+      throw TransportTransient(e.message);
+    } on PosFailure catch (e) {
+      throw TransportRejected(e.message);
+    }
+  }
+
+  @override
+  Future<void> recordExpense({
+    required String idempotencyKey,
+    required Map<String, dynamic> payload,
+  }) async {
+    try {
+      await _expenses.record(
+        categoryId: payload['category_id'] as String,
+        amountCents: (payload['amount_cents'] as num).toInt(),
+        note: payload['note'] as String,
+        paidFrom: PaidFrom.from(payload['paid_from'] as String?),
+        businessDate: payload['business_date'] as String?,
+        clientKey: idempotencyKey,
+      );
     } on PosTransientFailure catch (e) {
       throw TransportTransient(e.message);
     } on PosFailure catch (e) {

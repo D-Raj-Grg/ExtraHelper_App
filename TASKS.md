@@ -1780,6 +1780,42 @@ from the server-side template. Traps paid for:
 Not done, deliberately: a full-screen "scan to pay" mode, and opening the receipt automatically
 after payment.
 
+## Live order alerts on the phone (2026-09-26, both clients)
+
+Backend: `../extrahelper/supabase/migrations/20260926120000_order_notifications.sql` —
+`notifications` rows written by triggers on `orders.status` / `bills.status`, per-user read cursor
+in `notification_reads`, `mark_notifications_read(_tenant)`. RLS = `notifications.view`.
+
+- [x] `flutter_local_notifications` 22.3.1 (matches Flutter 3.38 / compileSdk 36 / AGP 8.11.1);
+      core library desugaring in `android/app/build.gradle.kts`; `POST_NOTIFICATIONS`; monochrome
+      `ic_stat_notify` vector + `res/raw/keep.xml`; iOS `UNUserNotificationCenter` delegate.
+- [x] `data/notifications/` — `AppNotification` (parse, self-authored filter, unread, merge) and
+      `LocalNotifier` (init, permission, show, tap stream, launch payload).
+- [x] `data/supabase/notifications_repository.dart` — latest 50, read cursor, mark read, Realtime
+      INSERT stream (fresh topic per listen, JWT set on join).
+- [x] `NotifyLoop` above the router: keeps the feed alive, one-time pre-prompt then OS prompt, tap →
+      `/notifications`, refresh on resume. Bell with unread badge in `AppScaffold`.
+- [x] Settings → Notifications: OS permission state, "Turn on" / "Open phone settings", per-device
+      mute.
+- [ ] Real-device pass, both platforms: prompt, banner backgrounded, tap-to-open, cold launch from
+      the tray, Android 12 (no runtime prompt) vs 13+.
+- [ ] Phase 2: FCM/APNs push, so alerts reach a phone whose app has been killed.
+
+## Daily expenses + night cash count (2026-09-26, both clients)
+
+Backend + web: see `../extrahelper/TASKS.md` → "Daily expenses + night cash count".
+
+- [x] `data/supabase/expenses_repository.dart`: `PaidFrom`, `Expense`, `ExpenseDay` (from `expenses_day`), and the
+      record/update/void/category/close_day RPCs.
+- [x] `OutboxKind.expense`: logging an expense queues offline. The outbox key is the RPC's `_client_key`, so a
+      replay can't double-log. It appends rather than last-write-wins, since two Rs 100 rides are two entries.
+      Pending entries show greyed on the list. Covered in `test/outbox_test.dart` → `expenses`.
+- [x] `features/expenses/`: Expenses screen (day switcher, totals by paid-from, edit/void menu, pending rows),
+      add/edit bottom sheet (chips), void dialog, and a categories screen (`expenses.manage`). Drawer entry is gated on `expenses.create`.
+- [x] Day close: Cash book section (expected vs counted, variance with word + sign), "Count cash & close the
+      day" / "Recount" sheet → `close_day`, and an Expenses section. The drawer section is hidden when the drawer is off.
+- [ ] Real-device pass: log offline in airplane mode → reconnect → appears once; recount a closed day.
+
 ## Open Questions
 
 - [x] Confirm bundle id `com.extrahelper.app` before the first signed build. Confirmed and shipped in

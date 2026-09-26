@@ -35,6 +35,9 @@ class DayReport {
     required this.voidBills,
     required this.cash,
     required this.topItems,
+    required this.cashDrawerEnabled,
+    required this.expenses,
+    required this.cashBook,
   });
 
   /// `YYYY-MM-DD`, the business day this report covers. Server-resolved: ask
@@ -81,6 +84,13 @@ class DayReport {
   final DayCash cash;
   final List<DayTopItem> topItems;
 
+  /// Whether this restaurant runs shift drawers at all. Off, the drawer
+  /// section is hidden unless a session happened to close on this day.
+  final bool cashDrawerEnabled;
+
+  final DayExpenses expenses;
+  final DayCashBook cashBook;
+
   /// A day on which nothing was billed. Still a real answer, so the sheet
   /// renders in full with zeros rather than collapsing to an empty state.
   bool get isQuiet => sales.bills == 0;
@@ -107,8 +117,156 @@ class DayReport {
       voidBills: _int(j['void_bills']),
       cash: DayCash.fromJson(obj('cash')),
       topItems: _list(j['top_items'], DayTopItem.fromJson),
+      cashDrawerEnabled: j['cash_drawer_enabled'] == true,
+      expenses: DayExpenses.fromJson(obj('expenses')),
+      cashBook: DayCashBook.fromJson(obj('cash_book')),
     );
   }
+}
+
+/// The day's logged expenses, voided ones already left out by the RPC.
+class DayExpenses {
+  const DayExpenses({
+    required this.totalCents,
+    required this.cashCents,
+    required this.onlineCents,
+    required this.ownerCents,
+    required this.byCategory,
+    required this.items,
+  });
+
+  final int totalCents;
+  final int cashCents;
+  final int onlineCents;
+  final int ownerCents;
+  final List<DayExpenseCategory> byCategory;
+  final List<DayExpenseItem> items;
+
+  static DayExpenses fromJson(Map<String, dynamic> j) {
+    final from = (j['by_paid_from'] as Map<String, dynamic>?) ?? const {};
+    return DayExpenses(
+      totalCents: _int(j['total_cents']),
+      cashCents: _int(from['cash']),
+      onlineCents: _int(from['online']),
+      ownerCents: _int(from['owner']),
+      byCategory: _list(j['by_category'], DayExpenseCategory.fromJson),
+      items: _list(j['items'], DayExpenseItem.fromJson),
+    );
+  }
+}
+
+class DayExpenseCategory {
+  const DayExpenseCategory({
+    required this.name,
+    required this.amountCents,
+    required this.count,
+  });
+
+  final String name;
+  final int amountCents;
+  final int count;
+
+  static DayExpenseCategory fromJson(Map<String, dynamic> j) =>
+      DayExpenseCategory(
+        name: (j['name'] as String?) ?? '',
+        amountCents: _int(j['amount_cents']),
+        count: _int(j['count']),
+      );
+}
+
+class DayExpenseItem {
+  const DayExpenseItem({
+    required this.id,
+    required this.time,
+    required this.category,
+    required this.note,
+    required this.amountCents,
+    required this.paidFrom,
+    this.by,
+  });
+
+  final String id;
+
+  /// "14:05", already in the tenant's timezone.
+  final String time;
+  final String category;
+  final String note;
+  final int amountCents;
+  final String paidFrom;
+  final String? by;
+
+  static DayExpenseItem fromJson(Map<String, dynamic> j) => DayExpenseItem(
+    id: (j['id'] as String?) ?? '',
+    time: (j['time'] as String?) ?? '',
+    category: (j['category'] as String?) ?? '',
+    note: (j['note'] as String?) ?? '',
+    amountCents: _int(j['amount_cents']),
+    paidFrom: (j['paid_from'] as String?) ?? 'cash',
+    by: j['by'] as String?,
+  );
+}
+
+/// The night count without a drawer — the paper book's "cash left 100,
+/// online 1000", against what the system says should be there. Every figure
+/// computed by `daily_report`; the counted ones stay null until someone
+/// closes the day.
+class DayCashBook {
+  const DayCashBook({
+    required this.cashSalesCents,
+    required this.cashRefundsCents,
+    required this.cashExpensesCents,
+    required this.expectedCashCents,
+    required this.onlineSalesCents,
+    required this.onlineRefundsCents,
+    required this.onlineExpensesCents,
+    required this.expectedOnlineCents,
+    required this.closed,
+    this.countedCashCents,
+    this.countedOnlineCents,
+    this.cashVarianceCents,
+    this.onlineVarianceCents,
+    this.note,
+    this.closedAt,
+    this.closedBy,
+  });
+
+  final int cashSalesCents;
+  final int cashRefundsCents;
+  final int cashExpensesCents;
+  final int expectedCashCents;
+  final int onlineSalesCents;
+  final int onlineRefundsCents;
+  final int onlineExpensesCents;
+  final int expectedOnlineCents;
+  final bool closed;
+  final int? countedCashCents;
+  final int? countedOnlineCents;
+  final int? cashVarianceCents;
+  final int? onlineVarianceCents;
+  final String? note;
+  final DateTime? closedAt;
+  final String? closedBy;
+
+  static int? _maybe(Object? v) => v == null ? null : _int(v);
+
+  static DayCashBook fromJson(Map<String, dynamic> j) => DayCashBook(
+    cashSalesCents: _int(j['cash_sales_cents']),
+    cashRefundsCents: _int(j['cash_refunds_cents']),
+    cashExpensesCents: _int(j['cash_expenses_cents']),
+    expectedCashCents: _int(j['expected_cash_cents']),
+    onlineSalesCents: _int(j['online_sales_cents']),
+    onlineRefundsCents: _int(j['online_refunds_cents']),
+    onlineExpensesCents: _int(j['online_expenses_cents']),
+    expectedOnlineCents: _int(j['expected_online_cents']),
+    closed: j['closed'] == true,
+    countedCashCents: _maybe(j['counted_cash_cents']),
+    countedOnlineCents: _maybe(j['counted_online_cents']),
+    cashVarianceCents: _maybe(j['cash_variance_cents']),
+    onlineVarianceCents: _maybe(j['online_variance_cents']),
+    note: j['note'] as String?,
+    closedAt: j['closed_at'] == null ? null : _time(j['closed_at']),
+    closedBy: j['closed_by'] as String?,
+  );
 }
 
 /// The money, all of it from `bills` alone.

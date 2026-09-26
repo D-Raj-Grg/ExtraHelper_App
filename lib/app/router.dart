@@ -10,9 +10,12 @@ import '../features/auth/signup_screen.dart';
 import '../features/auth/verify_email_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/dev/design_gallery.dart';
+import '../features/expenses/expense_categories_screen.dart';
+import '../features/expenses/expenses_screen.dart';
 import '../features/inventory/inventory_screen.dart';
 import '../features/kds/kds_screen.dart';
 import '../features/menu/menu_screen.dart';
+import '../features/notifications/notifications_screen.dart';
 import '../features/pos/bill_view_screen.dart';
 import '../features/pos/checkout_screen.dart';
 import '../features/pos/manager_ops.dart';
@@ -23,6 +26,7 @@ import '../features/settings/charges_settings_screen.dart';
 import '../features/settings/danger_reset_screen.dart';
 import '../features/settings/danger_screen.dart';
 import '../features/settings/general_settings_screen.dart';
+import '../features/settings/notification_settings_screen.dart';
 import '../features/settings/plan_usage_screen.dart';
 import '../features/settings/printers_screen.dart';
 import '../features/settings/printing_screen.dart';
@@ -58,6 +62,8 @@ abstract final class Routes {
   static const kds = '/kitchen';
   static const dashboard = '/dashboard';
   static const dayClose = '/day-close';
+  static const expenses = '/expenses';
+  static const expenseCategories = '/expenses/categories';
   static const inventory = '/store-room';
   static const menu = '/menu';
 
@@ -67,6 +73,11 @@ abstract final class Routes {
   static const team = '/team';
   static const managerLog = '/manager-log';
   static const printing = '/printing';
+
+  /// The order-lifecycle feed behind the bell. Pushed, never a destination:
+  /// someone glances at it and backs out to whatever they were doing. Also
+  /// where a tap on an OS alert lands.
+  static const notifications = '/notifications';
 
   /// Settings. A hub of pushed leaves rather than the web's six tabs — see
   /// `features/settings/settings_hub_screen.dart` for why.
@@ -79,6 +90,7 @@ abstract final class Routes {
   static const settingsPlan = '/settings/plan';
   static const settingsProfile = '/settings/profile';
   static const settingsAppearance = '/settings/appearance';
+  static const settingsNotifications = '/settings/notifications';
   static const settingsDanger = '/settings/danger';
   static const settingsDangerReset = '/settings/danger/reset';
   static const account = '/account';
@@ -168,6 +180,14 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const DayCloseScreen(),
       ),
       GoRoute(
+        path: Routes.expenses,
+        builder: (context, state) => const ExpensesScreen(),
+      ),
+      GoRoute(
+        path: Routes.expenseCategories,
+        builder: (context, state) => const ExpenseCategoriesScreen(),
+      ),
+      GoRoute(
         path: Routes.inventory,
         builder: (context, state) => const InventoryScreen(),
       ),
@@ -186,6 +206,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: Routes.printing,
         builder: (context, state) => const PrintingScreen(),
+      ),
+      // No permission branch, for the reason on the bill route: the screen
+      // gates itself on `notifications.view`, and RLS returns nothing without
+      // it anyway.
+      GoRoute(
+        path: Routes.notifications,
+        builder: (context, state) => const NotificationsScreen(),
       ),
       GoRoute(
         path: Routes.account,
@@ -234,6 +261,10 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: 'appearance',
             builder: (context, state) => const AppearanceScreen(),
+          ),
+          GoRoute(
+            path: 'notifications',
+            builder: (context, state) => const NotificationSettingsScreen(),
           ),
           GoRoute(
             path: 'danger',

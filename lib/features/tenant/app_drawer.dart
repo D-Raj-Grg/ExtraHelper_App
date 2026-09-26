@@ -24,6 +24,9 @@ class AppDrawer extends ConsumerWidget {
     // avoids offering a door that won't open.
     final canSeeKitchen = ref.watch(hasPermissionProvider('kds.view'));
     final canSeeReports = ref.watch(hasPermissionProvider('reports.view'));
+    // Every base role holds `expenses.create` — whoever paid for the rice
+    // logs it. The RPCs decide what each person may see and change.
+    final canLogExpenses = ref.watch(hasPermissionProvider('expenses.create'));
     final canSeeStock = ref.watch(hasPermissionProvider('inventory.view'));
     // `audit_logs` RLS is owner/manager only; `order.void` is held by exactly
     // those two, so it is the honest key to hang the manager log on.
@@ -72,6 +75,14 @@ class AppDrawer extends ConsumerWidget {
                 selectedIcon: Icons.insights,
                 label: 'Dashboard',
                 route: Routes.dashboard,
+                location: location,
+              ),
+            if (canLogExpenses)
+              _DrawerItem(
+                icon: Icons.account_balance_wallet_outlined,
+                selectedIcon: Icons.account_balance_wallet,
+                label: 'Expenses',
+                route: Routes.expenses,
                 location: location,
               ),
             // Same key as the dashboard: the day close exposes strictly less

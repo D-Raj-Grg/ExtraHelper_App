@@ -13,10 +13,24 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 ## [Unreleased]
 
 ### Added
+- **Expenses on the phone.** A new **Expenses** entry in the menu for everyone on staff. Tap **Add expense**, type the amount, tap a category, write a few words, and choose where the money came from (Cash, Online / eSewa, Owner's pocket). You can add a receipt photo from the camera or gallery. **It works with no signal**: the expense is saved on the phone, shown greyed out as "Waiting to send", and sent once when the connection is back, never twice. Page back through earlier days; managers can add to them. Edit, void with a reason, and attach, view or remove a receipt photo from each entry's menu.
+- **Last 7 days and last 30 days.** Managers see rolling expense totals at the top of Expenses, with the category that cost the most, matching the web Reports page.
+- **Count cash & close the day.** Day close now has a **Cash book** card: what should be in hand (sales minus refunds minus cash expenses), the same for online, and a **Count cash & close the day** sheet for what you actually counted. It shows Balanced, Short or Over, and you can recount. Day close also lists the day's expenses. The shift-drawer section only appears for restaurants that use a drawer.
+- Owners and managers can manage expense categories from the tag icon on Expenses.
+
+### Added
+- **Order alerts on the phone.** The app now tells staff about every step of an order — **new order, preparing, ready to serve, served, billed, paid**, and cancelled — as a real phone notification with a banner and sound. A waiter hears that a table's food is up without watching the pass. Alerts come from other people's actions: tapping "Served" yourself doesn't buzz your own phone. The amount is shown in the restaurant's currency when there is one.
+- **Asked once, like other apps.** Shortly after you sign in, the app explains what the alerts are for and then shows the phone's own permission prompt. It asks once per device. After that, **Settings → Notifications** shows whether alerts are on, turns them on (or opens the phone's settings if they were blocked), and has a **Mute on this phone** switch for a shared counter tablet that shouldn't buzz.
+- **A bell in every screen's header** with an unread count, opening a **Notifications** screen: every update with an icon for each step, unread ones in bold, pull to refresh, and **Mark all read**. Tapping a phone notification opens this screen, including when the tap is what starts the app. Billed and paid updates open the bill for staff who can take payments.
+- Unread works the same as on the web: only the last 24 hours count, and your own actions never do, so the phone and the browser show the same number.
+- Kitchen and store-room roles get no bell, no alerts and no prompt.
+
+### Added
 - **Checkout on the phone.** A waiter or cashier can now settle a bill at the table instead of walking to the till. Tap **Bill** on an order (or a table that has asked for one) and the bill opens: the items, what they come to, and what is still owed. From there you can take cash, card or wallet in full or in part; split the check equally, by item, or across several tenders; discount the bill or a single line; add an extra charge; apply a coupon; add a tip or round the total off; attach a guest and spend their loyalty points; put another round onto the same tab; leave the bill unpaid on a guest's tab; and refund a settled one. A third **Bills** tab lists everything still owed, because opening a bill takes its order off the Orders board.
 - **The receipt prints itself.** Settling a bill on the phone queues the receipt exactly as settling one on the till does, and the phone's own printer picks it up. No new printing code was needed.
 
 ### Fixed
+- **Day close: stepping back a day and then forward again now lands on today properly.** Going forward to today used to pin the screen to that date instead of following "today", so if the trading day rolled over while the app was open, the sheet stayed on the previous day. It could also briefly treat the day you'd just left as today and disable the forward arrow.
 - **The menu on the phone could go stale and never recover — and it cost money.** The cached-list loader kicked off its background refresh while it was still building, which Riverpod refuses; the refresh died as an unhandled error every time, so whatever was saved on the first run was what the phone showed forever. On a real order this charged nothing: a dish whose price had moved onto size variants still showed the old flat price, was added without asking for a size, and the server snapshotted it at zero. The refresh now runs on the values the build already resolved and touches no providers, so it completes. Pull-to-refresh was never affected — this only ever hit the automatic one.
 - **Variants and add-ons appear again.** Same cause: the stale cache predated them, so dishes that should ask "which size?" were added straight to the order. A dish with options now shows its badge and price range and forces the choice, as it always should have.
 
@@ -28,12 +42,41 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 - **Tapping a table that has asked for its bill opens the bill**, not a second order. Previously the app looked only at orders still on the floor, and a billed order is not one of them — so the tap would have started a fresh order on a table that was mid-payment.
 
 ### Known gaps
+- **Alerts need the app to be running.** They arrive while ExtraHelper is open. On Android that includes the background for as long as the phone keeps the app running; iOS pauses a backgrounded app soon after, and whatever came in meanwhile shows in the list when you come back, without a banner. With the app fully closed nothing arrives. That needs push notifications through Firebase/APNs, which is the next step.
+- Not yet checked on a real phone: the permission prompt, a banner while backgrounded, and tapping a notification to open the app.
 - **Checkout needs a connection.** Nothing is queued: an order taken with no coverage is safe and still syncs, but it cannot be billed until the phone is back on signal. Every entry point says so rather than hanging.
 - **Card (online) is web-only.** Charging a card through a payment gateway runs server-side on the web and has no RPC behind it, so the phone would record money it never collected. It offers cash, card (on a terminal), wallet and loyalty points. A settled bill that carries an online payment still shows it correctly.
 - **A refund cannot be retried safely.** `refund_payment` takes no idempotency key, so after a lost connection the app asks you to check the bill's payments rather than offering to try again.
 
 ### Changed
 - **Taking an order sends it to the kitchen.** The order screen had a **Save draft** button beside **Send to kitchen**, and a saved draft never reached a kitchen screen or a printer. There is now one button. Orders taken with no coverage still queue and go to the kitchen by themselves the moment the phone is back on signal. Matches the same change on the web app.
+
+
+<details><summary>Technical — order alerts and day close</summary>
+
+Server half: `../extrahelper/supabase/migrations/20260926120000_order_notifications.sql` and `20260926130000_order_notifications_hardening.sql` (see the web changelog).
+
+- **Dependency.** `flutter_local_notifications` ^22.3.1 (needs Flutter 3.38.1+ / Dart 3.10, compileSdk 35+, AGP 8.11.1+, minSdk 24). Android: core library desugaring on with `desugar_jdk_libs:2.1.4`, `POST_NOTIFICATIONS` in the manifest, monochrome `ic_stat_notify` vector kept from R8 by `res/raw/keep.xml`, high-importance `orders` channel, category `event`. iOS: `UNUserNotificationCenter` delegate set in `AppDelegate.swift` so banners show while the app is open.
+- **Code.** `lib/data/notifications/` (`AppNotification`, `LocalNotifier`), `lib/data/supabase/notifications_repository.dart` (latest 50, cursor, `mark_notifications_read`, realtime INSERT stream on a fresh topic per listen with an `onRejoin` catch-up), `lib/features/notifications/` (feed notifier, bell, screen, `NotifyLoop`), `lib/features/settings/notification_settings_screen.dart`.
+- **Feed notifier.** Rebuilds only when the tenant id, user id or `notifications.view` changes, watched via `select`. `Membership` has no `==` and is rebuilt on every token refresh and connectivity flip, and rebuilding on those tore the channel down mid-service. Every async write carries a build generation, so a slow response from a previous tenant is dropped. `refresh()` merges rather than replaces and keeps the later cursor. It also recovers a feed whose first load failed; before, live rows went into a buffer that was never merged. A failed mark-read restores only the cursor. The screen keeps the list on reload/error (`skipLoadingOnReload`, `skipError`). A tray tap before go_router has its first route retries instead of throwing.
+- **Unread.** `isUnread(n, cursor, userId:, now:)` = `created_at > max(cursor, now − 24h)` and not self-authored. Mirrors the web's rule.
+- **Day close.** `DayCursor.next()` clears the selection (back to "today") when it reaches the known today, instead of naming the date; the screen's listener ignores loading states, whose `valueOrNull` is still the previous day's report.
+- Tests: `test/notifications_test.dart` (alert filtering, unread window, cursor merge, arrival merge, bell) and `test/day_cursor_test.dart` (back → forward → back).
+
+</details>
+
+
+<details><summary>Technical — expenses</summary>
+
+Server side: see `../extrahelper/CHANGELOG.md` → "daily expenses, receipts, night count".
+
+- `data/supabase/expenses_repository.dart`: `PaidFrom`, `Expense`, `ExpenseDay` (`expenses_day`), `ExpenseRange` (`report_expenses`, rolling 7/30 days), record/update/void/categories/`close_day`, and receipts (upload to the private bucket, then `set_expense_receipt`, then clean up the old object; signed URL for 10 minutes).
+- New `OutboxKind.expense`. The outbox idempotency key is the RPC's `_client_key`; it appends rather than last-write-wins. `OrderQueue.recordExpense` / `pendingExpenses`. Tests: `test/outbox_test.dart` → `expenses`.
+- A photo picked while adding is attached after the write syncs (the id is looked up by client key). If the expense was queued offline, the user is told to attach it from the menu later.
+- `features/expenses/` (screen, sheet, categories screen, `receipt_photo.dart`), `features/reports/day_count_sheet.dart`. `DayReport` parses `expenses`, `cash_book` and `cash_drawer_enabled`.
+- iOS `NSPhotoLibraryUsageDescription` added; the camera usage string now mentions receipts.
+
+</details>
 
 ---
 
