@@ -18,7 +18,7 @@ _Nothing yet._
 
 ## [1.0.15] — 2026-09-26 · The menu on the phone
 
-TestFlight build **1.0.15+1**.
+TestFlight build **1.0.15+1**, submitted to App Store review on 2026-09-26 (releases automatically once approved). This is the first App Store release since 1.0.13, so it also carries everything in 1.0.14.
 
 ### Added
 - **Manage the menu from the phone.** The Menu screen could only fix a dish's sizes. Now it can:
