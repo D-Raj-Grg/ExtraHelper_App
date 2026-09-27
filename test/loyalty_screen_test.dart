@@ -52,6 +52,25 @@ final _history = [
     tableLabel: 'A1',
     itemsSummary: 'Sekuwa set ×2, Momo ×1',
   ),
+  // Open, but nothing left on it — still an unpaid bill by status, so it is
+  // listed for closing rather than hidden as if it were paid.
+  CustomerBillRow(
+    billId: 'bill-settled',
+    createdAt: DateTime(2026, 9, 10, 12, 0),
+    status: 'open',
+    totalCents: 50000,
+    paidCents: 50000,
+    outstandingCents: 0,
+  ),
+  CustomerBillRow(
+    billId: 'bill-void',
+    createdAt: DateTime(2026, 9, 5, 12, 0),
+    status: 'void',
+    totalCents: 9900,
+    paidCents: 0,
+    outstandingCents: 0,
+    itemsSummary: 'Voided sekuwa',
+  ),
   CustomerBillRow(
     billId: 'bill-0',
     createdAt: DateTime(2026, 9, 1, 20, 0),
@@ -81,6 +100,15 @@ Widget _app({required Set<String> permissions, required Widget home}) {
       permissionsProvider.overrideWith((ref) => permissions),
       isOnlineProvider.overrideWith((ref) => Stream.value(true)),
       crmOverviewProvider.overrideWith((ref) async => _overview),
+      // The detail resolves its guest by id, never off the overview list —
+      // a search on the list must not blank the page behind it.
+      customerProvider.overrideWith(
+        (ref, id) async => switch (id) {
+          'c-ramesh' => _ramesh,
+          'c-sita' => _sita,
+          _ => null,
+        },
+      ),
       customerHistoryProvider.overrideWith((ref, id) async => _history),
     ],
     // AppScaffold reads the router for its back handling, so the screen
@@ -141,9 +169,56 @@ void main() {
 
     expect(find.text('Ramesh Thapa'), findsOneWidget);
     expect(find.text('Silver'), findsOneWidget);
-    expect(find.text('Collect'), findsOneWidget);
+    // Two open/partial bills, Collect on each — the settled-but-open one
+    // says so instead of quoting a debt, and the void one is not shown.
+    expect(find.text('Collect'), findsNWidgets(2));
+    expect(find.textContaining('owes NPR 2,415.00'), findsOneWidget);
+    expect(find.textContaining('nothing left to collect'), findsOneWidget);
+    expect(find.text('Voided sekuwa'), findsNothing);
     // Points controls need loyalty.edit, which this person lacks.
     expect(find.text('Earn'), findsNothing);
+  });
+
+  testWidgets('the detail is found by id, not by scanning the list', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        permissions: const {'loyalty.view'},
+        home: const CustomerDetailScreen(customerId: 'c-sita'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Sita Rai'), findsOneWidget);
+    expect(find.text('sita@example.com'), findsOneWidget);
+  });
+
+  testWidgets('an unknown id says so instead of spinning', (tester) async {
+    await tester.pumpWidget(
+      _app(
+        permissions: const {'loyalty.view'},
+        home: const CustomerDetailScreen(customerId: 'c-nobody'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Customer not found'), findsOneWidget);
+  });
+
+  testWidgets('the detail is the same locked door without loyalty.view', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        permissions: const {'order.view'},
+        home: const CustomerDetailScreen(customerId: 'c-ramesh'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('No customer access'), findsOneWidget);
+    expect(find.text('Silver'), findsNothing);
   });
 
   testWidgets('without payment.take there is no Collect button', (

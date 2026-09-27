@@ -12,6 +12,7 @@ import '../../core/widgets/notice.dart';
 import '../../data/supabase/customers_repository.dart';
 import '../tenant/tenant_providers.dart';
 import 'loyalty_providers.dart';
+import 'no_customer_access.dart';
 
 /// Who comes back, who owes, and what they said on the way out.
 ///
@@ -52,6 +53,9 @@ class _LoyaltyScreenState extends ConsumerState<LoyaltyScreen> {
 
   void _refresh() => ref.invalidate(crmOverviewProvider);
 
+  /// Pull-to-refresh holds its spinner until the new load lands.
+  Future<void> _reload() => ref.refresh(crmOverviewProvider.future);
+
   @override
   Widget build(BuildContext context) {
     final status = ref.watch(identityStatusProvider);
@@ -70,11 +74,12 @@ class _LoyaltyScreenState extends ConsumerState<LoyaltyScreen> {
               ..invalidate(permissionsProvider),
           ),
         ),
-        IdentityStatus.ready when !canView => const _NoAccess(),
+        IdentityStatus.ready when !canView => const NoCustomerAccess(),
         IdentityStatus.ready => _Body(
           search: _search,
           onSearch: _onSearch,
-          onRefresh: _refresh,
+          onRetry: _refresh,
+          onRefresh: _reload,
         ),
         _ => const Center(child: CircularProgressIndicator()),
       },
@@ -86,12 +91,14 @@ class _Body extends ConsumerWidget {
   const _Body({
     required this.search,
     required this.onSearch,
+    required this.onRetry,
     required this.onRefresh,
   });
 
   final TextEditingController search;
   final ValueChanged<String> onSearch;
-  final VoidCallback onRefresh;
+  final VoidCallback onRetry;
+  final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -101,7 +108,7 @@ class _Body extends ConsumerWidget {
     final overview = ref.watch(crmOverviewProvider);
 
     return RefreshIndicator(
-      onRefresh: () async => onRefresh(),
+      onRefresh: onRefresh,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
         children: [
@@ -134,7 +141,7 @@ class _Body extends ConsumerWidget {
                 child: Center(child: CircularProgressIndicator()),
               ),
             ],
-            error: (e, _) => [_Problem(message: '$e', onRetry: onRefresh)],
+            error: (e, _) => [_Problem(message: '$e', onRetry: onRetry)],
             data: (o) => [
               if (!searching) ...[
                 _CreditBanner(overview: o, currency: currency),
@@ -390,39 +397,6 @@ class _Empty extends StatelessWidget {
             style: theme.textTheme.bodySmall,
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _NoAccess extends StatelessWidget {
-  const _NoAccess();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.lock_outline,
-              size: 40,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-            const SizedBox(height: 12),
-            Text('No customer access', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 6),
-            Text(
-              "Your role in this restaurant doesn't include seeing "
-              'customers. An owner or manager can change that under Team.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall,
-            ),
-          ],
-        ),
       ),
     );
   }

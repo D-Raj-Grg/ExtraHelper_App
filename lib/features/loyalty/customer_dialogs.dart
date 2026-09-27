@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/theme/tokens.dart';
 import '../../data/supabase/customers_repository.dart';
+import '../../data/supabase/pos_repository.dart' show PosFailure;
 
 /// What the edit dialog hands back. A field left blank clears it.
 typedef CustomerEdit = ({String? name, String? phone, String? email});
@@ -18,16 +21,17 @@ Future<CustomerEdit?> showEditCustomerDialog(
 
 /// Pick which *other* customer this one folds into. Returns the id of the
 /// customer to keep, or null when dismissed.
+///
+/// [search] runs against the whole book — the duplicate is rarely on the
+/// same page of the list as the guest being merged. Empty query is "the
+/// newest guests"; [customer] itself is never offered.
 Future<String?> showMergeCustomerDialog(
   BuildContext context,
-  CrmCustomer customer,
-  List<CrmCustomer> others,
-) => showDialog<String>(
+  CrmCustomer customer, {
+  required Future<List<CrmCustomer>> Function(String query) search,
+}) => showDialog<String>(
   context: context,
-  builder: (_) => _MergeCustomerDialog(
-    customer: customer,
-    others: others.where((o) => o.id != customer.id).toList(),
-  ),
+  builder: (_) => _MergeCustomerDialog(customer: customer, search: search),
 );
 
 /// Spells out what goes and what stays before a delete. Returns true to go
@@ -91,10 +95,10 @@ class _EditCustomerDialogState extends State<_EditCustomerDialog> {
     super.dispose();
   }
 
+  /// Mirrors `update_customer`: a guest is known by a name or a phone; an
+  /// email alone is not enough to find them at the counter.
   bool get _valid =>
-      _name.text.trim().isNotEmpty ||
-      _phone.text.trim().isNotEmpty ||
-      _email.text.trim().isNotEmpty;
+      _name.text.trim().isNotEmpty || _phone.text.trim().isNotEmpty;
 
   String? _clean(TextEditingController c) {
     final t = c.text.trim();
@@ -140,6 +144,15 @@ class _EditCustomerDialogState extends State<_EditCustomerDialog> {
               ),
               onChanged: (_) => setState(() {}),
             ),
+            if (!_valid) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Name or phone is required.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -164,10 +177,10 @@ class _EditCustomerDialogState extends State<_EditCustomerDialog> {
 }
 
 class _MergeCustomerDialog extends StatefulWidget {
-  const _MergeCustomerDialog({required this.customer, required this.others});
+  const _MergeCustomerDialog({required this.customer, required this.search});
 
   final CrmCustomer customer;
-  final List<CrmCustomer> others;
+  final Future<List<CrmCustomer>> Function(String query) search;
 
   @override
   State<_MergeCustomerDialog> createState() => _MergeCustomerDialogState();
@@ -175,23 +188,66 @@ class _MergeCustomerDialog extends StatefulWidget {
 
 class _MergeCustomerDialogState extends State<_MergeCustomerDialog> {
   final _search = TextEditingController();
+  Timer? _debounce;
+  int _request = 0;
+  List<CrmCustomer> _shown = const [];
+  bool _loading = true;
+  String? _error;
   String? _picked;
 
   @override
+  void initState() {
+    super.initState();
+    _load('');
+  }
+
+  @override
   void dispose() {
+    _debounce?.cancel();
     _search.dispose();
     super.dispose();
+  }
+
+  void _onChanged(String value) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) _load(value.trim());
+    });
+  }
+
+  /// Runs the search; a reply to an older query than the one now typed is
+  /// dropped, so fast typing cannot land stale rows on top of fresh ones.
+  Future<void> _load(String query) async {
+    final ticket = ++_request;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    List<CrmCustomer> rows;
+    String? error;
+    try {
+      rows = await widget.search(query);
+    } on PosFailure catch (e) {
+      rows = const [];
+      error = e.message;
+    } catch (_) {
+      rows = const [];
+      error = "Couldn't search customers.";
+    }
+    if (!mounted || ticket != _request) return;
+    setState(() {
+      _shown = rows.where((o) => o.id != widget.customer.id).toList();
+      if (_picked != null && !_shown.any((o) => o.id == _picked)) {
+        _picked = null;
+      }
+      _error = error;
+      _loading = false;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final q = _search.text.trim().toLowerCase();
-    final shown = q.isEmpty
-        ? widget.others
-        : widget.others
-              .where((o) => o.describe.toLowerCase().contains(q))
-              .toList();
 
     return AlertDialog(
       title: Text('Merge ${widget.customer.label}'),
@@ -217,43 +273,60 @@ class _MergeCustomerDialogState extends State<_MergeCustomerDialog> {
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
-              onChanged: (_) => setState(() {}),
+              onChanged: _onChanged,
             ),
             const SizedBox(height: 8),
             Flexible(
-              child: shown.isEmpty
-                  ? Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Text(
-                        widget.others.isEmpty
-                            ? 'No other customers to merge into.'
-                            : 'Nobody matches.',
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    )
-                  : RadioGroup<String>(
-                      groupValue: _picked,
-                      onChanged: (v) => setState(() => _picked = v),
-                      child: ListView.builder(
-                        shrinkWrap: true,
-                        itemCount: shown.length,
-                        itemBuilder: (_, i) {
-                          final o = shown[i];
-                          return RadioListTile<String>(
-                            value: o.id,
-                            title: Text(o.label),
-                            subtitle: o.describe == o.label
-                                ? null
-                                : Text(
-                                    o.describe,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                            dense: true,
-                          );
-                        },
-                      ),
+              child: switch ((_loading, _error, _shown.isEmpty)) {
+                (true, _, _) => const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Center(
+                    child: SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
                     ),
+                  ),
+                ),
+                (_, final String error, _) => Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    error,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.error,
+                    ),
+                  ),
+                ),
+                (_, _, true) => Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    'Nobody matches.',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+                _ => RadioGroup<String>(
+                  groupValue: _picked,
+                  onChanged: (v) => setState(() => _picked = v),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _shown.length,
+                    itemBuilder: (_, i) {
+                      final o = _shown[i];
+                      return RadioListTile<String>(
+                        value: o.id,
+                        title: Text(o.label),
+                        subtitle: o.describe == o.label
+                            ? null
+                            : Text(
+                                o.describe,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                        dense: true,
+                      );
+                    },
+                  ),
+                ),
+              },
             ),
           ],
         ),

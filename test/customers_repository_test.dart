@@ -40,6 +40,25 @@ void main() {
       expect(missingKey.tier, 'bronze');
     });
 
+    test('loyalty_accounts as a single object reads the same', () {
+      // PostgREST embeds a one-to-one relation as an object, not a list.
+      final c = CrmCustomer.fromRow({
+        'id': 'c5',
+        'name': 'Rita',
+        'loyalty_accounts': {'points_balance': '75', 'tier': 'silver'},
+      });
+      expect(c.points, 75);
+      expect(c.tier, 'silver');
+
+      final nullEmbed = CrmCustomer.fromRow({
+        'id': 'c6',
+        'name': 'Nil',
+        'loyalty_accounts': null,
+      });
+      expect(nullEmbed.points, 0);
+      expect(nullEmbed.tier, 'bronze');
+    });
+
     test('blank strings become null', () {
       final c = CrmCustomer.fromRow({
         'id': 'c4',
@@ -168,6 +187,19 @@ void main() {
       expect(f.rating, isNull);
       expect(f.comment, isNull);
       expect(f.customerName, isNull);
+    });
+  });
+
+  group('CrmOverview.countDebtors', () {
+    test('a credit row with nothing outstanding is not a debtor', () {
+      final rows = <Map<String, dynamic>>[
+        {'customer_id': 'a', 'outstanding_cents': 1500, 'unpaid_bills': 1},
+        {'customer_id': 'b', 'outstanding_cents': 0, 'unpaid_bills': 1},
+        {'customer_id': 'c', 'outstanding_cents': '250', 'unpaid_bills': 2},
+        {'customer_id': 'd', 'outstanding_cents': null, 'unpaid_bills': 0},
+      ];
+      expect(CrmOverview.countDebtors(rows), 2);
+      expect(CrmOverview.countDebtors(const []), 0);
     });
   });
 

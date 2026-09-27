@@ -14,6 +14,7 @@ import '../../data/supabase/pos_repository.dart' show PosFailure;
 import '../tenant/tenant_providers.dart';
 import 'customer_dialogs.dart';
 import 'loyalty_providers.dart';
+import 'no_customer_access.dart';
 
 /// One regular: what they owe, what they have earned, what they ordered.
 ///
@@ -53,10 +54,19 @@ class _CustomerDetailScreenState extends ConsumerState<CustomerDetailScreen> {
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
+  /// After a write: this guest, their bills, and the list behind us all
+  /// changed.
   void _refresh() {
-    ref.invalidate(crmOverviewProvider);
+    ref.invalidate(customerProvider(widget.customerId));
     ref.invalidate(customerHistoryProvider(widget.customerId));
+    ref.invalidate(crmOverviewProvider);
   }
+
+  /// Pull-to-refresh holds its spinner until both loads land.
+  Future<void> _reload() => Future.wait([
+    ref.refresh(customerProvider(widget.customerId).future),
+    ref.refresh(customerHistoryProvider(widget.customerId).future),
+  ]);
 
   /// Runs one repo call; returns true when it went through.
   Future<bool> _run(
@@ -113,8 +123,14 @@ class _CustomerDetailScreenState extends ConsumerState<CustomerDetailScreen> {
     );
   }
 
-  Future<void> _merge(CrmCustomer c, List<CrmCustomer> all) async {
-    final keepId = await showMergeCustomerDialog(context, c, all);
+  Future<void> _merge(CrmCustomer c) async {
+    final repo = _repo;
+    if (repo == null) return;
+    final keepId = await showMergeCustomerDialog(
+      context,
+      c,
+      search: (q) async => (await repo.overview(query: q)).customers,
+    );
     if (keepId == null) return;
     final ok = await _run(
       (repo) => repo.merge(keepId: keepId, dropId: c.id),
@@ -132,31 +148,29 @@ class _CustomerDetailScreenState extends ConsumerState<CustomerDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final status = ref.watch(identityStatusProvider);
+    final canView = ref.watch(hasPermissionProvider('loyalty.view'));
     final currency = ref.watch(activeTenantProvider)?.currency ?? 'USD';
     final canEdit = ref.watch(hasPermissionProvider('loyalty.edit'));
     final canCollect = ref.watch(hasPermissionProvider('payment.take'));
-    final overview = ref.watch(crmOverviewProvider);
-    final all = overview.valueOrNull?.customers ?? const <CrmCustomer>[];
-    CrmCustomer? customer;
-    for (final c in all) {
-      if (c.id == widget.customerId) {
-        customer = c;
-        break;
-      }
-    }
+    final loaded = ref.watch(customerProvider(widget.customerId));
+    final customer = loaded.valueOrNull;
 
     return AppScaffold(
       title: customer?.label ?? 'Customer',
       showDrawer: false,
       actions: [
-        if (canEdit && customer != null)
+        if (status == IdentityStatus.ready &&
+            canView &&
+            canEdit &&
+            customer != null)
           PopupMenuButton<String>(
             tooltip: 'More',
             enabled: !_busy,
             onSelected: (v) => switch (v) {
-              'edit' => _edit(customer!),
-              'merge' => _merge(customer!, all),
-              _ => _delete(customer!),
+              'edit' => _edit(customer),
+              'merge' => _merge(customer),
+              _ => _delete(customer),
             },
             itemBuilder: (_) => const [
               PopupMenuItem(
@@ -183,38 +197,54 @@ class _CustomerDetailScreenState extends ConsumerState<CustomerDetailScreen> {
             ],
           ),
       ],
-      body: RefreshIndicator(
-        onRefresh: () async => _refresh(),
-        child: overview.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              RetryNotice(
-                message: "Couldn't load this customer.",
-                detail: '$e',
-                icon: Icons.cloud_off_outlined,
-                onRetry: _refresh,
-              ),
-            ],
+      // The same door as the list: a deep link to a customer must not
+      // show more than the list would.
+      body: switch (status) {
+        IdentityStatus.unavailable => Padding(
+          padding: const EdgeInsets.all(16),
+          child: RetryNotice(
+            message: "Couldn't check your access.",
+            detail: '${ref.watch(identityErrorProvider)}',
+            onRetry: () => ref
+              ..invalidate(membershipsProvider)
+              ..invalidate(permissionsProvider),
           ),
-          data: (_) => customer == null
-              ? const _NotFound()
-              : _Detail(
-                  customer: customer,
-                  currency: currency,
-                  canEdit: canEdit,
-                  canCollect: canCollect,
-                  busy: _busy,
-                  points: _points,
-                  onEarn: () => _adjust('earn'),
-                  onRedeem: () => _adjust('burn'),
-                  history: ref.watch(customerHistoryProvider(customer.id)),
-                  onRetryHistory: () =>
-                      ref.invalidate(customerHistoryProvider(customer!.id)),
-                ),
         ),
-      ),
+        IdentityStatus.ready when !canView => const NoCustomerAccess(),
+        IdentityStatus.ready => RefreshIndicator(
+          onRefresh: _reload,
+          child: loaded.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                RetryNotice(
+                  message: "Couldn't load this customer.",
+                  detail: '$e',
+                  icon: Icons.cloud_off_outlined,
+                  onRetry: _refresh,
+                ),
+              ],
+            ),
+            data: (c) => c == null
+                ? const _NotFound()
+                : _Detail(
+                    customer: c,
+                    currency: currency,
+                    canEdit: canEdit,
+                    canCollect: canCollect,
+                    busy: _busy,
+                    points: _points,
+                    onEarn: () => _adjust('earn'),
+                    onRedeem: () => _adjust('burn'),
+                    history: ref.watch(customerHistoryProvider(c.id)),
+                    onRetryHistory: () =>
+                        ref.invalidate(customerHistoryProvider(c.id)),
+                  ),
+          ),
+        ),
+        _ => const Center(child: CircularProgressIndicator()),
+      },
     );
   }
 }
@@ -280,7 +310,12 @@ class _Detail extends StatelessWidget {
             ),
           ],
           data: (rows) {
-            final unpaid = rows.where((r) => r.unpaid).toList();
+            // Buckets follow the bill's *status*, not the amount: an open
+            // bill with nothing left to collect is still open, and belongs
+            // here until someone closes it at the till. Void rows are gone.
+            final unpaid = rows
+                .where((r) => r.status == 'open' || r.status == 'partial')
+                .toList();
             final paid = rows.where((r) => r.status == 'paid').toList();
             return [
               if (unpaid.isEmpty)
@@ -568,13 +603,19 @@ class _BillCard extends StatelessWidget {
                       children: [
                         TextSpan(text: money(r.totalCents, currency)),
                         const TextSpan(text: ' · '),
-                        TextSpan(
-                          text: 'owes ${money(r.outstandingCents, currency)}',
-                          style: TextStyle(
-                            color: theme.colorScheme.error,
-                            fontWeight: FontWeight.w700,
+                        if (r.unpaid)
+                          TextSpan(
+                            text: 'owes ${money(r.outstandingCents, currency)}',
+                            style: TextStyle(
+                              color: theme.colorScheme.error,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          )
+                        else
+                          TextSpan(
+                            text: 'nothing left to collect',
+                            style: TextStyle(color: muted),
                           ),
-                        ),
                         if (r.paidCents > 0)
                           TextSpan(
                             text: ' (paid ${money(r.paidCents, currency)})',

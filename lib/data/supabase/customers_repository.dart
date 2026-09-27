@@ -58,12 +58,16 @@ class CrmCustomer {
 
   /// From `customers` selected as
   /// `id, name, phone, email, loyalty_accounts(points_balance, tier)`.
-  /// `loyalty_accounts` embeds as a list; a guest who never earned a point has
-  /// none, which is zero points on bronze, not a null.
+  /// `loyalty_accounts` embeds as a list, or as one object when PostgREST
+  /// knows the relation is one-to-one, or not at all; a guest who never
+  /// earned a point has none, which is zero points on bronze, not a null.
   static CrmCustomer fromRow(Map<String, dynamic> row) {
-    final loyalty = (row['loyalty_accounts'] as List<dynamic>? ?? const [])
-        .whereType<Map<String, dynamic>>()
-        .firstOrNull;
+    final raw = row['loyalty_accounts'];
+    final loyalty = switch (raw) {
+      Map<String, dynamic> m => m,
+      List<dynamic> l => l.whereType<Map<String, dynamic>>().firstOrNull,
+      _ => null,
+    };
     return CrmCustomer(
       id: row['id'] as String,
       name: _blankToNull(row['name'] as String?),
@@ -169,10 +173,21 @@ class CrmOverview {
   /// Summed over every credit row the tenant has, not just the ones listed.
   final int totalOwedCents;
 
-  /// How many guests owe anything at all.
+  /// How many guests owe anything at all — credit rows with nothing
+  /// outstanding are not debtors, see [countDebtors].
   final int debtors;
 
   final List<CustomerFeedback> feedback;
+
+  /// The guests in [creditRows] (as `customer_credit_summary` returns them)
+  /// who still owe something. The summary may carry a row for a guest whose
+  /// tab was settled but whose bill is still `partial`/`open` — zero owed is
+  /// not a debt.
+  static int countDebtors(List<Map<String, dynamic>> creditRows) =>
+      creditRows.where(_owing).length;
+
+  static bool _owing(Map<String, dynamic> r) =>
+      _int(r['outstanding_cents']) > 0;
 
   /// Stable: two debtors owing the same keep their incoming order, and the
   /// non-debtors keep theirs.
@@ -219,9 +234,9 @@ class CustomersRepository {
     final q = query.trim();
     final searching = q.isNotEmpty;
 
-    List<Map<String, dynamic>> customerRows;
-    List<Map<String, dynamic>> creditRows;
-    List<Map<String, dynamic>> feedbackRows;
+    // Parsing stays inside the try too: a row shaped differently from what
+    // `fromRow` expects is a transient "couldn't load", not a raw TypeError
+    // on the screen.
     try {
       // The `or` filter is parsed as text, so anything that is punctuation
       // *to that parser* is stripped before it gets there — commas and parens
@@ -267,13 +282,16 @@ class CustomersRepository {
               .order('created_at', ascending: false)
               .limit(20),
       ]);
-      customerRows = _rows(results[0]);
-      creditRows = _rows(results[1]);
-      feedbackRows = _rows(results[2]);
+      var customerRows = _rows(results[0]);
+      final creditRows = _rows(results[1]);
+      final feedbackRows = _rows(results[2]);
 
       if (!searching) {
+        // Only a guest who actually owes earns a place past the newest-50
+        // window; a settled row in the summary is not a debt to show.
         final listed = customerRows.map((r) => r['id'] as String).toSet();
         final missing = creditRows
+            .where(CrmOverview._owing)
             .map((r) => r['customer_id'] as String?)
             .nonNulls
             .where((id) => !listed.contains(id))
@@ -288,36 +306,64 @@ class CustomersRepository {
           customerRows = [...customerRows, ..._rows(extra)];
         }
       }
+
+      final credit = _creditById(creditRows);
+      final guests = customerRows
+          .map((r) => _withCredit(CrmCustomer.fromRow(r), credit[r['id']]))
+          .toList();
+
+      return CrmOverview(
+        customers: CrmOverview.debtorsFirst(guests),
+        totalOwedCents: creditRows.fold(
+          0,
+          (n, r) => n + _int(r['outstanding_cents']),
+        ),
+        debtors: CrmOverview.countDebtors(creditRows),
+        feedback: feedbackRows.map(CustomerFeedback.fromRow).toList(),
+      );
     } on PostgrestException catch (e) {
       throw PosFailure(_friendly(e.message));
     } catch (_) {
       throw const PosTransientFailure("Couldn't load customers.");
     }
-
-    final credit = <String, Map<String, dynamic>>{
-      for (final r in creditRows)
-        if (r['customer_id'] is String) r['customer_id'] as String: r,
-    };
-    final customers = customerRows.map((r) {
-      final c = CrmCustomer.fromRow(r);
-      final mine = credit[c.id];
-      if (mine == null) return c;
-      return c.withCredit(
-        owesCents: _int(mine['outstanding_cents']),
-        unpaidBills: _int(mine['unpaid_bills']),
-      );
-    }).toList();
-
-    return CrmOverview(
-      customers: CrmOverview.debtorsFirst(customers),
-      totalOwedCents: creditRows.fold(
-        0,
-        (n, r) => n + _int(r['outstanding_cents']),
-      ),
-      debtors: creditRows.length,
-      feedback: feedbackRows.map(CustomerFeedback.fromRow).toList(),
-    );
   }
+
+  /// One guest with their credit, or null when no such row is in this
+  /// tenant. The detail screen reads this rather than fishing the guest out
+  /// of the (possibly search-filtered) overview list.
+  Future<CrmCustomer?> customer(String id) => _read(() async {
+    final results = await Future.wait<dynamic>([
+      _client
+          .from('customers')
+          .select(_select)
+          .eq('tenant_id', _tenantId)
+          .eq('id', id)
+          .maybeSingle(),
+      _client.rpc<dynamic>(
+        'customer_credit_summary',
+        params: {'_tenant': _tenantId},
+      ),
+    ]);
+    final row = results[0];
+    if (row is! Map<String, dynamic>) return null;
+    final credit = _creditById(_rows(results[1]));
+    return _withCredit(CrmCustomer.fromRow(row), credit[id]);
+  });
+
+  static Map<String, Map<String, dynamic>> _creditById(
+    List<Map<String, dynamic>> creditRows,
+  ) => {
+    for (final r in creditRows)
+      if (r['customer_id'] is String) r['customer_id'] as String: r,
+  };
+
+  static CrmCustomer _withCredit(CrmCustomer c, Map<String, dynamic>? mine) =>
+      mine == null
+      ? c
+      : c.withCredit(
+          owesCents: _int(mine['outstanding_cents']),
+          unpaidBills: _int(mine['unpaid_bills']),
+        );
 
   /// Every non-void bill this guest was on, newest first.
   Future<List<CustomerBillRow>> history(String customerId, {int limit = 50}) =>
@@ -416,7 +462,9 @@ class CustomersRepository {
     final m = message.toLowerCase();
     if (m.contains('permission denied') ||
         m.contains('not authorized') ||
-        m.contains('not permitted')) {
+        m.contains('not permitted') ||
+        m.contains('require a manager') ||
+        m.contains('requires a manager')) {
       return "You don't have permission to do that.";
     }
     if ((m.contains('phone') && m.contains('already')) ||
