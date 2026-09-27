@@ -12,6 +12,9 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 ## [Unreleased]
 
+### Changed
+- **Log an expense: category is a dropdown, and it starts on "Other".** The row of category chips is now a single dropdown, so a long list no longer pushes the note and Paid-from fields off the screen. It opens on **Other** (the first category if the restaurant has no "Other"), so a quick back-door payment needs no category tap at all. Editing an expense keeps its own category, archived or not. There is also a **✕** in the top-right corner to close the sheet without saving.
+
 ### Added
 - **Checkout shows what the guest already owes.** When the attached guest has unpaid credit on *other* bills, the Guest card on the checkout shows a red **Owes Rs X · N unpaid bills** line under their name, so the cashier sees it before tapping **Unpaid (credit)** again. The bill being settled isn't counted against itself. A warning only — leaving another bill unpaid still works. Same numbers as the web's Loyalty & CRM page.
 
@@ -22,6 +25,7 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 - `BillRepository.snapshot` pass two calls `customer_credit_summary(_tenant)` (shared with the web, `checkout.view`-gated, `security invoker`) only when a guest is attached and the bill is still settleable. Failure is caught on that future alone (it shares a `Future.wait` with the modifiers), so a missing warning never costs the add-on names; the line is simply absent.
 - `BillCustomer` gains `owesCents` / `unpaidBills` / `owes`; `BillCustomer.fromCreditRows` subtracts this bill's own due amount and count from the roll-up, mirroring `app/(app)/bill/[billId]/page.tsx` on the web. Unit tests in `test/bill_models_test.dart`; widget tests for the card in `test/checkout_screen_test.dart`.
+- `expense_sheet.dart`: `DropdownButtonFormField` replaces the `AppChoiceChip` wrap for categories; `_defaultCategory` matches `other`/`others` case-insensitively and falls back to the first category. Header is a `Row` with an `IconButton(Icons.close)`. Widget tests in `test/expense_sheet_test.dart`.
 - `_CustomerCard` in `checkout_screen.dart` renders the line in `colorScheme.error`. Not built or uploaded; ships with the next TestFlight build on request.
 
 </details>

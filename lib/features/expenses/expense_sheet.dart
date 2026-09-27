@@ -82,10 +82,19 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
       text: e == null ? '' : _plain(e.amountCents),
     );
     _note = TextEditingController(text: e?.note ?? '');
-    _category =
-        e?.categoryId ??
-        (widget.categories.isEmpty ? null : widget.categories.first.id);
+    _category = e?.categoryId ?? _defaultCategory(widget.categories);
     _paidFrom = e?.paidFrom ?? PaidFrom.cash;
+  }
+
+  /// "Other" when the tenant has one — most back-door expenses are exactly
+  /// that, and a wrong specific category is worse than a vague right one.
+  /// Falls back to the first category so the form is never opened unfilled.
+  static String? _defaultCategory(List<ExpenseCategory> categories) {
+    for (final c in categories) {
+      final n = c.name.trim().toLowerCase();
+      if (n == 'other' || n == 'others') return c.id;
+    }
+    return categories.isEmpty ? null : categories.first.id;
   }
 
   @override
@@ -161,13 +170,24 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              editing == null ? 'Log an expense' : 'Edit expense',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    editing == null ? 'Log an expense' : 'Edit expense',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Close',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
             TextField(
               controller: _amount,
               autofocus: editing == null,
@@ -188,20 +208,26 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
               ),
             ),
             const SizedBox(height: 16),
-            Text('Category', style: theme.textTheme.labelLarge),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
+            DropdownButtonFormField<String>(
+              initialValue: options.any((c) => c.id == _category)
+                  ? _category
+                  : null,
+              decoration: const InputDecoration(
+                labelText: 'Category',
+                border: OutlineInputBorder(),
+              ),
+              hint: const Text('Pick a category'),
+              items: [
                 for (final c in options)
-                  AppChoiceChip(
-                    label: c.name,
-                    selected: _category == c.id,
-                    showCheck: true,
-                    onSelect: () => setState(() => _category = c.id),
+                  DropdownMenuItem(
+                    value: c.id,
+                    child: Text(
+                      c.archived ? '${c.name} (archived)' : c.name,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
               ],
+              onChanged: (v) => setState(() => _category = v),
             ),
             const SizedBox(height: 16),
             TextField(
