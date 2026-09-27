@@ -193,13 +193,18 @@ class BillRepository {
               .order('created_at', ascending: false),
         // What the guest already owes elsewhere. Only asked while the bill can
         // still be left unpaid: on a paid bill there is no credit decision.
+        // Failure is caught *here*, not by the block below: this call shares a
+        // `Future.wait` with the modifiers, and a missing warning must not
+        // take the add-on names down with it.
         if (customer == null || !bill.isSettleable)
           Future<List<Map<String, dynamic>>>.value(const [])
         else
-          _client.rpc<dynamic>(
-            'customer_credit_summary',
-            params: {'_tenant': _tenantId},
-          ),
+          _client
+              .rpc<dynamic>(
+                'customer_credit_summary',
+                params: {'_tenant': _tenantId},
+              )
+              .then<dynamic>((r) => r, onError: (_) => const <dynamic>[]),
       ]);
       modifierRows = _rows(results[0]);
       mergeableRows = _rows(results[1]);

@@ -20,8 +20,8 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 <details><summary>Technical</summary>
 
-- `BillRepository.snapshot` pass two calls `customer_credit_summary(_tenant)` (shared with the web, `checkout.view`-gated, `security invoker`) only when a guest is attached and the bill is still settleable. Failure is swallowed like the other pass-two trimmings: the line is simply absent.
-- `BillCustomer` gains `owesCents` / `unpaidBills` / `owes`; `BillCustomer.fromCreditRows` subtracts this bill's own due amount and count from the roll-up, mirroring `app/(app)/bill/[billId]/page.tsx` on the web. Unit tests in `test/bill_models_test.dart`.
+- `BillRepository.snapshot` pass two calls `customer_credit_summary(_tenant)` (shared with the web, `checkout.view`-gated, `security invoker`) only when a guest is attached and the bill is still settleable. Failure is caught on that future alone (it shares a `Future.wait` with the modifiers), so a missing warning never costs the add-on names; the line is simply absent.
+- `BillCustomer` gains `owesCents` / `unpaidBills` / `owes`; `BillCustomer.fromCreditRows` subtracts this bill's own due amount and count from the roll-up, mirroring `app/(app)/bill/[billId]/page.tsx` on the web. Unit tests in `test/bill_models_test.dart`; widget tests for the card in `test/checkout_screen_test.dart`.
 - `_CustomerCard` in `checkout_screen.dart` renders the line in `colorScheme.error`. Not built or uploaded; ships with the next TestFlight build on request.
 
 </details>
