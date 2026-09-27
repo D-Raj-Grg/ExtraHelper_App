@@ -12,7 +12,14 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 ## [Unreleased]
 
-_Nothing yet._
+### Known gaps
+- **Customer credit isn't visible on the phone yet.** The web app (see `../extrahelper/CHANGELOG.md`) now shows what a guest owes on Loyalty & CRM and warns at checkout; the app still only enforces "attach a guest before leaving a bill unpaid". Follow-up: an **Owes …** line in the checkout guest block (`checkout_screen.dart` / `checkout_customer_sheet.dart`) using the shared `customer_credit_summary` RPC.
+
+<details><summary>Technical</summary>
+
+- No app code changed. Server-side RPCs `customer_credit_summary(_tenant)` and `customer_bill_history(_tenant, _customer, _limit)` are live and callable from `bill_repository.dart` when the screen is built.
+
+</details>
 
 ---
 
