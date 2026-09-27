@@ -12,12 +12,17 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 ## [Unreleased]
 
+### Added
+- **Checkout shows what the guest already owes.** When the attached guest has unpaid credit on *other* bills, the Guest card on the checkout shows a red **Owes Rs X · N unpaid bills** line under their name, so the cashier sees it before tapping **Unpaid (credit)** again. The bill being settled isn't counted against itself. A warning only — leaving another bill unpaid still works. Same numbers as the web's Loyalty & CRM page.
+
 ### Known gaps
-- **Customer credit isn't visible on the phone yet.** The web app (see `../extrahelper/CHANGELOG.md`) now shows what a guest owes on Loyalty & CRM and warns at checkout; the app still only enforces "attach a guest before leaving a bill unpaid". Follow-up: an **Owes …** line in the checkout guest block (`checkout_screen.dart` / `checkout_customer_sheet.dart`) using the shared `customer_credit_summary` RPC.
+- Still no customer list or credit history on the phone; collect a debt by opening the unpaid bill from the Bills tab.
 
 <details><summary>Technical</summary>
 
-- No app code changed. Server-side RPCs `customer_credit_summary(_tenant)` and `customer_bill_history(_tenant, _customer, _limit)` are live and callable from `bill_repository.dart` when the screen is built.
+- `BillRepository.snapshot` pass two calls `customer_credit_summary(_tenant)` (shared with the web, `checkout.view`-gated, `security invoker`) only when a guest is attached and the bill is still settleable. Failure is swallowed like the other pass-two trimmings: the line is simply absent.
+- `BillCustomer` gains `owesCents` / `unpaidBills` / `owes`; `BillCustomer.fromCreditRows` subtracts this bill's own due amount and count from the roll-up, mirroring `app/(app)/bill/[billId]/page.tsx` on the web. Unit tests in `test/bill_models_test.dart`.
+- `_CustomerCard` in `checkout_screen.dart` renders the line in `colorScheme.error`. Not built or uploaded; ships with the next TestFlight build on request.
 
 </details>
 

@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// table, a synthetic bill line has no order item behind it, and `numeric`
 /// discount values can arrive as strings.
 void main() {
+  _creditTests();
   group('Bill.fromRow', () {
     test('a dine-in bill', () {
       final row =
@@ -272,5 +273,49 @@ void main() {
         expect(s.canAddItems, isFalse);
       },
     );
+  });
+}
+
+void _creditTests() {
+  group('BillCustomer.fromCreditRows', () {
+    const guest = BillCustomer(id: 'c1', name: 'Sona', points: 10);
+
+    test('subtracts this bill from the guest\'s roll-up', () {
+      final c = BillCustomer.fromCreditRows(guest, [
+        {'customer_id': 'c1', 'outstanding_cents': 289500, 'unpaid_bills': 2},
+      ], thisBillDueCents: 48000);
+      expect(c.owesCents, 241500);
+      expect(c.unpaidBills, 1);
+      expect(c.owes, isTrue);
+    });
+
+    test('a paid bill takes nothing off', () {
+      final c = BillCustomer.fromCreditRows(guest, [
+        {
+          'customer_id': 'c1',
+          'outstanding_cents': '250000',
+          'unpaid_bills': '1',
+        },
+      ], thisBillDueCents: 0);
+      expect(c.owesCents, 250000);
+      expect(c.unpaidBills, 1);
+    });
+
+    test('only this bill outstanding means nothing owed elsewhere', () {
+      final c = BillCustomer.fromCreditRows(guest, [
+        {'customer_id': 'c1', 'outstanding_cents': 48000, 'unpaid_bills': 1},
+      ], thisBillDueCents: 48000);
+      expect(c.owesCents, 0);
+      expect(c.unpaidBills, 0);
+      expect(c.owes, isFalse);
+    });
+
+    test('someone else\'s row leaves the guest untouched', () {
+      final c = BillCustomer.fromCreditRows(guest, [
+        {'customer_id': 'c2', 'outstanding_cents': 9900, 'unpaid_bills': 1},
+      ], thisBillDueCents: 0);
+      expect(c.owesCents, 0);
+      expect(identical(c, guest), isTrue);
+    });
   });
 }
