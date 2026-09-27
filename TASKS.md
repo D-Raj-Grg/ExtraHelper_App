@@ -1830,6 +1830,17 @@ Backend + web: see `../extrahelper/TASKS.md` → "Daily expenses + night cash co
 - [x] Review fixes: a photo that fails after a new dish is saved no longer strands it; the delete copy names what cascades (sizes, add-ons, windows, recipe); the kitchen can use the stock switch on a read-only dish; saving no longer collapses multi-station dishes.
 - [ ] **Enforce availability windows and combos when ordering**, server-side in `place_staff_order` / QR / storefront menus plus both POS clients. Today (web and phone) they are data only.
 
+## Customers / Loyalty & CRM on the phone (2026-09-27)
+
+- [x] Customer list with search, credit roll-up, debtors first; detail page with points earn/redeem,
+      unpaid bills → Collect (checkout), past orders; edit / merge / delete on `loyalty.edit`.
+      All rules server-side via the RPCs the web uses. Built with two parallel agents (data layer,
+      screens) against a fixed API contract; wired routes and drawer by hand.
+- [ ] Not gated on the tenant's loyalty *feature* flag (web is). Decide whether the phone should
+      read `tenant_features` or whether the credit book should be plan-independent on both.
+- [ ] Device pass outstanding: not run on a phone. `flutter analyze` clean, 669 tests.
+- [ ] Owes line at checkout + expense sheet dropdown/close also unshipped. Next TestFlight is 1.0.16+.
+
 ## Open Questions
 
 - [x] Confirm bundle id `com.extrahelper.app` before the first signed build. Confirmed and shipped in

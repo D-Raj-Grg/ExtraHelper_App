@@ -14,6 +14,8 @@ import '../features/expenses/expense_categories_screen.dart';
 import '../features/expenses/expenses_screen.dart';
 import '../features/inventory/inventory_screen.dart';
 import '../features/kds/kds_screen.dart';
+import '../features/loyalty/customer_detail_screen.dart';
+import '../features/loyalty/loyalty_screen.dart';
 import '../features/menu/menu_screen.dart';
 import '../features/notifications/notifications_screen.dart';
 import '../features/pos/bill_view_screen.dart';
@@ -71,6 +73,12 @@ abstract final class Routes {
   /// is its own top-level page, and on a phone the job — approve the person
   /// standing in front of you — is not a settings errand.
   static const team = '/team';
+
+  /// The customer book: who owes what, points, and the web's edit / merge /
+  /// delete. A destination, like Loyalty & CRM in the web sidebar.
+  static const customers = '/customers';
+  static const customer = '/customers/:id';
+  static String customerPath(String id) => '/customers/$id';
   static const managerLog = '/manager-log';
   static const printing = '/printing';
 
@@ -198,6 +206,15 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: Routes.team,
         builder: (context, state) => const TeamScreen(),
+      ),
+      GoRoute(
+        path: Routes.customers,
+        builder: (context, state) => const LoyaltyScreen(),
+      ),
+      GoRoute(
+        path: Routes.customer,
+        builder: (context, state) =>
+            CustomerDetailScreen(customerId: state.pathParameters['id']!),
       ),
       GoRoute(
         path: Routes.managerLog,

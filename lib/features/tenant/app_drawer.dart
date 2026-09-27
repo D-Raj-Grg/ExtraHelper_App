@@ -32,6 +32,10 @@ class AppDrawer extends ConsumerWidget {
     // those two, so it is the honest key to hang the manager log on.
     final canReview = ref.watch(hasPermissionProvider('order.void'));
     final canSeeMenu = ref.watch(hasPermissionProvider('menu.view'));
+    // `loyalty.view` is Owner/Manager by default; `loyalty.edit` gates the
+    // levers inside. The credit roll-up on the screen is the reason a manager
+    // opens it at all.
+    final canSeeCustomers = ref.watch(hasPermissionProvider('loyalty.view'));
     // Owner and manager by default. False while permissions load, which is the
     // right way round: a door that appears late is better than one that
     // vanishes under a thumb already moving towards it.
@@ -115,6 +119,14 @@ class AppDrawer extends ConsumerWidget {
                 selectedIcon: Icons.restaurant_menu,
                 label: 'Menu',
                 route: Routes.menu,
+                location: location,
+              ),
+            if (canSeeCustomers)
+              _DrawerItem(
+                icon: Icons.people_outline,
+                selectedIcon: Icons.people,
+                label: 'Customers',
+                route: Routes.customers,
                 location: location,
               ),
             if (canReview)
