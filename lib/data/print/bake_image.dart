@@ -94,18 +94,15 @@ BakeResult bakeAsset(Uint8List bytes, String kind) {
     total += bitmap.data.length;
   }
 
-  return BakeResult(
-    variants: variants,
-    bytes: total,
-    unscannable: unscannable,
-  );
+  return BakeResult(variants: variants, bytes: total, unscannable: unscannable);
 }
 
 /// A greyscale canvas: one byte per dot, row-major, 0 = black.
 class _Grey {
   _Grey(this.w, this.h, this.pixels);
 
-  _Grey.white(this.w, this.h) : pixels = Uint8List(w * h)..fillRange(0, w * h, 255);
+  _Grey.white(this.w, this.h)
+    : pixels = Uint8List(w * h)..fillRange(0, w * h, 255);
 
   final int w;
   final int h;
@@ -214,8 +211,15 @@ _Grey _composeQr(_Grey source, int dots) {
   // Nearest-neighbour, and square regardless of what was uploaded: a smoothed
   // QR is a grey mush that the threshold below rounds into ragged modules, and
   // a stretched one does not scan at all.
-  _draw(canvas, source, ((dots - side) / 2).round(), quiet, side, side,
-      smooth: false);
+  _draw(
+    canvas,
+    source,
+    ((dots - side) / 2).round(),
+    quiet,
+    side,
+    side,
+    smooth: false,
+  );
   _threshold(canvas, _otsu(canvas));
   return canvas;
 }

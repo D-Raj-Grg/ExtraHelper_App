@@ -73,9 +73,7 @@ class PrintingScreen extends ConsumerWidget {
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.print_outlined),
               title: const Text('Printers'),
-              subtitle: const Text(
-                'See the registry and send a test page.',
-              ),
+              subtitle: const Text('See the registry and send a test page.'),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => context.push(Routes.settingsPrinters),
             ),

@@ -29,8 +29,10 @@ class _BranchesScreenState extends ConsumerState<BranchesScreen> {
     return ref.read(branchesRepositoryProvider(tenant.tenantId));
   }
 
-  Future<void> _run(Future<void> Function(BranchesRepository repo) work,
-      String success) async {
+  Future<void> _run(
+    Future<void> Function(BranchesRepository repo) work,
+    String success,
+  ) async {
     final repo = _repo;
     if (repo == null || _busy) return;
     setState(() => _busy = true);
@@ -63,11 +65,8 @@ class _BranchesScreenState extends ConsumerState<BranchesScreen> {
     final draft = await showBranchSheet(context, editing: branch);
     if (draft == null) return;
     await _run(
-      (repo) => repo.update(
-        id: branch.id,
-        name: draft.name,
-        address: draft.address,
-      ),
+      (repo) =>
+          repo.update(id: branch.id, name: draft.name, address: draft.address),
       'Branch saved.',
     );
   }

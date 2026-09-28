@@ -221,7 +221,9 @@ void main() {
       expect(find.text('1 of ${resetDomains.length} selected'), findsOneWidget);
       expect(
         tester
-            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Reset it!'))
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Reset it!'),
+            )
             .onPressed,
         isNotNull,
       );
@@ -273,7 +275,9 @@ void main() {
       expect(find.textContaining('the restaurant name'), findsOneWidget);
       expect(
         tester
-            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Reset now'))
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Reset now'),
+            )
             .onPressed,
         isNull,
       );

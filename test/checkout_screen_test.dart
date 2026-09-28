@@ -232,6 +232,9 @@ void main() {
     // The guest will ask which code took the money off.
     expect(find.text('Discount · SAVE10-7KQ2'), findsOneWidget);
 
+    // The discount line pushes the button below the fold on the test screen.
+    await tester.ensureVisible(find.text('Discounts, charges, tip'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Discounts, charges, tip'));
     await tester.pumpAndSettle();
 

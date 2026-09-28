@@ -12,6 +12,22 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 ## [Unreleased]
 
+### Added
+- **Coupons on the phone.** A new **Coupons** entry in the drawer (Owner/Manager by default, via *See coupons*) brings the web's Insights → Coupons over. Every campaign code with its badge — **Active**, **Paused**, **Scheduled**, **Expired** or **Used up** — what it takes off, when it runs, how many times it was used and how much it has given away. Tap one for **Show QR**: the flyer square on screen for a guest to scan, **Copy link**, or **Share** it as a picture to whoever prints the flyers. With *Manage coupons* the same menu offers **Pause / Resume**, **Edit** and **Delete**, and **New coupon** at the bottom: code (blank makes one, `SAVE10-7KQ2`), campaign name, percent or amount off, valid from / through, usage limit, minimum order, dine in / takeaway / delivery, once per customer. A coupon already on a bill cannot be deleted — the phone says so and offers Pause instead, same as the web. Printing the flyer itself stays on the web.
+
+### Fixed
+- **The coupon test that was never run.** The checkout's "a coupon on the bill is named" test tapped a button that sat below the fold on the test screen and silently missed; it now scrolls first. The checkout coupon box and Scan button themselves were already right.
+
+<details><summary>Technical — coupons</summary>
+
+- No new SQL. `CouponsRepository` (`lib/data/supabase/coupons_repository.dart`) calls the three RPCs the web already uses: `list_coupons(_tenant)` under `coupons.view`; `upsert_coupon(...)` and `delete_coupon(_id)` under `coupons.manage`. Pause/resume is `upsert_coupon` with every field re-sent and only `_is_active` flipped (`Coupon.toDraft().copyWith(isActive:)`) — there is no pause RPC. `Coupon.fromRow` coerces `numeric`/`bigint` strings; `CouponDraft.validate()` mirrors the web's `saveCoupon` checks (code `^[A-Z0-9-]{4,24}$` or blank, value > 0, percent ≤ 100, limit ≥ 1 or null, end after start); `effectiveOrderTypes` sends null for none-or-all.
+- `lib/features/coupons/`: `coupon_status.dart` ports `lib/coupon-constants.ts` (`couponStatus`, `couponValueLabel`, `couponSummary`, `couponUrl`, `couponQrPayload`); `coupons_providers.dart` (`couponsProvider`, autoDispose, keyed on tenant id); `coupons_screen.dart` (list + action sheet + delete dialog); `coupon_sheet.dart` (form, owns its controllers); `coupon_qr_sheet.dart`; `no_coupon_access.dart`. Route `Routes.coupons = '/coupons'`; drawer entry after Customers on `coupons.view`.
+- **QR** is drawn from `zxing2`'s `Encoder` (already a dependency, used by the print pipeline's tests) through a 40-line `CustomPainter` — no new package, no network. Payload is `${APP_URL}/s/{slug}?coupon=CODE`, the bare code when either is missing, so it scans on the web storefront and at the phone's checkout alike. Share photographs the card through `exportFrame` / `capturePng` from `bill_export.dart` and hands the PNG to `fileSharerProvider`, the receipt's path.
+- **Dates**: the phone has no tz database. `showDatePicker` days become `DateTime(y,m,d)` in the device zone; "valid through" stores the exclusive start of the next day, as the web does in the tenant zone. Staff phones are on the restaurant's clock; a phone in another timezone would be off by that offset at the day boundary.
+- Tests: `test/coupons_repository_test.dart` (row parsing, draft validation, pause keeps fields), `test/coupon_status_test.dart` (badge matrix, labels, URL, QR grid), `test/coupons_screen_test.dart` (list, viewer vs manager levers, used-coupon delete → Pause instead, empty state, locked door), drawer cases in `test/shell_chrome_test.dart`.
+
+</details>
+
 ## [1.0.16] — 2026-09-28 · Costs, coupons and customers
 
 ### Added

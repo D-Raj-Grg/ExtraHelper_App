@@ -65,7 +65,11 @@ Widget _harness({
 /// than a test viewport, and `findsNothing` on something below the fold says
 /// nothing about whether it exists.
 Future<void> _reveal(WidgetTester tester, Finder finder) async {
-  await tester.scrollUntilVisible(finder, 120, scrollable: find.byType(Scrollable).first);
+  await tester.scrollUntilVisible(
+    finder,
+    120,
+    scrollable: find.byType(Scrollable).first,
+  );
   await tester.pumpAndSettle();
 }
 
@@ -164,7 +168,10 @@ void main() {
         find.widgetWithText(TextField, 'The Sekuwa Station'),
       );
       expect(field.enabled, isTrue);
-      expect(find.text('Only the owner can rename the restaurant.'), findsNothing);
+      expect(
+        find.text('Only the owner can rename the restaurant.'),
+        findsNothing,
+      );
     });
 
     testWidgets('a manager is told the name is not theirs to change', (
@@ -203,7 +210,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.widgetWithText(FilledButton, 'Save'), findsNothing);
-      expect(find.text('An owner or manager can change these.'), findsOneWidget);
+      expect(
+        find.text('An owner or manager can change these.'),
+        findsOneWidget,
+      );
     });
 
     testWidgets('moving the day cutoff warns before it saves', (tester) async {

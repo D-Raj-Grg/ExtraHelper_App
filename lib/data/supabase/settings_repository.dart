@@ -480,7 +480,8 @@ class SettingsRepository {
   }) async {
     _assertKind(kind);
     final ext = extension.toLowerCase().replaceAll(RegExp('[^a-z0-9]'), '');
-    final path = '$_tenantId/${kind == 'logo' ? 'logo' : 'receipt-qr'}'
+    final path =
+        '$_tenantId/${kind == 'logo' ? 'logo' : 'receipt-qr'}'
         '.${ext.isEmpty ? 'png' : ext}';
     try {
       await _client.storage

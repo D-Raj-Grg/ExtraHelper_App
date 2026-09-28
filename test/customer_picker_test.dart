@@ -65,9 +65,8 @@ Future<CustomerAction?> _open(
                       if (q.isEmpty) return _book;
                       return _book
                           .where(
-                            (c) => c.label.toLowerCase().contains(
-                              q.toLowerCase(),
-                            ),
+                            (c) =>
+                                c.label.toLowerCase().contains(q.toLowerCase()),
                           )
                           .toList();
                     },

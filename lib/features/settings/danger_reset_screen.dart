@@ -46,7 +46,8 @@ class _DangerResetScreenState extends ConsumerState<DangerResetScreen> {
     final confirmed = await showConfirmPhraseDialog(
       context,
       title: 'Reset ${tenant.name}?',
-      message: '$what will be wiped. This cannot be undone, and the '
+      message:
+          '$what will be wiped. This cannot be undone, and the '
           'restaurant itself stays where it is.',
       phrase: tenant.name,
       phraseHint: 'the restaurant name',

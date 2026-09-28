@@ -8,6 +8,7 @@ import '../features/auth/login_screen.dart';
 import '../features/auth/onboarding_screen.dart';
 import '../features/auth/signup_screen.dart';
 import '../features/auth/verify_email_screen.dart';
+import '../features/coupons/coupons_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/dev/design_gallery.dart';
 import '../features/expenses/expense_categories_screen.dart';
@@ -76,6 +77,7 @@ abstract final class Routes {
 
   /// The customer book: who owes what, points, and the web's edit / merge /
   /// delete. A destination, like Loyalty & CRM in the web sidebar.
+  static const coupons = '/coupons';
   static const customers = '/customers';
   static const customer = '/customers/:id';
   static String customerPath(String id) => '/customers/$id';
@@ -210,6 +212,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: Routes.customers,
         builder: (context, state) => const LoyaltyScreen(),
+      ),
+      GoRoute(
+        path: Routes.coupons,
+        builder: (context, state) => const CouponsScreen(),
       ),
       GoRoute(
         path: Routes.customer,

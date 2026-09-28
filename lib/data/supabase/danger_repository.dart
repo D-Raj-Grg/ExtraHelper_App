@@ -179,11 +179,10 @@ class DangerRepository {
 
   /// Hand the restaurant over. The caller becomes a manager on success, so the
   /// screen they are standing on stops being theirs.
-  Future<void> transferOwnership(String toUserId) =>
-      _call('transfer_tenant_ownership', {
-        '_tenant': _tenantId,
-        '_to_user': toUserId,
-      });
+  Future<void> transferOwnership(String toUserId) => _call(
+    'transfer_tenant_ownership',
+    {'_tenant': _tenantId, '_to_user': toUserId},
+  );
 
   /// Start the seven-day clock. Returns when it runs out, if the server says.
   Future<DateTime?> requestDeletion() async {
@@ -213,10 +212,7 @@ class DangerRepository {
   }
 
   Future<int> _count(String table, {bool activeOnly = false}) async {
-    var query = _client
-        .from(table)
-        .select('*')
-        .eq('tenant_id', _tenantId);
+    var query = _client.from(table).select('*').eq('tenant_id', _tenantId);
     if (activeOnly) query = query.eq('status', 'active');
     final response = await query.count(CountOption.exact);
     return response.count;

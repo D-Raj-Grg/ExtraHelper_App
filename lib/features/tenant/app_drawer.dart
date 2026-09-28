@@ -36,6 +36,9 @@ class AppDrawer extends ConsumerWidget {
     // levers inside. The credit roll-up on the screen is the reason a manager
     // opens it at all.
     final canSeeCustomers = ref.watch(hasPermissionProvider('loyalty.view'));
+    // `coupons.view` is Owner/Manager by default; `coupons.manage` gates the
+    // levers inside. A waiter who can see the list can still show the QR.
+    final canSeeCoupons = ref.watch(hasPermissionProvider('coupons.view'));
     // Owner and manager by default. False while permissions load, which is the
     // right way round: a door that appears late is better than one that
     // vanishes under a thumb already moving towards it.
@@ -127,6 +130,14 @@ class AppDrawer extends ConsumerWidget {
                 selectedIcon: Icons.people,
                 label: 'Customers',
                 route: Routes.customers,
+                location: location,
+              ),
+            if (canSeeCoupons)
+              _DrawerItem(
+                icon: Icons.confirmation_number_outlined,
+                selectedIcon: Icons.confirmation_number,
+                label: 'Coupons',
+                route: Routes.coupons,
                 location: location,
               ),
             if (canReview)

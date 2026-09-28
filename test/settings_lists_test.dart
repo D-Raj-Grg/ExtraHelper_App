@@ -228,10 +228,7 @@ void main() {
         200,
         scrollable: find.byType(Scrollable).first,
       );
-      expect(
-        find.text('Prepared for 58mm, 76mm, 80mm paper.'),
-        findsOneWidget,
-      );
+      expect(find.text('Prepared for 58mm, 76mm, 80mm paper.'), findsOneWidget);
       expect(find.text('Replace'), findsWidgets);
     });
 
@@ -276,7 +273,10 @@ void main() {
       // Ask the same question here rather than offering a refused control.
       expect(find.text('Replace'), findsNothing);
       expect(find.text('Remove'), findsNothing);
-      expect(find.text('An owner or manager can change these.'), findsOneWidget);
+      expect(
+        find.text('An owner or manager can change these.'),
+        findsOneWidget,
+      );
     });
   });
 }

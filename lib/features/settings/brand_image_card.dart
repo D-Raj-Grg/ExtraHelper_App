@@ -16,9 +16,10 @@ const _maxUploadBytes = 3 * 1024 * 1024;
 
 /// Baking is milliseconds of tight pixel loops per roll width. On the UI
 /// isolate that is a visible stall on the frame the picker closes.
-Future<BakeResult> _bake(Uint8List bytes, String kind) =>
-    compute((_BakeArgs args) => bakeAsset(args.bytes, args.kind),
-        _BakeArgs(bytes, kind));
+Future<BakeResult> _bake(Uint8List bytes, String kind) => compute(
+  (_BakeArgs args) => bakeAsset(args.bytes, args.kind),
+  _BakeArgs(bytes, kind),
+);
 
 class _BakeArgs {
   const _BakeArgs(this.bytes, this.kind);
@@ -99,7 +100,9 @@ class _BrandImageCardState extends ConsumerState<BrandImageCard> {
       }
 
       if (!mounted) return;
-      if (_isQr && baked.unscannable.isNotEmpty && !await _confirmPartial(baked)) {
+      if (_isQr &&
+          baked.unscannable.isNotEmpty &&
+          !await _confirmPartial(baked)) {
         return;
       }
 

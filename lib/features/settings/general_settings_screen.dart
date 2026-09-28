@@ -291,7 +291,8 @@ class _GeneralSettingsScreenState extends ConsumerState<GeneralSettingsScreen> {
                         DropdownMenuItem(value: zone, child: Text(zone)),
                     ],
                     onChanged: canEdit
-                        ? (value) => setState(() => _timezone = value ?? _timezone)
+                        ? (value) =>
+                              setState(() => _timezone = value ?? _timezone)
                         : null,
                   ),
                   const SizedBox(height: 16),
@@ -355,8 +356,7 @@ class _GeneralSettingsScreenState extends ConsumerState<GeneralSettingsScreen> {
                     contentPadding: EdgeInsets.zero,
                     value: _blockNegativeStock,
                     onChanged: canEdit
-                        ? (value) =>
-                              setState(() => _blockNegativeStock = value)
+                        ? (value) => setState(() => _blockNegativeStock = value)
                         : null,
                     title: const Text('Block sales below zero stock'),
                     subtitle: const Text(

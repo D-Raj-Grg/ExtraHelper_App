@@ -15,17 +15,17 @@ class BranchDraft {
 ///
 /// Owns its controllers and disposes them in its own `State` — see
 /// `menu/variant_sheet.dart` for the crash this avoids.
-Future<BranchDraft?> showBranchSheet(
-  BuildContext context, {
-  Branch? editing,
-}) => showModalBottomSheet<BranchDraft>(
-  context: context,
-  isScrollControlled: true,
-  builder: (_) => Padding(
-    padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-    child: _BranchSheet(editing: editing),
-  ),
-);
+Future<BranchDraft?> showBranchSheet(BuildContext context, {Branch? editing}) =>
+    showModalBottomSheet<BranchDraft>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: _BranchSheet(editing: editing),
+      ),
+    );
 
 class _BranchSheet extends StatefulWidget {
   const _BranchSheet({this.editing});
@@ -60,9 +60,9 @@ class _BranchSheetState extends State<_BranchSheet> {
       setState(() => _nameError = 'Give the branch a name.');
       return;
     }
-    Navigator.of(context).pop(
-      BranchDraft(name: _name.text.trim(), address: _address.text.trim()),
-    );
+    Navigator.of(
+      context,
+    ).pop(BranchDraft(name: _name.text.trim(), address: _address.text.trim()));
   }
 
   @override

@@ -10,17 +10,17 @@ import 'charges_form.dart';
 /// creating them beside `showModalBottomSheet` and disposing after the await
 /// takes the app down on `'_dependents.isEmpty': is not true`, because the
 /// future resolves a frame before the field unmounts.
-Future<TaxRule?> showTaxRuleSheet(
-  BuildContext context, {
-  TaxRule? editing,
-}) => showModalBottomSheet<TaxRule>(
-  context: context,
-  isScrollControlled: true,
-  builder: (_) => Padding(
-    padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-    child: _TaxRuleSheet(editing: editing),
-  ),
-);
+Future<TaxRule?> showTaxRuleSheet(BuildContext context, {TaxRule? editing}) =>
+    showModalBottomSheet<TaxRule>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: _TaxRuleSheet(editing: editing),
+      ),
+    );
 
 class _TaxRuleSheet extends StatefulWidget {
   const _TaxRuleSheet({this.editing});

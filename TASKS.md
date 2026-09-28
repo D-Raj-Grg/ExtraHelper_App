@@ -27,10 +27,30 @@ it lands, on the build already installed. This entry is the rest of the owner's 
 - [x] `_TotalsCard`: "Discount · CODE" when a coupon is on the bill.
 - [x] Tests: Scan present with `payment.take`, absent without; coupon named on the card and
       removable from the sheet.
-- [ ] **Not verified here:** written without a Flutter SDK on the machine — run `flutter analyze`,
-      `dart format .`, `flutter test`, then a real scan of a printed flyer on both platforms.
+- [x] Verified 2026-09-28: `flutter analyze` clean, `dart format`, `flutter test` (706) green. The
+      "coupon on the bill" test had been tapping below the fold and missing — it scrolls first now.
+- [ ] A real scan of a printed flyer on both platforms (owner, on device).
 - [ ] Error text from the new lookup arrives as prose ("This coupon has expired"); `_friendly`'s
       `contains('percent')` rewrite is avoided server-side by saying "10% off". Nothing to map.
+
+## Coupons: manage them on the phone (2026-09-28)
+
+Parity with the web's Insights → Coupons, so a manager on the floor can make a code and show its
+QR without going to the counter. **No new SQL** — the three RPCs and both permission keys already
+exist.
+
+- [x] `CouponsRepository` (`list_coupons` / `upsert_coupon` / `delete_coupon`); `Coupon.fromRow`,
+      `CouponDraft.validate()` mirroring the web's `saveCoupon` checks; pause = upsert with
+      `_is_active` flipped.
+- [x] `lib/features/coupons/`: list (status badge icon + word, uses / limit, given), action sheet
+      (Show QR for `coupons.view`; Pause/Resume, Edit, Delete for `coupons.manage`), form sheet,
+      QR sheet (`zxing2` encoder + `CustomPainter`, Copy link, Share as PNG through the receipt's
+      export path), locked door. Drawer entry after Customers; route `/coupons`.
+- [x] Delete of a redeemed coupon offers **Pause instead** up front (the server would refuse).
+- [x] Tests: repository, status helpers, screen (viewer vs manager), drawer.
+- [ ] Dates are device-zone days — no tz db on the phone. Revisit if a tenant's staff phones ever
+      sit in another timezone (a `day_bounds(tenant, date)` RPC would settle it).
+- [ ] Printing the flyer stays on the web; the phone shares the PNG.
 
 **Scope decided 2026-07-26:** first build = Milestones 0–2 (shell + waiter ordering create/amend +
 native offline queue). Amend goes through a **new shared RPC** with the web refactored onto it.
