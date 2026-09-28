@@ -35,6 +35,7 @@ class ItemEditScreen extends ConsumerStatefulWidget {
 class _ItemEditScreenState extends ConsumerState<ItemEditScreen> {
   late final TextEditingController _name;
   late final TextEditingController _price;
+  late final TextEditingController _cost;
   late final TextEditingController _description;
   String? _categoryId;
   Set<String> _stationIds = {};
@@ -54,6 +55,7 @@ class _ItemEditScreenState extends ConsumerState<ItemEditScreen> {
     _id = widget.itemId;
     _name = TextEditingController();
     _price = TextEditingController();
+    _cost = TextEditingController();
     _description = TextEditingController();
     if (_id == null) _seeded = true;
   }
@@ -62,6 +64,7 @@ class _ItemEditScreenState extends ConsumerState<ItemEditScreen> {
   void dispose() {
     _name.dispose();
     _price.dispose();
+    _cost.dispose();
     _description.dispose();
     super.dispose();
   }
@@ -72,6 +75,7 @@ class _ItemEditScreenState extends ConsumerState<ItemEditScreen> {
     _seeded = true;
     _name.text = item.name;
     _price.text = _plain(item.basePriceCents);
+    _cost.text = item.costCents == null ? '' : _plain(item.costCents!);
     _description.text = item.description ?? '';
     _categoryId = item.categoryId;
     _stationIds = item.stationIds.toSet();
@@ -117,6 +121,14 @@ class _ItemEditScreenState extends ConsumerState<ItemEditScreen> {
     if (cents == null) {
       return setState(() => _error = 'Enter a price — 0 is allowed.');
     }
+    // Only someone who saw the field may write it; otherwise the stored cost
+    // is left alone rather than cleared by a form that never showed it.
+    final canSeeProfit = ref.read(hasPermissionProvider('profit.view'));
+    final costRaw = _cost.text.trim();
+    final costCents = costRaw.isEmpty ? null : _cents(costRaw);
+    if (canSeeProfit && costRaw.isNotEmpty && costCents == null) {
+      return setState(() => _error = 'Enter a cost price, or leave it blank.');
+    }
     final draft = MenuItemDraft(
       name: name,
       basePriceCents: cents,
@@ -124,6 +136,8 @@ class _ItemEditScreenState extends ConsumerState<ItemEditScreen> {
       description: _description.text,
       isVeg: _isVeg,
       stationIds: _stationIds,
+      costCents: costCents,
+      costSet: canSeeProfit,
     );
     setState(() {
       _busy = true;
@@ -132,7 +146,8 @@ class _ItemEditScreenState extends ConsumerState<ItemEditScreen> {
     try {
       final id = _id;
       if (id == null) {
-        final newId = await repo.createItem(draft);
+        final created = await repo.createItem(draft);
+        final newId = created.id;
         _id = newId;
         _refreshLists();
         final photo = _pendingPhoto;
@@ -158,6 +173,16 @@ class _ItemEditScreenState extends ConsumerState<ItemEditScreen> {
             }
             return;
           }
+        }
+        final costWarning = created.costWarning;
+        if (costWarning != null) {
+          // Same shape as the photo: the dish exists, so stay here. `_id` is
+          // set now, so the next Save goes through updateItem and retries the
+          // cost against the row that already exists.
+          if (mounted) {
+            setState(() => _error = '$costWarning Tap Save to try again.');
+          }
+          return;
         }
         _say('$name added to the menu.');
         if (mounted) Navigator.of(context).pop();
@@ -282,6 +307,7 @@ class _ItemEditScreenState extends ConsumerState<ItemEditScreen> {
     final theme = Theme.of(context);
     final currency = ref.watch(activeTenantProvider)?.currency ?? 'USD';
     final canEdit = ref.watch(canEditMenuProvider);
+    final canSeeProfit = ref.watch(hasPermissionProvider('profit.view'));
     final categories =
         ref.watch(menuCategoriesProvider).valueOrNull ?? const [];
     final stations = ref.watch(menuStationsProvider).valueOrNull ?? const [];
@@ -369,6 +395,27 @@ class _ItemEditScreenState extends ConsumerState<ItemEditScreen> {
                     border: const OutlineInputBorder(),
                   ),
                 ),
+                if (canSeeProfit) ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _cost,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                    ],
+                    style: const TextStyle(
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                    decoration: InputDecoration(
+                      labelText: 'Cost price ($currency)',
+                      helperText:
+                          'What it costs you to make. Used for profit reports.',
+                      border: const OutlineInputBorder(),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 _Label('Category'),
                 Wrap(

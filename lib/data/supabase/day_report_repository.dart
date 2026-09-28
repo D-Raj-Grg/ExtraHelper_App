@@ -286,10 +286,27 @@ class DaySales {
     required this.bills,
     required this.tablesServed,
     required this.avgCents,
+    this.netSalesCents,
+    this.cogsCents,
+    this.grossProfitCents,
+    this.marginPct,
+    this.uncostedLines,
   });
 
   /// What was settled: paid bills, at bill totals, after tax and discounts.
   final int revenueCents;
+
+  /// Profit block. **Absent** (null) when the caller lacks `profit.view` or
+  /// the server predates it — null must render as nothing, never as 0.
+  final int? netSalesCents;
+  final int? cogsCents;
+  final int? grossProfitCents;
+
+  /// One decimal, as the server rounds it.
+  final double? marginPct;
+
+  /// Lines sold with no cost on file; the profit figure is low by that much.
+  final int? uncostedLines;
 
   final int subtotalCents;
   final int taxCents;
@@ -316,6 +333,11 @@ class DaySales {
     bills: _int(j['bills']),
     tablesServed: _int(j['tables_served']),
     avgCents: _int(j['avg_cents']),
+    netSalesCents: _maybeInt(j['net_sales_cents']),
+    cogsCents: _maybeInt(j['cogs_cents']),
+    grossProfitCents: _maybeInt(j['gross_profit_cents']),
+    marginPct: _maybeDouble(j['margin_pct']),
+    uncostedLines: _maybeInt(j['uncosted_lines']),
   );
 }
 
@@ -510,16 +532,24 @@ class DayTopItem {
     required this.description,
     required this.qty,
     required this.revenueCents,
+    this.costCents,
+    this.profitCents,
   });
 
   final String description;
   final int qty;
   final int revenueCents;
 
+  /// Null without `profit.view`, or when any of its lines had no cost.
+  final int? costCents;
+  final int? profitCents;
+
   static DayTopItem fromJson(Map<String, dynamic> j) => DayTopItem(
     description: (j['description'] as String?) ?? '',
     qty: _int(j['qty']),
     revenueCents: _int(j['revenue_cents']),
+    costCents: _maybeInt(j['cost_cents']),
+    profitCents: _maybeInt(j['profit_cents']),
   );
 }
 
@@ -554,6 +584,23 @@ int _int(Object? v) => switch (v) {
   num() => v.round(),
   String() => int.tryParse(v) ?? 0,
   _ => 0,
+};
+
+/// For keys that are optional on purpose: absent, null or unparsable stays
+/// null, so a figure the caller may not see is not shown as a zero they can
+/// misread. Unlike [_int], nothing here falls back to 0.
+int? _maybeInt(Object? v) => switch (v) {
+  int() => v,
+  num() => v.round(),
+  String() => int.tryParse(v),
+  _ => null,
+};
+
+double? _maybeDouble(Object? v) => switch (v) {
+  null => null,
+  num() => v.toDouble(),
+  String() => double.tryParse(v),
+  _ => null,
 };
 
 DateTime _time(Object? v) =>

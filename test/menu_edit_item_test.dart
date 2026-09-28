@@ -65,6 +65,82 @@ void main() {
     expect(item.is86, isFalse);
   });
 
+  test('cost price is read when present, on the dish and its sizes', () {
+    final item = MenuEditItem.fromJson({
+      'id': 'i3',
+      'name': 'Buff Sekuwa',
+      'base_price_cents': 45000,
+      'menu_item_costs': {'cost_cents': 18000},
+      'item_variants': [
+        {
+          'id': 'v1',
+          'name': 'Half',
+          'price_delta_cents': -20000,
+          'sort': 0,
+          'item_variant_costs': {'cost_cents': 9000},
+        },
+        {
+          'id': 'v2',
+          'name': 'Full',
+          'price_delta_cents': 0,
+          'sort': 1,
+          // The row exists but the cost was cleared.
+          'item_variant_costs': {'cost_cents': null},
+        },
+      ],
+    });
+    expect(item.costCents, 18000);
+    expect(item.variants.first.costCents, 9000);
+    expect(item.variants.last.costCents, isNull);
+  });
+
+  test('cost embed hidden by RLS (no profit.view) is null, never 0', () {
+    final item = MenuEditItem.fromJson({
+      'id': 'i4',
+      'name': 'Tea',
+      'base_price_cents': 5000,
+      'menu_item_costs': null,
+      'item_variants': [
+        {
+          'id': 'v1',
+          'name': 'Small',
+          'price_delta_cents': 0,
+          'sort': 0,
+          'item_variant_costs': null,
+        },
+      ],
+    });
+    expect(item.costCents, isNull);
+    expect(item.variants.single.costCents, isNull);
+  });
+
+  test('cost embed absent from the select is null too', () {
+    final item = MenuEditItem.fromJson({
+      'id': 'i5',
+      'name': 'Tea',
+      'base_price_cents': 5000,
+      'item_variants': [
+        {'id': 'v1', 'name': 'Small', 'price_delta_cents': 0, 'sort': 0},
+      ],
+    });
+    expect(item.costCents, isNull);
+    expect(item.variants.single.costCents, isNull);
+  });
+
+  test('a draft leaves the cost alone unless it was set', () {
+    const untouched = MenuItemDraft(name: 'Tea', basePriceCents: 5000);
+    expect(untouched.costSet, isFalse);
+    expect(untouched.costCents, isNull);
+
+    const cleared = MenuItemDraft(
+      name: 'Tea',
+      basePriceCents: 5000,
+      costSet: true,
+    );
+    expect(cleared.costSet, isTrue);
+    expect(cleared.costCents, isNull, reason: 'set + null clears the cost');
+  });
+
   test('a combo keeps its dishes and quantities, skipping malformed rows', () {
     final c = MenuCombo.fromJson({
       'id': 'k1',

@@ -157,8 +157,36 @@ class _Sheet extends ConsumerWidget {
               value: money(r.refunds.totalCents, cur),
               warn: r.refunds.totalCents > 0,
             ),
+            // Only with `profit.view`: the server leaves the keys out
+            // otherwise, and an absent figure must not read as zero profit.
+            if (s.grossProfitCents != null) ...[
+              _Kpi(
+                icon: Icons.trending_up_outlined,
+                label: 'Gross profit',
+                value: money(s.grossProfitCents!, cur),
+              ),
+              _Kpi(
+                icon: Icons.pie_chart_outline,
+                label: 'Margin',
+                // Profit without a margin (no net sales to divide by) is a
+                // dash, not a 0.0% that reads as "sold at cost".
+                value: s.marginPct == null
+                    ? '—'
+                    : '${s.marginPct!.toStringAsFixed(1)}%',
+              ),
+            ],
           ],
         ),
+        if ((s.uncostedLines ?? 0) > 0) ...[
+          const SizedBox(height: 8),
+          Text(
+            '${s.uncostedLines} ${s.uncostedLines == 1 ? 'line' : 'lines'} '
+            'had no cost — enter costs on the web Inventory → Costing tab.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
         const SizedBox(height: 16),
 
         PrintDayReportButton(day: r.day),
@@ -292,7 +320,9 @@ class _Sheet extends ConsumerWidget {
             for (final t in r.topItems)
               _Line(
                 label: t.description,
-                note: '×${t.qty}',
+                note: t.profitCents == null
+                    ? '×${t.qty}'
+                    : '×${t.qty} · profit ${money(t.profitCents!, cur)}',
                 value: money(t.revenueCents, cur),
               ),
           ],

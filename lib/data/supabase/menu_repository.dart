@@ -23,11 +23,17 @@ class MenuEditItem {
     this.addOns = const [],
     this.availability = const [],
     this.is86 = false,
+    this.costCents,
   });
 
   final String id;
   final String name;
   final int basePriceCents;
+
+  /// What it costs to make, for profit reports. Null = never entered, or
+  /// null unless the caller holds `profit.view` (RLS hides the
+  /// `menu_item_costs` row, so the embed comes back null, not an error).
+  final int? costCents;
   final List<MenuEditVariant> variants;
   final String? categoryId;
   final String? categoryName;
@@ -66,6 +72,7 @@ class MenuEditItem {
       id: (j['id'] as String?) ?? '',
       name: (j['name'] as String?) ?? '',
       basePriceCents: (j['base_price_cents'] as num?)?.toInt() ?? 0,
+      costCents: _embeddedCost(j['menu_item_costs']),
       is86: (j['is_86'] as bool?) ?? false,
       categoryId: j['category_id'] as String?,
       categoryName:
@@ -113,6 +120,7 @@ class MenuEditVariant {
     required this.name,
     required this.priceDeltaCents,
     required this.sort,
+    this.costCents,
   });
 
   final String id;
@@ -120,12 +128,27 @@ class MenuEditVariant {
   final int priceDeltaCents;
   final int sort;
 
+  /// Per-size cost, when it differs from the dish's. Null = falls back, or
+  /// null unless the caller holds `profit.view` (RLS hides the
+  /// `item_variant_costs` row).
+  final int? costCents;
+
   static MenuEditVariant fromJson(Map<String, dynamic> j) => MenuEditVariant(
     id: (j['id'] as String?) ?? '',
     name: (j['name'] as String?) ?? '',
     priceDeltaCents: (j['price_delta_cents'] as num?)?.toInt() ?? 0,
     sort: (j['sort'] as num?)?.toInt() ?? 0,
+    costCents: _embeddedCost(j['item_variant_costs']),
   );
+}
+
+/// A one-to-one cost embed (`menu_item_costs(cost_cents)` /
+/// `item_variant_costs(cost_cents)`) is `{cost_cents: n}`, or null when RLS
+/// hid the row or none was ever written. Absent, null and malformed all read
+/// as "unknown", never 0.
+int? _embeddedCost(Object? embed) {
+  if (embed is! Map) return null;
+  return (embed['cost_cents'] as num?)?.toInt();
 }
 
 /// Menu editing from the phone.
@@ -144,11 +167,14 @@ class MenuRepository {
   final String _tenantId;
 
   static const _columns =
-      'id, name, base_price_cents, is_86, category_id, description, image_url, '
-      'is_veg, menu_categories(name), item_station_routes(station_id), '
+      'id, name, base_price_cents, is_86, category_id, '
+      'description, image_url, is_veg, menu_categories(name), '
+      'menu_item_costs(cost_cents), '
+      'item_station_routes(station_id), '
       'item_modifiers(modifier_id, is_default, max_qty), '
       'item_availability(id, day_of_week, start_time, end_time), '
-      'item_variants(id, name, price_delta_cents, sort)';
+      'item_variants(id, name, price_delta_cents, sort, '
+      'item_variant_costs(cost_cents))';
 
   /// Every dish, with its sizes in the owner's order.
   ///
@@ -388,6 +414,8 @@ class MenuItemDraft {
     this.description,
     this.isVeg,
     this.stationIds = const {},
+    this.costCents,
+    this.costSet = false,
   });
 
   final String name;
@@ -396,7 +424,20 @@ class MenuItemDraft {
   final String? description;
   final bool? isVeg;
   final Set<String> stationIds;
+
+  /// Cost price. Only written when [costSet]; null then clears it.
+  final int? costCents;
+
+  /// False = the field was hidden or untouched, so the stored cost is left
+  /// alone. True = write [costCents], null clearing it. Separate from the
+  /// value because "no cost" and "didn't ask" must not collapse into one.
+  final bool costSet;
 }
+
+/// What [MenuItemWrites.createItem] hands back: the new dish's id, plus a
+/// warning when the dish was written but its cost was not. The dish is on the
+/// menu either way — a failed cost must not read as a failed save.
+typedef CreatedMenuItem = ({String id, String? costWarning});
 
 /// Dishes, categories and photos.
 ///
@@ -473,7 +514,13 @@ extension MenuItemWrites on MenuRepository {
         if (rows.isEmpty) throw _refused;
       }, "Couldn't save that category just now.");
 
-  Future<String> createItem(MenuItemDraft d) => _write(() async {
+  /// Inserts the dish, then its stations and cost. The cost is validated
+  /// **before** the insert so a bad value never leaves a half-made dish; a cost
+  /// RPC that fails *after* the row exists comes back as [CreatedMenuItem]
+  /// `costWarning` rather than a thrown failure, because throwing would tell
+  /// the person the dish was not added when it was.
+  Future<CreatedMenuItem> createItem(MenuItemDraft d) => _write(() async {
+    if (d.costSet) _checkCost(d.costCents);
     final rows = await _client
         .from('menu_items')
         .insert({
@@ -488,10 +535,19 @@ extension MenuItemWrites on MenuRepository {
     if (rows.isEmpty) throw _refused;
     final id = rows.first['id'] as String;
     await _setStations(id, d.stationIds);
-    return id;
+    String? costWarning;
+    if (d.costSet) {
+      try {
+        await setItemCost(id, d.costCents);
+      } on PosFailure catch (e) {
+        costWarning = 'Dish saved, but the cost was not. ${e.message}';
+      }
+    }
+    return (id: id, costWarning: costWarning);
   }, "Couldn't add that dish just now.");
 
   Future<void> updateItem(String id, MenuItemDraft d) => _write(() async {
+    if (d.costSet) _checkCost(d.costCents);
     final rows = await _client
         .from('menu_items')
         .update({
@@ -506,7 +562,18 @@ extension MenuItemWrites on MenuRepository {
         .select('id');
     if (rows.isEmpty) throw _refused;
     await _setStations(id, d.stationIds);
+    if (d.costSet) await setItemCost(id, d.costCents);
   }, "Couldn't save that dish just now.");
+
+  /// Cost price, through the `set_item_cost` RPC: it carries the `profit.view`
+  /// check (42501 without it), unlike the table columns. Null clears.
+  Future<void> setItemCost(String id, int? cents) => _write(
+    () => _client.rpc<dynamic>(
+      'set_item_cost',
+      params: {'_item_id': id, '_cost_cents': cents},
+    ),
+    "Couldn't save the cost just now.",
+  );
 
   /// Deleting keeps order history: order lines snapshot the name and price.
   Future<void> deleteItem(String id) => _write(() async {
@@ -782,6 +849,19 @@ extension MenuItemWrites on MenuRepository {
         .select('id');
     if (rows.isEmpty) throw _refused;
   }, "Couldn't remove that photo just now.");
+
+  /// Same bounds as `set_item_cost` on the server, checked here first so the
+  /// person is told before anything is written.
+  static const maxCostCents = 100000000;
+
+  static void _checkCost(int? cents) {
+    if (cents == null) return;
+    if (cents < 0 || cents > maxCostCents) {
+      throw const PosFailure(
+        'Enter a cost price between 0 and 1,000,000, or leave it blank.',
+      );
+    }
+  }
 
   static String? _blankToNull(String? v) {
     final t = v?.trim() ?? '';
