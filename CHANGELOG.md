@@ -12,6 +12,10 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 ## [Unreleased]
 
+## [1.0.16] — 2026-09-28 · Costs, coupons, customers and passwords
+
+_Build 2 adds the Coupons screen, staff passwords and the Bills tab change below; build 1 shipped the rest earlier the same day._
+
 ### Changed
 - **Bills tab opens on All today.** The chips now run **All today · Paid · Void · Credit**, and the tab starts on All today instead of the old first chip. What used to be called **Owed** is now **Credit** — same list, every bill with money outstanding however old, sitting at the end where it is looked for rather than lived in.
 
@@ -43,7 +47,6 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 </details>
 
-## [1.0.16] — 2026-09-28 · Costs, coupons and customers
 
 ### Added
 - **Scan the coupon.** The coupon box on the checkout's adjustments sheet has a **Scan** button beside it: point the camera at the flyer's QR and the code applies itself. Typing still works. A coupon already on the bill shows as "Now: SAVE10-7KQ2 · 10%" with **Remove**, and the totals card names it ("Discount · SAVE10-7KQ2"). Needs the web migration `20260928120000_coupons` on the server — which also makes the typed coupon box work for the first time (it had been failing on a database error since it shipped).
