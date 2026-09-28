@@ -11,6 +11,10 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        // flutter_local_notifications (order alerts) is built against
+        // java.time and needs library desugaring in the app that hosts it,
+        // whether or not anything is scheduled. See its README, "Gradle setup".
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -41,4 +45,10 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Pairs with isCoreLibraryDesugaringEnabled above. 2.1.4 is the version
+    // flutter_local_notifications 22.x itself compiles against.
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

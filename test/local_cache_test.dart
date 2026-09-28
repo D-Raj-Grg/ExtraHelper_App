@@ -72,6 +72,12 @@ class _RecordingTransport implements OutboxTransport {
   @override
   Future<void> markOrderServed(String orderId) async =>
       calls.add('markOrderServed:$orderId');
+
+  @override
+  Future<void> recordExpense({
+    required String idempotencyKey,
+    required Map<String, dynamic> payload,
+  }) async {}
 }
 
 PosMenuItem _item(

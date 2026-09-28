@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../features/notifications/notifications_screen.dart';
 import '../features/tenant/app_drawer.dart';
 import '../features/tenant/sync_status_bar.dart';
 import 'router.dart';
@@ -15,6 +16,8 @@ import 'router.dart';
 ///
 /// * [showDrawer] false for a leaf that was pushed on top of a destination
 ///   (stock count, composer): those keep the back arrow.
+/// * [showBell] false on the feed itself. The bell draws nothing for anyone
+///   without `notifications.view`, so it is safe to leave on everywhere else.
 /// * [subtitle] renders under the title at a height derived from the user's
 ///   text scale, never a hardcoded one.
 class AppScaffold extends StatelessWidget {
@@ -28,6 +31,7 @@ class AppScaffold extends StatelessWidget {
     this.floatingActionButton,
     this.bottomNavigationBar,
     this.showDrawer = true,
+    this.showBell = true,
   });
 
   final String title;
@@ -42,6 +46,7 @@ class AppScaffold extends StatelessWidget {
   final Widget? floatingActionButton;
   final Widget? bottomNavigationBar;
   final bool showDrawer;
+  final bool showBell;
 
   @override
   Widget build(BuildContext context) {
@@ -51,7 +56,8 @@ class AppScaffold extends StatelessWidget {
         // One line, always. Two lines in an app bar clip the moment someone
         // turns their text size up, and this app ships to people who do.
         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        actions: actions,
+        // The bell goes last, in the corner every app puts it.
+        actions: [...?actions, if (showBell) const NotificationBell()],
         bottom: bottom ?? _subtitleBar(context),
       ),
       body: Column(

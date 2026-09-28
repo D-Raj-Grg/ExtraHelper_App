@@ -48,3 +48,19 @@ bool isEarlierDay(DateTime at, {DateTime? dayStart, DateTime? now}) {
   final today = DateTime(b.year, b.month, b.day);
   return day.isBefore(today);
 }
+
+/// "just now", "5 min ago", "2 h ago", then the clock for earlier today and
+/// the date beyond that — how long ago an order moved, read at a glance.
+String relativeTime(DateTime at, {DateTime? now}) {
+  final local = at.toLocal();
+  final ref = (now ?? DateTime.now()).toLocal();
+  final diff = ref.difference(local);
+  if (diff.inSeconds < 60) return 'just now';
+  if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
+  if (diff.inHours < 6) return '${diff.inHours} h ago';
+  final sameDay =
+      local.year == ref.year &&
+      local.month == ref.month &&
+      local.day == ref.day;
+  return sameDay ? clockTime(local) : billDate(local);
+}

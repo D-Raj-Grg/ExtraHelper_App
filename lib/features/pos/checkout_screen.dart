@@ -1268,6 +1268,21 @@ class _CustomerCard extends StatelessWidget {
                 : '${customer.label} · ${customer.points} pts',
             style: theme.textTheme.bodyMedium,
           ),
+          if (customer != null && customer.owes) ...[
+            const SizedBox(height: 4),
+            // The one line a cashier needs before tapping "Unpaid": what this
+            // guest already has on the tab. A warning, never a block — the
+            // server still takes the credit if staff choose to extend it.
+            Text(
+              'Owes ${money(customer.owesCents, currency)} · '
+              '${customer.unpaidBills} unpaid '
+              '${customer.unpaidBills == 1 ? 'bill' : 'bills'}',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.error,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
           if (note != null && note.trim().isNotEmpty) ...[
             const SizedBox(height: 6),
             Text(note, style: theme.textTheme.bodySmall),

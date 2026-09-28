@@ -111,6 +111,15 @@ class FakeTransport implements OutboxTransport {
     calls.add('markOrderServed:$orderId');
     _maybeThrow();
   }
+
+  @override
+  Future<void> recordExpense({
+    required String idempotencyKey,
+    required Map<String, dynamic> payload,
+  }) async {
+    calls.add('recordExpense:$idempotencyKey:${payload['amount_cents']}');
+    _maybeThrow();
+  }
 }
 
 CartLine _line(String itemId, {int qty = 1}) => CartLine(
@@ -179,6 +188,92 @@ void main() {
       expect(outcome.synced, isTrue);
       expect(outcome.orderRef, 'order-1');
       expect((await h.store.all()).single.state, OutboxState.done);
+    });
+  });
+
+  group('expenses', () {
+    test(
+      'an expense logged offline is owed, then sent once under its own key',
+      () async {
+        var online = false;
+        final store = MemoryOutboxStore();
+        final transport = FakeTransport();
+        final engine = ReplayEngine(
+          store: store,
+          transport: transport,
+          isOnline: () async => online,
+        );
+        final queue = OrderQueue(
+          store: store,
+          engine: engine,
+          tenantId: 'tenant-1',
+        );
+
+        final logged = await queue.recordExpense(
+          categoryId: 'cat-rice',
+          amountCents: 10000,
+          note: 'Rice',
+          paidFrom: 'cash',
+        );
+        expect(logged.synced, isFalse);
+        expect(transport.calls, isEmpty);
+        expect((await queue.pendingExpenses()).length, 1);
+
+        online = true;
+        await engine.run();
+        await engine.run();
+
+        final sent = transport.calls.where(
+          (c) => c.startsWith('recordExpense:'),
+        );
+        expect(sent.length, 1);
+        // The outbox key is the RPC's _client_key — the server dedupes on it.
+        expect(
+          sent.single,
+          contains(logged.orderRef.substring('expense:'.length)),
+        );
+        expect(await queue.pendingExpenses(), isEmpty);
+      },
+    );
+
+    test('two identical expenses are two entries, not a merge', () async {
+      final h = _harness();
+      await h.queue.recordExpense(
+        categoryId: 'cat-ride',
+        amountCents: 10000,
+        note: 'Ride',
+        paidFrom: 'cash',
+      );
+      await h.queue.recordExpense(
+        categoryId: 'cat-ride',
+        amountCents: 10000,
+        note: 'Ride',
+        paidFrom: 'cash',
+      );
+      final keys = h.transport.calls
+          .where((c) => c.startsWith('recordExpense:'))
+          .map((c) => c.split(':')[1])
+          .toSet();
+      expect(keys.length, 2);
+    });
+
+    test('a refused expense dies with the reason, not retried', () async {
+      final h = _harness();
+      h.transport.failures.add(
+        const TransportRejected(
+          'only a manager can log an expense for an earlier day',
+        ),
+      );
+      final out = await h.queue.recordExpense(
+        categoryId: 'cat',
+        amountCents: 500,
+        note: 'Gas',
+        paidFrom: 'cash',
+        businessDate: '2026-09-20',
+      );
+      expect(out.isRejected, isTrue);
+      expect(out.error, contains('manager'));
+      expect(await h.queue.pendingExpenses(), isEmpty);
     });
   });
 

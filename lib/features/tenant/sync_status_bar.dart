@@ -184,6 +184,7 @@ class _DeadRow extends StatelessWidget {
     OutboxKind.kotLine => 'Dish status',
     OutboxKind.kotTicket => 'Ticket status',
     OutboxKind.orderServed => 'Delivered to the table',
+    OutboxKind.expense => 'Expense',
   };
 
   @override

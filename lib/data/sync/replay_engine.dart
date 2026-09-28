@@ -155,6 +155,11 @@ class ReplayEngine {
         );
       case OutboxKind.orderServed:
         await _transport.markOrderServed(entry.orderRef);
+      case OutboxKind.expense:
+        await _transport.recordExpense(
+          idempotencyKey: entry.idempotencyKey,
+          payload: entry.payload,
+        );
     }
   }
 }

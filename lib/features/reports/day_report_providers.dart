@@ -81,8 +81,18 @@ class DayCursor extends Notifier<DayCursorState> {
     return const DayCursorState();
   }
 
-  /// Record the day the server resolved. Called when a payload lands.
+  /// Record the day the server resolved as *today*. Called when a payload lands.
+  ///
+  /// Only a payload for a **null** request answers "what day is it".
+  /// `DayReport.day` names the day the report covers, and the screen feeds every
+  /// payload through here — so without this guard a past day's report would
+  /// overwrite [DayCursorState.knownToday], collapse `canGoForward`, hide "Back
+  /// to today", and strand the user on the day they stepped back to.
+  ///
+  /// It also drops a stale today-response that lands after a step back, since by
+  /// then the cursor has already named a day.
   void rememberToday(String day) {
+    if (state.selected != null) return; // Not an answer about today.
     if (day.isEmpty || state.knownToday == day) return;
     state = state.copyWith(knownToday: day);
   }
@@ -95,7 +105,16 @@ class DayCursor extends Notifier<DayCursorState> {
 
   void next() {
     if (!state.canGoForward) return;
-    state = state.copyWith(selected: shiftDay(state.selected!, 1));
+    final to = shiftDay(state.selected!, 1);
+    // Landing on today goes back to asking for *today* (a null day), not for a
+    // date string that happens to match it. Otherwise the cursor stays pinned
+    // to that date: a day boundary passing while the app is open would leave
+    // the sheet on yesterday, and it would not agree with `today()`.
+    if (to.compareTo(state.knownToday!) >= 0) {
+      today();
+      return;
+    }
+    state = state.copyWith(selected: to);
   }
 
   /// Back to today — by clearing the selection, not by naming a date, so the
