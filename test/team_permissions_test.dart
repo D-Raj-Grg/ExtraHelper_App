@@ -221,6 +221,75 @@ void main() {
       expect(find.text('Remove'), findsOneWidget);
     });
 
+    testWidgets('an owner can set a password for staff, never for an owner '
+        'or themself', (tester) async {
+      await tester.pumpWidget(
+        _harness(
+          permissions: editor,
+          roster: [
+            _member(email: 'cook@sekuwa.co'),
+            _member(
+              userId: 'u-boss',
+              email: 'boss@sekuwa.co',
+              baseRole: 'owner',
+            ),
+            _member(userId: _me, email: 'me@sekuwa.co', baseRole: 'owner'),
+            _member(userId: null, email: 'new@hire.co', status: 'invited'),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _openMenu(tester, 'cook@sekuwa.co');
+      expect(find.text('Set password'), findsOneWidget);
+      expect(find.text('Create login'), findsNothing);
+      await tester.tapAt(Offset.zero);
+      await tester.pumpAndSettle();
+
+      // Another owner: the server says "an owner's password can't be set by
+      // another owner", so the item is not drawn.
+      await _openMenu(tester, 'boss@sekuwa.co');
+      expect(find.text('Set password'), findsNothing);
+      await tester.tapAt(Offset.zero);
+      await tester.pumpAndSettle();
+
+      await _openMenu(tester, 'me@sekuwa.co');
+      expect(find.text('Set password'), findsNothing);
+      await tester.tapAt(Offset.zero);
+      await tester.pumpAndSettle();
+
+      // An invite has no account yet: the offer is to create one.
+      await _openMenu(tester, 'new@hire.co');
+      expect(find.text('Create login'), findsOneWidget);
+      expect(find.text('Set password'), findsNothing);
+    });
+
+    testWidgets('a manager with staff.edit gets no password items', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _harness(
+          permissions: editor,
+          role: 'manager',
+          roster: [
+            _member(email: 'cook@sekuwa.co'),
+            _member(userId: null, email: 'new@hire.co', status: 'invited'),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _openMenu(tester, 'cook@sekuwa.co');
+      expect(find.text('Change role'), findsOneWidget);
+      expect(find.text('Set password'), findsNothing);
+      await tester.tapAt(Offset.zero);
+      await tester.pumpAndSettle();
+
+      await _openMenu(tester, 'new@hire.co');
+      expect(find.text('Cancel invite'), findsOneWidget);
+      expect(find.text('Create login'), findsNothing);
+    });
+
     testWidgets('you are never offered a way to remove yourself', (
       tester,
     ) async {

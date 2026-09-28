@@ -13,10 +13,21 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 ## [Unreleased]
 
 ### Added
+- **Set a staff password from the phone.** On Team, an owner's row menu now has **Set password** (and **Create login** on an invite that never signed up), like the web. Type one or **Generate one** (`abcd-2345-wxyz`, no look-alike letters), show or copy it, and tell them in person — nothing is emailed, and their old password stops working right away. Only an owner sees it, never on an owner's row or your own; a person who also works at another restaurant is refused with the reason, same as the web.
 - **Coupons on the phone.** A new **Coupons** entry in the drawer (Owner/Manager by default, via *See coupons*) brings the web's Insights → Coupons over. Every campaign code with its badge — **Active**, **Paused**, **Scheduled**, **Expired** or **Used up** — what it takes off, when it runs, how many times it was used and how much it has given away. Tap one for **Show QR**: the flyer square on screen for a guest to scan, **Copy link**, or **Share** it as a picture to whoever prints the flyers. With *Manage coupons* the same menu offers **Pause / Resume**, **Edit** and **Delete**, and **New coupon** at the bottom: code (blank makes one, `SAVE10-7KQ2`), campaign name, percent or amount off, valid from / through, usage limit, minimum order, dine in / takeaway / delivery, once per customer. A coupon already on a bill cannot be deleted — the phone says so and offers Pause instead, same as the web. Printing the flyer itself stays on the web.
 
 ### Fixed
 - **The coupon test that was never run.** The checkout's "a coupon on the bill is named" test tapped a button that sat below the fold on the test screen and silently missed; it now scrolls first. The checkout coupon box and Scan button themselves were already right.
+
+<details><summary>Technical — staff passwords</summary>
+
+- The password write needs the service-role key, which no client may hold (rule 2), and there was no RPC or Edge Function for it — the web did it inside a Next.js server action. New Supabase Edge Function **`set-member-password`** (`../extrahelper/supabase/functions/set-member-password/index.ts`, deployed 2026-09-28, `verify_jwt: true`): takes `{tenant_id, password, user_id}` or `{tenant_id, password, email}`, re-checks the password rule, runs `assert_can_set_member_password` / `assert_can_create_invite_login` **under the caller's JWT** (the owner-only SQL the web already relied on), then `auth.admin.updateUserById` / `createUser` + `user_tenants` upsert + `staff_invites` delete, and writes the `password_reset` audit row (`set_password` / `create_login`, email only, never the password). Errors come back as `4xx {error}`; 401 for no or anon token.
+- `TeamRepository.setMemberPassword` / `createInviteLogin` → `_client.functions.invoke('set-member-password')`. A `FunctionException` body's `error` goes through `friendlyTeamError`; anything else is transient. `passwordProblem()` mirrors the web's (8–72, letters + digits) so the dialog refuses what the server would.
+- `canManagePasswordsProvider` = membership base role `owner` (the assert RPC checks `has_tenant_role`, not a permission key — the web gates on `tenant.role === "owner"` for the same reason). `staff_tab.dart`: `MemberAction.setPassword` on an active non-owner row that is not yours, `MemberAction.createLogin` on a non-owner invite. `password_dialog.dart` owns its controller; `generatePassword` is `Random.secure()` over `[a-hj-km-np-z]` and `[2-9]`.
+- Tests: `test/password_dialog_test.dart` (validator, generator shape, button gating, refused-without-digit, generate → visible), `test/team_permissions_test.dart` (+2: owner sees the items on the right rows only; manager with `staff.edit` sees none).
+- Not verified: a real set-password on device against a throwaway staff account (would touch the live tenant's logins).
+
+</details>
 
 <details><summary>Technical — coupons</summary>
 

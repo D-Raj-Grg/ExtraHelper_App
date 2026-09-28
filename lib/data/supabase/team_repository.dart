@@ -368,6 +368,63 @@ class TeamRepository {
     );
   }, "Couldn't cancel that invite just now. Nothing was changed.");
 
+  // --- passwords (Edge Function) ------------------------------------------
+
+  /// Set a staff member's password and hand it over in person. Nothing is
+  /// emailed.
+  ///
+  /// The write needs the service-role key, which no client holds, so it runs
+  /// in the `set-member-password` Edge Function: the caller's JWT goes with
+  /// the request, the function runs `assert_can_set_member_password` under
+  /// that token (owner only, never yourself, never another owner, never
+  /// someone who also works elsewhere), and only then touches GoTrue. The
+  /// function writes the `password_reset` audit row itself.
+  Future<String> setMemberPassword({
+    required String userId,
+    required String password,
+  }) {
+    final problem = passwordProblem(password);
+    if (problem != null) throw PosFailure(problem);
+    return _password({'user_id': userId, 'password': password});
+  }
+
+  /// Create the login for an invite that never signed up: the account is
+  /// made with this password and the invite becomes an active member.
+  Future<String> createInviteLogin({
+    required String email,
+    required String password,
+  }) {
+    final problem = passwordProblem(password);
+    if (problem != null) throw PosFailure(problem);
+    return _password({'email': email.trim(), 'password': password});
+  }
+
+  /// Returns the member's email as the function confirms it.
+  Future<String> _password(Map<String, dynamic> body) async {
+    try {
+      final res = await _client.functions.invoke(
+        'set-member-password',
+        body: {'tenant_id': _tenantId, ...body},
+      );
+      final data = res.data;
+      final email = data is Map ? data['email'] : null;
+      return email is String ? email : '';
+    } on FunctionException catch (e) {
+      final d = e.details;
+      final msg = d is Map ? d['error'] : null;
+      throw PosFailure(
+        msg is String
+            ? friendlyTeamError(msg)
+            : "Couldn't change the password just now. Nothing was changed.",
+      );
+    } catch (_) {
+      throw const PosTransientFailure(
+        "Couldn't reach the server to change the password. Nothing was "
+        'changed.',
+      );
+    }
+  }
+
   /// An 8-character code someone can redeem to join. Null [roleId] leaves the
   /// server's default (waiter).
   Future<String> createJoinCode({String? roleId}) => _run(() async {
@@ -562,6 +619,18 @@ class TeamRepository {
 }
 
 final _emailPattern = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+
+/// The web's `passwordProblem`, so a password the phone accepts is one the
+/// server accepts. The Edge Function checks again.
+String? passwordProblem(String password) {
+  if (password.length < 8) return 'Use at least 8 characters.';
+  if (password.length > 72) return 'Keep it to 72 characters or fewer.';
+  if (!RegExp(r'[a-zA-Z]').hasMatch(password) ||
+      !RegExp(r'\d').hasMatch(password)) {
+    return 'Mix letters and numbers.';
+  }
+  return null;
+}
 
 /// Server prose → something the person holding the phone can act on.
 ///

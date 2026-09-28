@@ -6,6 +6,7 @@ import '../../data/supabase/team_repository.dart';
 import '../tenant/tenant_providers.dart';
 import 'add_member_sheet.dart';
 import 'join_code_sheet.dart';
+import 'password_dialog.dart';
 import 'role_editor_screen.dart';
 import 'role_picker_sheet.dart';
 import 'roles_tab.dart';
@@ -165,6 +166,33 @@ class _TeamScreenState extends ConsumerState<TeamScreen>
         await _run((repo) async {
           await repo.removeMember(member.userId!);
           return '${member.email} removed.';
+        });
+
+      case MemberAction.setPassword:
+        final password = await showPasswordDialog(
+          context,
+          email: member.email,
+          create: false,
+        );
+        if (password == null || !mounted) return;
+        await _run((repo) async {
+          await repo.setMemberPassword(
+            userId: member.userId!,
+            password: password,
+          );
+          return 'Password updated for ${member.email}.';
+        });
+
+      case MemberAction.createLogin:
+        final password = await showPasswordDialog(
+          context,
+          email: member.email,
+          create: true,
+        );
+        if (password == null || !mounted) return;
+        await _run((repo) async {
+          await repo.createInviteLogin(email: member.email, password: password);
+          return 'Login created for ${member.email}. They can sign in now.';
         });
 
       case MemberAction.cancelInvite:

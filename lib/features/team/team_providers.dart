@@ -95,6 +95,15 @@ final canEditTeamProvider = Provider<bool>(
   (ref) => ref.watch(hasPermissionProvider('staff.edit')),
 );
 
+/// Setting someone's password is owner-only — `assert_can_set_member_password`
+/// checks `has_tenant_role(_tenant, 'owner')`, not a permission key — so the
+/// gate is the membership's base role, as the web's `canManagePasswords` is.
+/// The role comes from the server's `user_tenants` row, not from anything the
+/// app decided.
+final canManagePasswordsProvider = Provider<bool>(
+  (ref) => ref.watch(activeTenantProvider.select((m) => m?.role)) == 'owner',
+);
+
 /// `remove_member` refuses self-removal, so the row for the person holding the
 /// phone must not offer the button in the first place.
 final myUserIdProvider = Provider<String?>(

@@ -9,7 +9,14 @@ import 'team_providers.dart';
 
 /// What a row's overflow menu can do. Named rather than raw strings so the
 /// switch in the screen is exhaustive.
-enum MemberAction { changeRole, approve, remove, cancelInvite }
+enum MemberAction {
+  changeRole,
+  approve,
+  remove,
+  cancelInvite,
+  setPassword,
+  createLogin,
+}
 
 /// Who is on the team.
 class StaffTab extends ConsumerWidget {
@@ -22,6 +29,7 @@ class StaffTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final members = ref.watch(teamMembersProvider);
     final canEdit = ref.watch(canEditTeamProvider);
+    final canManagePasswords = ref.watch(canManagePasswordsProvider);
     final myUserId = ref.watch(myUserIdProvider);
     final owners = ref.watch(ownerCountProvider);
 
@@ -53,6 +61,7 @@ class StaffTab extends ConsumerWidget {
                 _MemberRow(
                   member: member,
                   canEdit: canEdit,
+                  canManagePasswords: canManagePasswords,
                   isMe: member.userId != null && member.userId == myUserId,
                   isLastOwner: member.isOwner && owners <= 1,
                   onAction: (action) => onAction(member, action),
@@ -69,6 +78,7 @@ class _MemberRow extends StatelessWidget {
   const _MemberRow({
     required this.member,
     required this.canEdit,
+    required this.canManagePasswords,
     required this.isMe,
     required this.isLastOwner,
     required this.onAction,
@@ -76,6 +86,10 @@ class _MemberRow extends StatelessWidget {
 
   final TeamMember member;
   final bool canEdit;
+
+  /// Owner only. Never offered on an owner's row or your own — the server
+  /// refuses both, and a menu item that always fails is a trap.
+  final bool canManagePasswords;
 
   /// `remove_member` refuses self-removal, so the control is never offered.
   final bool isMe;
@@ -98,6 +112,16 @@ class _MemberRow extends StatelessWidget {
         const PopupMenuItem(
           value: MemberAction.approve,
           child: Text('Approve'),
+        ),
+      if (canManagePasswords && !member.isInvite && !member.isOwner && !isMe)
+        const PopupMenuItem(
+          value: MemberAction.setPassword,
+          child: Text('Set password'),
+        ),
+      if (canManagePasswords && member.isInvite && !member.isOwner)
+        const PopupMenuItem(
+          value: MemberAction.createLogin,
+          child: Text('Create login'),
         ),
       if (member.isInvite)
         const PopupMenuItem(

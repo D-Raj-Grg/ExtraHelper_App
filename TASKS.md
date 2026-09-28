@@ -33,6 +33,17 @@ it lands, on the build already installed. This entry is the rest of the owner's 
 - [ ] Error text from the new lookup arrives as prose ("This coupon has expired"); `_friendly`'s
       `contains('percent')` rewrite is avoided server-side by saying "10% off". Nothing to map.
 
+## Team: set a staff password from the phone (2026-09-28)
+
+- [x] Edge Function `set-member-password` in the web repo (the only server code that may hold the
+      service key besides the Next.js actions); deployed via MCP. Same assert RPCs as the web, under
+      the caller's JWT; audit `password_reset` written by the function.
+- [x] `TeamRepository.setMemberPassword` / `createInviteLogin`; `canManagePasswordsProvider` (owner
+      base role); **Set password** / **Create login** in the row menu; `password_dialog.dart`.
+- [ ] Owner to try it on device with a throwaway staff account (not verified against live logins).
+- [ ] Web `setMemberPassword` could call the same function instead of its own admin client — one
+      path, not two. Not done: the web works and the function was written to mirror it exactly.
+
 ## Coupons: manage them on the phone (2026-09-28)
 
 Parity with the web's Insights → Coupons, so a manager on the floor can make a code and show its
