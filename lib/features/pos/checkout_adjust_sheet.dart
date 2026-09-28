@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'package:mobile_scanner/mobile_scanner.dart';
+
 import '../../core/format/money.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/choice_chip.dart';
+import '../inventory/scanner_sheet.dart';
 import 'bill_math.dart';
 import 'bill_models.dart';
+import 'coupon_code.dart';
 
 /// What the adjustments sheet decided. The screen performs it, so every write
 /// on this page goes through the one `mutate` path and the one busy guard.
@@ -45,6 +49,12 @@ class CouponAdjustment extends BillAdjustment {
   const CouponAdjustment(this.code);
 
   final String code;
+}
+
+/// Take the guest's coupon back off (a mistyped code, or they changed their
+/// mind). The use goes back to the campaign — `remove_coupon`'s job.
+class RemoveCouponAdjustment extends BillAdjustment {
+  const RemoveCouponAdjustment();
 }
 
 class ChargeAdjustment extends BillAdjustment {
@@ -220,6 +230,38 @@ class _AdjustSheetState extends State<_AdjustSheet> {
     );
   }
 
+  void _submitCoupon() {
+    final code = extractCouponCode(_coupon.text);
+    if (code == null) {
+      return _fail(
+        _coupon.text.trim().isEmpty
+            ? 'Enter a coupon code.'
+            : "That doesn't look like a coupon code.",
+      );
+    }
+    _finish(CouponAdjustment(code));
+  }
+
+  /// Read the flyer's square. The scan *is* the confirmation: a code that
+  /// came off a camera is applied straight away rather than parked in the
+  /// field for a second tap.
+  Future<void> _scanCoupon() async {
+    final raw = await showScannerSheet(
+      context,
+      title: 'Scan a coupon',
+      hint: "Point at the flyer's QR. Or close this and type the code.",
+      fallbackHint: 'Typing the code works either way.',
+      formats: const [BarcodeFormat.qrCode],
+    );
+    if (raw == null || !mounted) return;
+    final code = extractCouponCode(raw);
+    if (code == null) {
+      _fail("That QR isn't a coupon.");
+      return;
+    }
+    _finish(CouponAdjustment(code));
+  }
+
   Future<void> _submitComplimentary() async {
     final reason = await showReasonDialog(
       context: context,
@@ -237,6 +279,7 @@ class _AdjustSheetState extends State<_AdjustSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final existingDiscount = widget.snapshot.staffBillDiscount;
+    final existingCoupon = widget.snapshot.couponDiscount;
     final bill = widget.snapshot.bill;
     final roundOff = roundOffCents(
       totalCents: bill.totalCents,
@@ -346,29 +389,59 @@ class _AdjustSheetState extends State<_AdjustSheet> {
             if (widget.canTakePayment) ...[
               const SizedBox(height: 18),
               SheetLabel('Coupon'),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _coupon,
-                      textCapitalization: TextCapitalization.characters,
-                      decoration: const InputDecoration(
-                        labelText: 'Code',
-                        isDense: true,
+              // One coupon per bill, and the server refuses a second — so once
+              // one is on, the field gives way to what is on and a way off.
+              if (existingCoupon != null)
+                Row(
+                  children: [
+                    const Icon(Icons.confirmation_number_outlined, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Now: ${existingCoupon.couponCode} · '
+                        '${_discountLabel(existingCoupon)}',
+                        style: theme.textTheme.bodySmall,
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  SheetAction(
-                    label: 'Apply',
-                    onPressed: () {
-                      final code = _coupon.text.trim();
-                      if (code.isEmpty) return _fail('Enter a coupon code.');
-                      _finish(CouponAdjustment(code));
-                    },
-                  ),
-                ],
-              ),
+                    const SizedBox(width: 8),
+                    TextButton.icon(
+                      icon: const Icon(Icons.close, size: 18),
+                      label: const Text('Remove'),
+                      onPressed: () => _finish(const RemoveCouponAdjustment()),
+                    ),
+                  ],
+                )
+              else
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _coupon,
+                        textCapitalization: TextCapitalization.characters,
+                        autocorrect: false,
+                        textInputAction: TextInputAction.done,
+                        onSubmitted: (_) => _submitCoupon(),
+                        decoration: const InputDecoration(
+                          labelText: 'Code',
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Material's default is 40dp; the rule is 44 (Tokens.tapTarget).
+                    IconButton.filledTonal(
+                      tooltip: 'Scan coupon',
+                      icon: const Icon(Icons.qr_code_scanner),
+                      constraints: const BoxConstraints(
+                        minWidth: Tokens.tapTarget,
+                        minHeight: Tokens.tapTarget,
+                      ),
+                      onPressed: _scanCoupon,
+                    ),
+                    const SizedBox(width: 8),
+                    SheetAction(label: 'Apply', onPressed: _submitCoupon),
+                  ],
+                ),
             ],
 
             if (widget.canCharge) ...[

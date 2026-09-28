@@ -235,6 +235,9 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                 billId: widget.billId,
                 code: code,
               ),
+              RemoveCouponAdjustment() => repo.removeCoupon(
+                billId: widget.billId,
+              ),
               ChargeAdjustment(:final label, :final amountCents) =>
                 repo.addCharge(
                   billId: widget.billId,
@@ -1125,6 +1128,7 @@ class _TotalsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bill = snapshot.bill;
+    final couponCode = snapshot.couponDiscount?.couponCode;
 
     // Row visibility mirrors the web's totals panel exactly: a zero line is not
     // a line. A bill with no tax should not carry a row saying so.
@@ -1166,7 +1170,9 @@ class _TotalsCard extends StatelessWidget {
             ),
           if (bill.discountCents > 0)
             MoneyRow(
-              label: 'Discount',
+              // One merged figure (coupon + staff + line discounts), named
+              // after the coupon when there is one — the guest will ask.
+              label: couponCode == null ? 'Discount' : 'Discount · $couponCode',
               cents: -bill.discountCents,
               currency: currency,
               muted: true,

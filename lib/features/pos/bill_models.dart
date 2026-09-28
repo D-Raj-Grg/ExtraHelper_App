@@ -502,6 +502,16 @@ class BillSnapshot {
 
   bool get hasStaffBillDiscount => staffBillDiscount != null;
 
+  /// The guest's coupon on this bill, if any. The server keeps this to one
+  /// row (a partial unique index on `discounts`), so the first match is the
+  /// only match.
+  DiscountRow? get couponDiscount {
+    for (final d in discounts) {
+      if (d.orderItemId == null && d.couponCode != null) return d;
+    }
+    return null;
+  }
+
   int get chargesCents => charges.fold(0, (n, c) => n + c.amountCents);
 
   /// Money can still be taken. A void bill can't, whatever it is owed.

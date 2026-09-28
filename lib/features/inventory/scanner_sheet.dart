@@ -8,15 +8,46 @@ import '../../core/theme/tokens.dart';
 /// The camera is an accelerator, never a gate: everything reachable from here is
 /// also reachable by typing into the search box, so a denied permission, a dead
 /// camera or an unlabelled shelf all degrade to the same working screen.
-Future<String?> showScannerSheet(BuildContext context) =>
-    showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => const _ScannerSheet(),
-    );
+///
+/// The words around the frame are the caller's: the store room says "item
+/// label", the checkout says "coupon". The square is the same.
+Future<String?> showScannerSheet(
+  BuildContext context, {
+  String title = 'Scan an item label',
+  String hint =
+      'Hold the code inside the frame. No label on the shelf? Close this '
+      'and search by name instead.',
+  String fallbackHint = 'Searching by name works either way.',
+  List<BarcodeFormat>? formats,
+}) => showModalBottomSheet<String>(
+  context: context,
+  isScrollControlled: true,
+  builder: (_) => _ScannerSheet(
+    title: title,
+    hint: hint,
+    fallbackHint: fallbackHint,
+    formats: formats,
+  ),
+);
 
 class _ScannerSheet extends StatefulWidget {
-  const _ScannerSheet();
+  const _ScannerSheet({
+    required this.title,
+    required this.hint,
+    required this.fallbackHint,
+    this.formats,
+  });
+
+  final String title;
+  final String hint;
+
+  /// What to do when the camera is off — appended to the denied-permission
+  /// message so it names the way round it for *this* screen.
+  final String fallbackHint;
+
+  /// Null = every format the store room needs. A coupon sheet narrows it to
+  /// QR so a product barcode on the counter is not read as a code.
+  final List<BarcodeFormat>? formats;
 
   @override
   State<_ScannerSheet> createState() => _ScannerSheetState();
@@ -26,16 +57,18 @@ class _ScannerSheetState extends State<_ScannerSheet> {
   /// The controller is owned and disposed here — the same rule the void-reason
   /// dialog exists to enforce, and a camera left running is worse than a leaked
   /// text controller.
-  final MobileScannerController _controller = MobileScannerController(
+  late final MobileScannerController _controller = MobileScannerController(
     detectionSpeed: DetectionSpeed.noDuplicates,
-    formats: const [
-      BarcodeFormat.ean13,
-      BarcodeFormat.ean8,
-      BarcodeFormat.upcA,
-      BarcodeFormat.upcE,
-      BarcodeFormat.code128,
-      BarcodeFormat.qrCode,
-    ],
+    formats:
+        widget.formats ??
+        const [
+          BarcodeFormat.ean13,
+          BarcodeFormat.ean8,
+          BarcodeFormat.upcA,
+          BarcodeFormat.upcE,
+          BarcodeFormat.code128,
+          BarcodeFormat.qrCode,
+        ],
   );
 
   /// One scan per sheet. Without this the detector fires again while the pop is
@@ -76,10 +109,7 @@ class _ScannerSheetState extends State<_ScannerSheet> {
                 const Icon(Icons.qr_code_scanner),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Text(
-                    'Scan an item label',
-                    style: theme.textTheme.titleMedium,
-                  ),
+                  child: Text(widget.title, style: theme.textTheme.titleMedium),
                 ),
                 IconButton(
                   tooltip: 'Close',
@@ -98,17 +128,15 @@ class _ScannerSheetState extends State<_ScannerSheet> {
                   controller: _controller,
                   onDetect: _onDetect,
                   // A permission the user declined is a state, not a crash.
-                  errorBuilder: (context, error) =>
-                      _ScannerUnavailable(error: error),
+                  errorBuilder: (context, error) => _ScannerUnavailable(
+                    error: error,
+                    fallbackHint: widget.fallbackHint,
+                  ),
                 ),
               ),
             ),
             const SizedBox(height: 12),
-            Text(
-              'Hold the code inside the frame. No label on the shelf? Close this '
-              'and search by name instead.',
-              style: theme.textTheme.bodySmall,
-            ),
+            Text(widget.hint, style: theme.textTheme.bodySmall),
           ],
         ),
       ),
@@ -118,9 +146,10 @@ class _ScannerSheetState extends State<_ScannerSheet> {
 
 /// No camera, or no permission for it. Says which, and says the way round it.
 class _ScannerUnavailable extends StatelessWidget {
-  const _ScannerUnavailable({required this.error});
+  const _ScannerUnavailable({required this.error, required this.fallbackHint});
 
   final MobileScannerException error;
+  final String fallbackHint;
 
   @override
   Widget build(BuildContext context) {
@@ -150,9 +179,9 @@ class _ScannerUnavailable extends StatelessWidget {
               Text(
                 denied
                     ? 'Turn the camera on for ExtraHelper in your phone settings '
-                          'to scan labels. Searching by name works either way.'
-                    : 'Close this and search by name — nothing here needs the '
-                          'camera.',
+                          'to scan. $fallbackHint'
+                    : 'Close this and carry on by hand — nothing here needs '
+                          'the camera.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall,
               ),

@@ -48,7 +48,7 @@
 		<key>UIStatusBarHidden</key>
 		<false/>
 		<key>NSCameraUsageDescription</key>
-		<string>ExtraHelper uses the camera to scan item labels while you count the store room, and to photograph expense receipts. You can always search by name or skip the photo instead.</string>
+		<string>ExtraHelper uses the camera to scan item labels while you count the store room, to photograph expense receipts, and to scan coupon QR codes at checkout. You can always search by name, skip the photo, or type the code instead.</string>
 		<key>NSPhotoLibraryUsageDescription</key>
 		<string>ExtraHelper lets you attach a photo of a receipt to an expense you logged.</string>
 		<key>NSBluetoothAlwaysUsageDescription</key>
