@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/app_scaffold.dart';
 import '../../core/format/money.dart';
 import '../../core/format/when.dart';
+import '../../core/theme/tokens.dart';
 import '../../core/widgets/notice.dart';
 import '../../data/supabase/coupons_repository.dart';
 import '../../data/supabase/pos_repository.dart' show PosFailure;
@@ -342,8 +343,8 @@ class _CouponTile extends StatelessWidget {
     final validity = switch ((c.validFrom, c.validTo)) {
       (null, null) => 'Any time',
       (final f?, null) => 'From ${billDate(f)}',
-      (null, final t?) => 'Through ${billDate(_lastDay(t))}',
-      (final f?, final t?) => '${billDate(f)} – ${billDate(_lastDay(t))}',
+      (null, final t?) => 'Through ${billDate(lastDayOf(t))}',
+      (final f?, final t?) => '${billDate(f)} – ${billDate(lastDayOf(t))}',
     };
     const tabular = [FontFeature.tabularFigures()];
 
@@ -400,11 +401,6 @@ class _CouponTile extends StatelessWidget {
       ),
     );
   }
-
-  /// Stored as the exclusive start of the next day; shown as the last day
-  /// it works.
-  static DateTime _lastDay(DateTime exclusiveEnd) =>
-      exclusiveEnd.toLocal().subtract(const Duration(days: 1));
 }
 
 class _StatusBadge extends StatelessWidget {
@@ -414,16 +410,14 @@ class _StatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    // Icon + word carry the state; the semantic hue only reinforces.
+    final semantic = context.semantic;
     final (icon, color) = switch (status) {
-      CouponStatus.active => (Icons.check_circle_outline, scheme.primary),
-      CouponStatus.paused => (
-        Icons.pause_circle_outline,
-        scheme.onSurfaceVariant,
-      ),
-      CouponStatus.scheduled => (Icons.schedule, scheme.tertiary),
-      CouponStatus.expired => (Icons.event_busy, scheme.error),
-      CouponStatus.usedUp => (Icons.block, scheme.error),
+      CouponStatus.active => (Icons.check_circle_outline, semantic.goodText),
+      CouponStatus.paused => (Icons.pause_circle_outline, semantic.neutral),
+      CouponStatus.scheduled => (Icons.schedule, semantic.infoText),
+      CouponStatus.expired => (Icons.event_busy, semantic.dangerText),
+      CouponStatus.usedUp => (Icons.block, semantic.dangerText),
     };
     return Row(
       mainAxisSize: MainAxisSize.min,

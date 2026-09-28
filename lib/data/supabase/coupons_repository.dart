@@ -197,6 +197,25 @@ class CouponDraft {
     return null;
   }
 
+  /// The `upsert_coupon` argument map, exactly as the web's `saveCoupon`
+  /// sends it: null id creates, blank code lets the server make one, instants
+  /// as ISO-8601 UTC, none-or-all order types as null.
+  Map<String, dynamic> toRpcParams(String tenantId) => {
+    '_tenant': tenantId,
+    '_id': id,
+    '_code': _blankToNull(code)?.toUpperCase(),
+    '_name': _blankToNull(name),
+    '_type': type,
+    '_value': value,
+    '_is_active': isActive,
+    '_valid_from': validFrom?.toUtc().toIso8601String(),
+    '_valid_to': validTo?.toUtc().toIso8601String(),
+    '_usage_limit': usageLimit,
+    '_min_subtotal_cents': minSubtotalCents,
+    '_once_per_customer': oncePerCustomer,
+    '_order_types': effectiveOrderTypes,
+  };
+
   /// Every order type, or none, means no rule — the server stores null.
   List<String>? get effectiveOrderTypes {
     final t = orderTypes;
@@ -230,21 +249,7 @@ class CouponsRepository {
   Future<String> save(CouponDraft draft) async {
     final problem = draft.validate();
     if (problem != null) throw PosFailure(problem);
-    final res = await _write('upsert_coupon', {
-      '_tenant': _tenantId,
-      '_id': draft.id,
-      '_code': _blankToNull(draft.code)?.toUpperCase(),
-      '_name': _blankToNull(draft.name),
-      '_type': draft.type,
-      '_value': draft.value,
-      '_is_active': draft.isActive,
-      '_valid_from': draft.validFrom?.toUtc().toIso8601String(),
-      '_valid_to': draft.validTo?.toUtc().toIso8601String(),
-      '_usage_limit': draft.usageLimit,
-      '_min_subtotal_cents': draft.minSubtotalCents,
-      '_once_per_customer': draft.oncePerCustomer,
-      '_order_types': draft.effectiveOrderTypes,
-    });
+    final res = await _write('upsert_coupon', draft.toRpcParams(_tenantId));
     return res is String ? res : draft.id ?? '';
   }
 

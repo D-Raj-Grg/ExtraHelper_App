@@ -27,6 +27,7 @@ Future<void> showCouponQrSheet(
 }) => showModalBottomSheet<void>(
   context: context,
   isScrollControlled: true,
+  useSafeArea: true,
   showDragHandle: true,
   builder: (_) => _CouponQrSheet(coupon: coupon, currency: currency),
 );
@@ -48,11 +49,21 @@ class _CouponQrSheetState extends ConsumerState<_CouponQrSheet> {
   bool _busy = false;
   bool _copied = false;
 
-  String get _payload => couponQrPayload(
-    origin: Env.appUrl,
-    slug: ref.read(activeTenantProvider)?.slug ?? '',
-    code: widget.coupon.code,
-  );
+  /// Fixed for the sheet's life: nothing it depends on changes while a
+  /// coupon is on screen, and the grid is the expensive part.
+  late final String _payload;
+  late final List<List<bool>> _grid;
+
+  @override
+  void initState() {
+    super.initState();
+    _payload = couponQrPayload(
+      origin: Env.appUrl,
+      slug: ref.read(activeTenantProvider)?.slug ?? '',
+      code: widget.coupon.code,
+    );
+    _grid = qrModules(_payload);
+  }
 
   void _say(String msg) {
     if (!mounted) return;
@@ -84,6 +95,7 @@ class _CouponQrSheetState extends ConsumerState<_CouponQrSheet> {
             coupon: widget.coupon,
             currency: widget.currency,
             payload: _payload,
+            grid: _grid,
             forExport: true,
           ),
         ),
@@ -167,6 +179,7 @@ class _CouponQrSheetState extends ConsumerState<_CouponQrSheet> {
                     coupon: c,
                     currency: widget.currency,
                     payload: _payload,
+                    grid: _grid,
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -222,12 +235,14 @@ class _QrCard extends StatelessWidget {
     required this.coupon,
     required this.currency,
     required this.payload,
+    required this.grid,
     this.forExport = false,
   });
 
   final Coupon coupon;
   final String currency;
   final String payload;
+  final List<List<bool>> grid;
   final bool forExport;
 
   @override
@@ -236,6 +251,9 @@ class _QrCard extends StatelessWidget {
     return Container(
       width: forExport ? kBillExportWidth : 280,
       padding: const EdgeInsets.all(20),
+      // Pure white ground and pure black modules on purpose: a camera wants
+      // maximum contrast, and the card must look the same in dark mode as in
+      // the PNG it becomes. The text uses the light-theme ink tokens.
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border.all(color: theme.colorScheme.outline),
@@ -244,12 +262,12 @@ class _QrCard extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          QrSquare(payload: payload, size: forExport ? 300 : 220),
+          QrSquare(payload: payload, grid: grid, size: forExport ? 300 : 220),
           const SizedBox(height: 14),
           Text(
             coupon.code,
             style: theme.textTheme.titleLarge?.copyWith(
-              color: Colors.black,
+              color: Tokens.lightForeground,
               fontFamily: 'monospace',
               fontWeight: FontWeight.w700,
               letterSpacing: 2,
@@ -259,7 +277,9 @@ class _QrCard extends StatelessWidget {
           Text(
             couponSummary(coupon, currency),
             textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall?.copyWith(color: Colors.black87),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: Tokens.lightForeground,
+            ),
           ),
           if (coupon.name != null) ...[
             const SizedBox(height: 2),
@@ -278,14 +298,23 @@ class _QrCard extends StatelessWidget {
 /// A QR drawn from `zxing2`'s encoder — no image package, no network. Quiet
 /// zone is four modules, the spec minimum, so a camera finds the edges.
 class QrSquare extends StatelessWidget {
-  const QrSquare({super.key, required this.payload, required this.size});
+  const QrSquare({
+    super.key,
+    required this.payload,
+    required this.grid,
+    required this.size,
+  });
 
+  /// What [grid] encodes — for the accessibility label only.
   final String payload;
+
+  /// From [qrModules], computed once by the owner: encoding is not free and
+  /// a rebuild for a snackbar should not redo it.
+  final List<List<bool>> grid;
   final double size;
 
   @override
   Widget build(BuildContext context) {
-    final grid = qrModules(payload);
     if (grid.isEmpty) return SizedBox.square(dimension: size);
     return Semantics(
       label: 'QR code for $payload',

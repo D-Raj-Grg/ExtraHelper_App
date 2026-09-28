@@ -111,4 +111,16 @@ void main() {
       expect(grid[1][1], isFalse);
     });
   });
+
+  group('day bounds', () {
+    test('the stored exclusive end shows as the day before, and back', () {
+      // Stored as local midnight starting Oct 1 → works through Sep 30.
+      final stored = DateTime(2026, 10, 1);
+      expect(lastDayOf(stored), DateTime(2026, 9, 30));
+      expect(exclusiveEndOf(DateTime(2026, 9, 30)), stored);
+      // Calendar arithmetic across a month end and a year end.
+      expect(lastDayOf(DateTime(2027, 1, 1)), DateTime(2026, 12, 31));
+      expect(exclusiveEndOf(DateTime(2026, 12, 31)), DateTime(2027, 1, 1));
+    });
+  });
 }

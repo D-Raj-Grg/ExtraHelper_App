@@ -56,6 +56,19 @@ String couponSummary(Coupon c, String currency) {
   return parts.join(' · ');
 }
 
+/// The last day a coupon works, as a local calendar day, from the stored
+/// exclusive bound (start of the following day). Calendar arithmetic, not
+/// 24 hours: a DST night would otherwise land a day out.
+DateTime lastDayOf(DateTime exclusiveEnd) {
+  final l = exclusiveEnd.toLocal();
+  return DateTime(l.year, l.month, l.day - 1);
+}
+
+/// The stored bound for a coupon that works through [lastDay]: local
+/// midnight at the start of the next day.
+DateTime exclusiveEndOf(DateTime lastDay) =>
+    DateTime(lastDay.year, lastDay.month, lastDay.day + 1);
+
 /// The URL a flyer QR encodes: the storefront with the code pre-filled.
 /// Same shape as the web's `couponUrl`, so a QR made here scans on the web
 /// checkout and one printed there scans on the phone.

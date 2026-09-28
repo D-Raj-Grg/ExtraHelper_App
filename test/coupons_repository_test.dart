@@ -174,4 +174,63 @@ void main() {
       expect(paused.orderTypes, ['delivery']);
     });
   });
+
+  group('CouponDraft.toRpcParams', () {
+    test('sends every argument upsert_coupon takes, nulls where blank', () {
+      final params = const CouponDraft(
+        type: 'percent',
+        value: 10,
+        code: '  ',
+        name: '',
+      ).toRpcParams('t1');
+      expect(params.keys, [
+        '_tenant',
+        '_id',
+        '_code',
+        '_name',
+        '_type',
+        '_value',
+        '_is_active',
+        '_valid_from',
+        '_valid_to',
+        '_usage_limit',
+        '_min_subtotal_cents',
+        '_once_per_customer',
+        '_order_types',
+      ]);
+      expect(params['_tenant'], 't1');
+      expect(params['_id'], isNull);
+      expect(params['_code'], isNull);
+      expect(params['_name'], isNull);
+      expect(params['_value'], 10);
+      expect(params['_is_active'], isTrue);
+      expect(params['_valid_from'], isNull);
+      expect(params['_usage_limit'], isNull);
+      expect(params['_min_subtotal_cents'], 0);
+      expect(params['_order_types'], isNull);
+    });
+
+    test('dates go as ISO-8601 UTC and the code is uppercased', () {
+      final params = CouponDraft(
+        id: 'cp-1',
+        code: 'save10-7kq2',
+        type: 'flat',
+        value: 200,
+        isActive: false,
+        validFrom: DateTime.utc(2026, 9, 30, 18, 15),
+        validTo: DateTime.utc(2026, 10, 31, 18, 15),
+        usageLimit: 5,
+        minSubtotalCents: 100,
+        oncePerCustomer: true,
+        orderTypes: const ['pickup'],
+      ).toRpcParams('t1');
+      expect(params['_id'], 'cp-1');
+      expect(params['_code'], 'SAVE10-7KQ2');
+      expect(params['_is_active'], isFalse);
+      expect(params['_valid_from'], '2026-09-30T18:15:00.000Z');
+      expect(params['_valid_to'], '2026-10-31T18:15:00.000Z');
+      expect(params['_usage_limit'], 5);
+      expect(params['_order_types'], ['pickup']);
+    });
+  });
 }

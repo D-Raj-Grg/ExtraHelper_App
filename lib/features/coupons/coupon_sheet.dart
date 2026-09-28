@@ -25,6 +25,7 @@ Future<CouponDraft?> showCouponSheet(
 }) => showModalBottomSheet<CouponDraft>(
   context: context,
   isScrollControlled: true,
+  useSafeArea: true,
   showDragHandle: true,
   builder: (_) => Padding(
     padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
@@ -58,6 +59,12 @@ class _CouponSheetState extends State<_CouponSheet> {
   /// on submit.
   DateTime? _through;
 
+  /// Whether a date was picked or cleared *in this sheet*. Untouched dates
+  /// go back exactly as they came: the stored instant is in the tenant's
+  /// zone, and re-deriving it from a phone in another zone would move it.
+  bool _fromTouched = false;
+  bool _throughTouched = false;
+
   String? _error;
 
   Coupon? get _editing => widget.editing;
@@ -80,9 +87,7 @@ class _CouponSheetState extends State<_CouponSheet> {
     _oncePerCustomer = e?.oncePerCustomer ?? false;
     _orderTypes = {...?e?.orderTypes};
     _from = e?.validFrom?.toLocal();
-    final to = e?.validTo?.toLocal();
-    // Stored exclusive start-of-next-day → the inclusive day shown.
-    _through = to == null ? null : _day(to.subtract(const Duration(days: 1)));
+    _through = e?.validTo == null ? null : lastDayOf(e!.validTo!);
   }
 
   @override
@@ -99,24 +104,42 @@ class _CouponSheetState extends State<_CouponSheet> {
 
   Future<void> _pickDate({required bool start}) async {
     final now = DateTime.now();
-    final initial = (start ? _from : _through) ?? _day(now);
+    final initial = _day((start ? _from : _through) ?? now);
+    // The range must contain the initial date or the picker asserts — an
+    // old campaign's start can sit before "a year ago".
+    var first = DateTime(now.year - 1);
+    var last = DateTime(now.year + 5);
+    if (initial.isBefore(first)) first = initial;
+    if (initial.isAfter(last)) last = initial;
     final picked = await showDatePicker(
       context: context,
       initialDate: initial,
-      firstDate: DateTime(now.year - 1),
-      lastDate: DateTime(now.year + 5),
+      firstDate: first,
+      lastDate: last,
       helpText: start ? 'Valid from' : 'Valid through',
     );
     if (picked == null || !mounted) return;
     setState(() {
       if (start) {
         _from = _day(picked);
+        _fromTouched = true;
       } else {
         _through = _day(picked);
+        _throughTouched = true;
       }
       _error = null;
     });
   }
+
+  void _clearDate({required bool start}) => setState(() {
+    if (start) {
+      _from = null;
+      _fromTouched = true;
+    } else {
+      _through = null;
+      _throughTouched = true;
+    }
+  });
 
   static int? _cents(String raw) {
     final t = raw.trim();
@@ -150,8 +173,10 @@ class _CouponSheetState extends State<_CouponSheet> {
       type: _type,
       value: value,
       isActive: _active,
-      validFrom: _from,
-      validTo: _through?.add(const Duration(days: 1)),
+      validFrom: _fromTouched ? _from : _editing?.validFrom,
+      validTo: _throughTouched
+          ? (_through == null ? null : exclusiveEndOf(_through!))
+          : _editing?.validTo,
       usageLimit: limit,
       minSubtotalCents: minCents,
       oncePerCustomer: _oncePerCustomer,
@@ -278,7 +303,7 @@ class _CouponSheetState extends State<_CouponSheet> {
                     onTap: () => _pickDate(start: true),
                     onClear: _from == null
                         ? null
-                        : () => setState(() => _from = null),
+                        : () => _clearDate(start: true),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -289,7 +314,7 @@ class _CouponSheetState extends State<_CouponSheet> {
                     onTap: () => _pickDate(start: false),
                     onClear: _through == null
                         ? null
-                        : () => setState(() => _through = null),
+                        : () => _clearDate(start: false),
                   ),
                 ),
               ],
@@ -439,12 +464,14 @@ class _DateButton extends StatelessWidget {
             ),
           ),
           if (onClear != null)
-            InkWell(
-              onTap: onClear,
-              customBorder: const CircleBorder(),
-              child: const Padding(
-                padding: EdgeInsets.all(4),
-                child: Icon(Icons.close, size: 16),
+            IconButton(
+              onPressed: onClear,
+              tooltip: 'Clear $label',
+              icon: const Icon(Icons.close, size: 18),
+              visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints(
+                minWidth: Tokens.tapTarget,
+                minHeight: Tokens.tapTarget,
               ),
             ),
         ],
