@@ -12,6 +12,8 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 ## [Unreleased]
 
+## [1.0.16] — 2026-09-28 · Costs, coupons and customers
+
 ### Added
 - **Scan the coupon.** The coupon box on the checkout's adjustments sheet has a **Scan** button beside it: point the camera at the flyer's QR and the code applies itself. Typing still works. A coupon already on the bill shows as "Now: SAVE10-7KQ2 · 10%" with **Remove**, and the totals card names it ("Discount · SAVE10-7KQ2"). Needs the web migration `20260928120000_coupons` on the server — which also makes the typed coupon box work for the first time (it had been failing on a database error since it shipped).
 - **Cost price on the dish editor.** Under the price there is now a **Cost price** field — what the dish costs you to make. It is shown only to people with the new **See dish costs & profit** permission (owners by default); everyone else sees the form as before, and saving without the field never touches a cost already on file. Leave it blank to clear it.
