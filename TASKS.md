@@ -6,6 +6,32 @@
 
 **Legend:** `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked (see Open Questions)
 
+## Coupons: scan the flyer at checkout (2026-09-28, pairs with web migration `20260928120000_coupons`)
+
+The coupon field on the adjust sheet has been there since checkout shipped — and has failed every
+time, because `apply_coupon` read columns the table never had (see `../extrahelper/TASKS.md`,
+"Coupons"). The migration fixes the RPC under its **same signature**, so this field works the moment
+it lands, on the build already installed. This entry is the rest of the owner's ask: scan the flyer.
+
+- [x] `showScannerSheet` takes `title` / `hint` / `fallbackHint` / `formats` (defaults keep the
+      store-room copy; both inventory callers unchanged). Camera usage strings (`Info.plist`,
+      manifest comment) now mention coupons.
+- [x] `lib/features/pos/coupon_code.dart`: `extractCouponCode` — the flyer QR encodes
+      `/s/{slug}?coupon=CODE`, so a scan hands back a URL; this pulls the code out (or takes a bare
+      code), uppercases, and checks the shape. Parsing only — `apply_coupon` decides validity. Mirror
+      of `extrahelper/lib/coupon-constants.ts`. `test/coupon_code_test.dart`.
+- [x] Adjust sheet: **Scan** (`IconButton.filledTonal`, 44dp via explicit constraints) beside the
+      code field, QR-only formats; a scan applies straight away. A coupon already on the bill shows
+      "Now: CODE · 10%" + **Remove** → new `RemoveCouponAdjustment` → `BillRepository.removeCoupon`
+      → `remove_coupon` (hands the use back to the campaign). `BillSnapshot.couponDiscount`.
+- [x] `_TotalsCard`: "Discount · CODE" when a coupon is on the bill.
+- [x] Tests: Scan present with `payment.take`, absent without; coupon named on the card and
+      removable from the sheet.
+- [ ] **Not verified here:** written without a Flutter SDK on the machine — run `flutter analyze`,
+      `dart format .`, `flutter test`, then a real scan of a printed flyer on both platforms.
+- [ ] Error text from the new lookup arrives as prose ("This coupon has expired"); `_friendly`'s
+      `contains('percent')` rewrite is avoided server-side by saying "10% off". Nothing to map.
+
 **Scope decided 2026-07-26:** first build = Milestones 0–2 (shell + waiter ordering create/amend +
 native offline queue). Amend goes through a **new shared RPC** with the web refactored onto it.
 Material 3 with ported design tokens. Riverpod + Drift. Login + join-by-code only — restaurant

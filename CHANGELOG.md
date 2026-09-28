@@ -13,6 +13,7 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 ## [Unreleased]
 
 ### Added
+- **Scan the coupon.** The coupon box on the checkout's adjustments sheet has a **Scan** button beside it: point the camera at the flyer's QR and the code applies itself. Typing still works. A coupon already on the bill shows as "Now: SAVE10-7KQ2 · 10%" with **Remove**, and the totals card names it ("Discount · SAVE10-7KQ2"). Needs the web migration `20260928120000_coupons` on the server — which also makes the typed coupon box work for the first time (it had been failing on a database error since it shipped).
 - **Checkout on the phone.** A waiter or cashier can now settle a bill at the table instead of walking to the till. Tap **Bill** on an order (or a table that has asked for one) and the bill opens: the items, what they come to, and what is still owed. From there you can take cash, card or wallet in full or in part; split the check equally, by item, or across several tenders; discount the bill or a single line; add an extra charge; apply a coupon; add a tip or round the total off; attach a guest and spend their loyalty points; put another round onto the same tab; leave the bill unpaid on a guest's tab; and refund a settled one. A third **Bills** tab lists everything still owed, because opening a bill takes its order off the Orders board.
 - **The receipt prints itself.** Settling a bill on the phone queues the receipt exactly as settling one on the till does, and the phone's own printer picks it up. No new printing code was needed.
 

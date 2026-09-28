@@ -169,7 +169,76 @@ void main() {
     expect(find.text('On the house'), findsNothing);
     // What a cashier does hold.
     expect(find.text('Coupon'), findsOneWidget);
+    // The flyer's square, read from the counter. 44dp, per the rule.
+    expect(find.byTooltip('Scan coupon'), findsOneWidget);
     expect(find.text('Tip, round off and remark'), findsOneWidget);
+  });
+
+  testWidgets('without payment.take there is no coupon and no scanner', (
+    tester,
+  ) async {
+    // `apply_coupon` checks `payment.take`; offering the button to a role
+    // without it is a door the server keeps locked.
+    await tester.pumpWidget(
+      _app(
+        permissions: const {'checkout.view', 'order.discount'},
+        snapshot: _snapshot(),
+        role: 'manager',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Discounts, charges, tip'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Coupon'), findsNothing);
+    expect(find.byTooltip('Scan coupon'), findsNothing);
+  });
+
+  testWidgets('a coupon on the bill is named, and can be taken off', (
+    tester,
+  ) async {
+    final withCoupon = _snapshot();
+    await tester.pumpWidget(
+      _app(
+        permissions: cashier,
+        snapshot: BillSnapshot(
+          orderId: withCoupon.orderId,
+          bill: Bill(
+            id: _billId,
+            status: 'open',
+            createdAt: DateTime(2026, 8, 13),
+            subtotalCents: 1000,
+            taxCents: 0,
+            serviceChargeCents: 0,
+            discountCents: 100,
+            tipCents: 0,
+            roundingCents: 0,
+            totalCents: 900,
+            tableLabel: 'A1',
+          ),
+          lines: withCoupon.lines,
+          payments: const [],
+          charges: const [],
+          discounts: const [
+            DiscountRow(type: 'percent', value: 10, couponCode: 'SAVE10-7KQ2'),
+          ],
+          settings: const TenantMoneySettings(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // The guest will ask which code took the money off.
+    expect(find.text('Discount · SAVE10-7KQ2'), findsOneWidget);
+
+    await tester.tap(find.text('Discounts, charges, tip'));
+    await tester.pumpAndSettle();
+
+    // One coupon per bill: the field gives way to the code and a Remove.
+    expect(find.textContaining('Now: SAVE10-7KQ2'), findsOneWidget);
+    expect(find.text('Remove'), findsOneWidget);
+    expect(find.byTooltip('Scan coupon'), findsNothing);
   });
 
   testWidgets('a manager gets the discount levers', (tester) async {

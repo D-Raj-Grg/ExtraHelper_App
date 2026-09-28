@@ -48,7 +48,7 @@
 		<key>UIStatusBarHidden</key>
 		<false/>
 		<key>NSCameraUsageDescription</key>
-		<string>ExtraHelper uses the camera to scan item labels while you count the store room. You can always search by name instead.</string>
+		<string>ExtraHelper uses the camera to scan item labels while you count the store room, and coupon QR codes at checkout. You can always search or type instead.</string>
 		<key>NSBluetoothAlwaysUsageDescription</key>
 		<string>ExtraHelper uses Bluetooth to print kitchen tickets and receipts on a nearby thermal printer.</string>
 		<key>NSBluetoothPeripheralUsageDescription</key>

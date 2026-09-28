@@ -425,6 +425,14 @@ class BillRepository {
     }, "Couldn't apply that coupon.");
   }
 
+  /// Take the coupon back off. The server hands the use back to the campaign
+  /// and recomputes; a bill with no coupon is a no-op, not an error.
+  Future<void> removeCoupon({required String billId}) {
+    return _write('remove_coupon', {
+      '_bill_id': billId,
+    }, "Couldn't remove that coupon.");
+  }
+
   Future<void> addCharge({
     required String billId,
     required String label,
@@ -741,7 +749,9 @@ class BillRepository {
   /// one, and the coupon and points errors already name the thing that failed.
   static String _friendly(String message) {
     final m = message.toLowerCase();
-    if (m.contains('not authorized') || m.contains('not permitted')) {
+    if (m.contains('not authorized') ||
+        m.contains('not permitted') ||
+        m.contains('permission denied')) {
       return "You don't have permission to do that.";
     }
     if (m.contains('already paid') || m.contains('bill is not open')) {
