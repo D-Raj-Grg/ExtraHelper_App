@@ -12,6 +12,9 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 ## [Unreleased]
 
+### Changed
+- **Bills tab opens on All today.** The chips now run **All today · Paid · Void · Credit**, and the tab starts on All today instead of the old first chip. What used to be called **Owed** is now **Credit** — same list, every bill with money outstanding however old, sitting at the end where it is looked for rather than lived in.
+
 ### Added
 - **Set a staff password from the phone.** On Team, an owner's row menu now has **Set password** (and **Create login** on an invite that never signed up), like the web. Type one or **Generate one** (`abcd-2345-wxyz`, no look-alike letters), show or copy it, and tell them in person — nothing is emailed, and their old password stops working right away. Only an owner sees it, never on an owner's row or your own; a person who also works at another restaurant is refused with the reason, same as the web.
 - **Coupons on the phone.** A new **Coupons** entry in the drawer (Owner/Manager by default, via *See coupons*) brings the web's Insights → Coupons over. Every campaign code with its badge — **Active**, **Paused**, **Scheduled**, **Expired** or **Used up** — what it takes off, when it runs, how many times it was used and how much it has given away. Tap one for **Show QR**: the flyer square on screen for a guest to scan, **Copy link**, or **Share** it as a picture to whoever prints the flyers. With *Manage coupons* the same menu offers **Pause / Resume**, **Edit** and **Delete**, and **New coupon** at the bottom: code (blank makes one, `SAVE10-7KQ2`), campaign name, percent or amount off, valid from / through, usage limit, minimum order, dine in / takeaway / delivery, once per customer. A coupon already on a bill cannot be deleted — the phone says so and offers Pause instead, same as the web. Printing the flyer itself stays on the web.

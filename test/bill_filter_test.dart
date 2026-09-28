@@ -45,8 +45,10 @@ void main() {
       expect(reachable, containsAll(['open', 'partial', 'paid', 'void']));
     });
 
-    test('the tab opens on what is owed', () {
-      expect(BillFilter.values.first, BillFilter.owed);
+    test('the tab opens on the whole day, with credit last', () {
+      expect(BillFilter.values.first, BillFilter.today);
+      expect(BillFilter.values.last, BillFilter.owed);
+      expect(BillFilter.owed.label, 'Credit');
     });
   });
 }

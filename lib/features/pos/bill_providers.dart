@@ -227,10 +227,17 @@ final openBillsProvider = FutureProvider.autoDispose<List<OpenBillRow>>((
 /// tab only ever showed what was owed, so the moment a cashier took the last
 /// rupee the receipt went out of reach — which is exactly when someone asks for
 /// a copy of it.
+///
+/// Order is the chip order. The tab opens on **All today** — the day's
+/// bills, whatever became of them — and the running credit sits last: it is
+/// the exception a cashier goes looking for, not the list they live in.
 enum BillFilter {
-  /// Every bill with money outstanding, however old. Not date-bound: a debt
-  /// does not stop being one at midnight.
-  owed(label: 'Owed', statuses: ['open', 'partial'], dayBound: false),
+  /// Everything from today, whatever became of it.
+  today(
+    label: 'All today',
+    statuses: ['open', 'partial', 'paid', 'void'],
+    dayBound: true,
+  ),
 
   /// Settled today. Older ones are a reports question.
   paid(label: 'Paid', statuses: ['paid'], dayBound: true),
@@ -238,12 +245,9 @@ enum BillFilter {
   /// Written off today.
   voided(label: 'Void', statuses: ['void'], dayBound: true),
 
-  /// Everything from today, whatever became of it.
-  today(
-    label: 'All today',
-    statuses: ['open', 'partial', 'paid', 'void'],
-    dayBound: true,
-  );
+  /// Every bill with money outstanding, however old. Not date-bound: a debt
+  /// does not stop being one at midnight.
+  owed(label: 'Credit', statuses: ['open', 'partial'], dayBound: false);
 
   const BillFilter({
     required this.label,
@@ -264,7 +268,7 @@ final billFilterProvider = NotifierProvider<BillFilterNotifier, BillFilter>(
 
 class BillFilterNotifier extends Notifier<BillFilter> {
   @override
-  BillFilter build() => BillFilter.owed;
+  BillFilter build() => BillFilter.today;
 
   void select(BillFilter filter) => state = filter;
 }
