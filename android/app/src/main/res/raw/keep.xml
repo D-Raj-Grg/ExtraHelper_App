@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The notification icon is referenced by name from Dart
+     (AndroidInitializationSettings('ic_stat_notify')), never from Java/XML, so
+     R8's resource shrinker cannot see it is used and strips it from release
+     builds — and then every alert fails silently. Keep it explicitly. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_stat_notify" />

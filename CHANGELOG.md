@@ -14,28 +14,160 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 ### Added
 - **Scan the coupon.** The coupon box on the checkout's adjustments sheet has a **Scan** button beside it: point the camera at the flyer's QR and the code applies itself. Typing still works. A coupon already on the bill shows as "Now: SAVE10-7KQ2 · 10%" with **Remove**, and the totals card names it ("Discount · SAVE10-7KQ2"). Needs the web migration `20260928120000_coupons` on the server — which also makes the typed coupon box work for the first time (it had been failing on a database error since it shipped).
+- **Cost price on the dish editor.** Under the price there is now a **Cost price** field — what the dish costs you to make. It is shown only to people with the new **See dish costs & profit** permission (owners by default); everyone else sees the form as before, and saving without the field never touches a cost already on file. Leave it blank to clear it.
+- **Where costs are entered.** On the phone you can set a dish's own cost only. Per-size costs (Full / Half / 90 ml), add-on costs, the costing table for the whole menu and the “Apply costs to past sales” button are on the web, Inventory → Costing. The figures the phone shows come from the same server numbers as the web: refunds are deducted, add-ons are counted, and a bill discount is shared across that bill's lines.
+- **Gross profit and Margin on Day close, profit per top item.** With the same permission, the KPI tiles gain **Gross profit** and **Margin**, and each dish under **Top items** shows its profit beside the quantity. A dish sold with no cost on file shows no profit rather than a wrong one, and a caption counts how many lines had no cost so you know the day's figure is low by that much (costs are entered on the web Inventory → Costing tab, or per dish here).
+
+<details><summary>Technical — costs & profit</summary>
+
+- Costs no longer live on `menu_items` / `item_variants` (those `cost_cents` columns are gone). They sit in RLS-gated one-to-one tables readable only with `profit.view`: `menu_item_costs(item_id pk, tenant_id, cost_cents)` and `item_variant_costs(variant_id pk, tenant_id, cost_cents)`. Without the permission PostgREST returns the embed as null — no error, no 0.
+- `MenuRepository._columns` embeds `menu_item_costs(cost_cents)` on `menu_items` and `item_variant_costs(cost_cents)` inside `item_variants(...)`. `MenuEditItem.costCents` / `MenuEditVariant.costCents` parse through `_embeddedCost`: `{cost_cents: n}` → n; null, absent or malformed embed → null.
+- `MenuItemDraft` gains `costCents` + `costSet` (default false). `createItem` / `updateItem` call `MenuItemWrites.setItemCost(id, cents)` — the `set_item_cost(_item_id, _cost_cents)` RPC, which carries the `profit.view` check — only when `costSet`; null clears. Both validate the cost (`0..100000000` cents, `MenuItemWrites.maxCostCents`) **before** any table write and throw a `PosFailure` ("Enter a cost price between 0 and 1,000,000, or leave it blank.") so a bad value never leaves a half-made dish.
+- `createItem` now returns `CreatedMenuItem` (`({String id, String? costWarning})`). If `set_item_cost` fails after the `menu_items` row exists, the failure is caught and returned as `costWarning` ("Dish saved, but the cost was not. …") instead of thrown, so the person is not told the dish failed when it is on the menu. `item_edit_screen.dart` handles it like the post-save photo failure: shows the warning with "Tap Save to try again." and stays on the screen; `_id` is set by then, so the retry runs `updateItem`, which re-issues the cost RPC against the existing row.
+- `item_edit_screen.dart`: `_cost` controller seeded from `item.costCents`; the field renders only under `hasPermissionProvider('profit.view')`, and `_save` sets `costSet: canSeeProfit`, so a form that never showed the field cannot clear a cost.
+- `DaySales` gains nullable `netSalesCents`, `cogsCents`, `grossProfitCents`, `marginPct` (double), `uncostedLines`; `DayTopItem` gains nullable `costCents`, `profitCents`. Null-preserving `_maybeInt` / `_maybeDouble` helpers — absent, null **or unparsable** values parse to null, never 0 (`_maybeInt` no longer falls through to `_int`'s 0 default).
+- `day_close_screen.dart`: Gross profit + Margin `_Kpi`s only when `grossProfitCents != null`; Margin renders `—` when `marginPct` is null (profit with no net sales to divide by) rather than `0.0%`; top-item note extends with ` · profit …`; muted caption when `uncostedLines > 0`. No new colours.
+- Tests: `test/day_report_test.dart` (+3: keys present / absent / unparsable), `test/menu_edit_item_test.dart` (+4: embed present, embed null via RLS, embed absent, draft `costSet`).
+
+</details>
+
+### Added
+- **Customers on the phone.** A new **Customers** entry in the drawer (Owner/Manager by default, via *View loyalty*) brings the web's Loyalty & CRM over: search by name, phone or email; **Outstanding credit** total at the top; every customer with their points, tier, and — in red — what they **owe** and on how many bills, debtors first. Tap a customer for their page: credit box, **Earn / Redeem** points, every **unpaid bill** with a **Collect** button that opens the checkout (for anyone who can take payments), and their **past orders**. With *Manage customers*, the ⋮ menu offers **Edit** (name, phone, email), **Merge into another customer** and **Delete**, with the same warnings as the web. Recent guest **feedback** sits under the list.
+
+### Changed
+- **Log an expense: category is a dropdown, and it starts on "Other".** The row of category chips is now a single dropdown, so a long list no longer pushes the note and Paid-from fields off the screen. It opens on **Other** (the first category if the restaurant has no "Other"), so a quick back-door payment needs no category tap at all. Editing an expense keeps its own category, archived or not. There is also a **✕** in the top-right corner to close the sheet without saving.
+
+### Added
+- **Checkout shows what the guest already owes.** When the attached guest has unpaid credit on *other* bills, the Guest card on the checkout shows a red **Owes Rs X · N unpaid bills** line under their name, so the cashier sees it before tapping **Unpaid (credit)** again. The bill being settled isn't counted against itself. A warning only — leaving another bill unpaid still works. Same numbers as the web's Loyalty & CRM page.
+
+### Fixed
+- **Customers, review pass before release.** A customer's page now loads that customer by id, so searching the list no longer blanks the page behind it, and a deep link to a customer shows the same locked door as the list for someone without *View loyalty*. **Merge into another customer** searches the whole book, not just the page you came from. **Outstanding credit … across N customers** counts only guests who still owe something. **Unpaid bills** lists every open or part-paid bill — one with nothing left on it says *nothing left to collect* rather than *owes Rs 0* — and **Past orders** is the paid ones; void bills stay hidden. Pull-to-refresh holds until the new figures land. **Edit** needs a name or a phone (an email alone is not enough to find someone at the counter) and says so. A points change refused by the server for lack of role reads "You don't have permission to do that."
+
+### Known gaps
+- The phone gates Customers on the `loyalty.view` permission only; the web additionally hides the page when the restaurant's plan lacks the loyalty feature. A plan without loyalty still sees the credit book here.
+
+<details><summary>Technical</summary>
+
+- Customers: `lib/data/supabase/customers_repository.dart` (`CrmCustomer`, `CustomerBillRow`, `CustomerFeedback`, `CrmOverview`, `CustomersRepository` over `customers`/`feedback` selects plus the shared RPCs `customer_credit_summary`, `customer_bill_history`, `loyalty_adjust`, `update_customer`, `merge_customers`, `delete_customer` — every rule stays in Postgres, the app maps errors to `PosFailure`). Debtors missing from the newest-50 page are fetched by id so every debt has a row. `lib/features/loyalty/`: `loyalty_providers.dart` (search notifier, overview, per-customer history), `loyalty_screen.dart`, `customer_detail_screen.dart`, `customer_dialogs.dart` (`RadioGroup` merge picker). Routes `/customers`, `/customers/:id` (`Routes.customerPath`); drawer item on `loyalty.view`; levers on `loyalty.edit`; Collect on `payment.take`. Tests: `test/customers_repository_test.dart` (14), `test/loyalty_screen_test.dart` (4).
+- `BillRepository.snapshot` pass two calls `customer_credit_summary(_tenant)` (shared with the web, `checkout.view`-gated, `security invoker`) only when a guest is attached and the bill is still settleable. Failure is caught on that future alone (it shares a `Future.wait` with the modifiers), so a missing warning never costs the add-on names; the line is simply absent.
+- `BillCustomer` gains `owesCents` / `unpaidBills` / `owes`; `BillCustomer.fromCreditRows` subtracts this bill's own due amount and count from the roll-up, mirroring `app/(app)/bill/[billId]/page.tsx` on the web. Unit tests in `test/bill_models_test.dart`; widget tests for the card in `test/checkout_screen_test.dart`.
+- `expense_sheet.dart`: `DropdownButtonFormField` replaces the `AppChoiceChip` wrap for categories; `_defaultCategory` matches `other`/`others` case-insensitively and falls back to the first category. Header is a `Row` with an `IconButton(Icons.close)`. Widget tests in `test/expense_sheet_test.dart`.
+- `_CustomerCard` in `checkout_screen.dart` renders the line in `colorScheme.error`. Not built or uploaded; ships with the next TestFlight build on request.
+- Customers review fixes: `CustomersRepository.customer(id)` (`_select` by id + tenant, `maybeSingle`, joined with `customer_credit_summary`; null when no row) behind `customerProvider(id)`; `customer_detail_screen.dart` reads it, gates on `identityStatusProvider` like the list, and its `RefreshIndicator` awaits `Future.wait` of the customer and history refreshes (the list awaits `crmOverviewProvider.future`). `CrmCustomer.fromRow` accepts `loyalty_accounts` as a List, a Map or null; every `fromRow` in `overview()`/`customer()` runs inside the try so a bad row is a `PosTransientFailure`. `CrmOverview.countDebtors(rows)` counts `outstanding_cents > 0` only and the debtor back-fill uses the same filter. Providers select `activeTenantProvider.select((m) => m?.tenantId)` (`Membership` has no `==`). `showMergeCustomerDialog(context, customer, search:)` debounces 300 ms and calls `search(q)` (the detail passes `repo.overview(query:)`), excluding the customer itself. `_friendly` maps "require(s) a manager" to the permission message. Shared `NoCustomerAccess` widget in `lib/features/loyalty/no_customer_access.dart`. Tests: `customers_repository_test.dart` (+2), `loyalty_screen_test.dart` (+3, detail now overrides `customerProvider`).
+
+</details>
+
+---
+
+## [1.0.15] — 2026-09-26 · The menu on the phone
+
+TestFlight build **1.0.15+1**, submitted to App Store review on 2026-09-26 (releases automatically once approved). This is the first App Store release since 1.0.13, so it also carries everything in 1.0.14.
+
+### Added
+- **Manage the menu from the phone.** The Menu screen could only fix a dish's sizes. Now it can:
+  - **Add a dish:** name, price, category, kitchen station, veg / non-veg / not marked, a description, and a photo.
+  - **Change one** the same way, or **delete** it. Past orders and bills keep a deleted dish.
+- **Dish photos.** Take one with the camera or pick one from the gallery, change it or remove it. It shows on the POS, the QR menu and the web, because it is the same photo the web editor uploads. Each dish in the menu list now shows its photo, or its initials when it has none.
+- **In stock / Sold out, one tap.** Every dish in the menu list has a switch, with the word beside it. Turning it off marks the dish sold out everywhere, so nobody can order it until it's turned back on. The screen counts how many dishes are sold out. It works with no signal too: the change is saved on the phone and sent when coverage returns. Owners, managers and the kitchen can change stock; the switch is disabled for everyone else.
+- **Categories.** Filter the menu by category with the chips at the top. From the new Categories screen, add, rename, and hide or show a whole section on ordering screens. You can also create a category while adding a dish.
+- **Add-ons.** From a dish, tick which add-ons it offers (extra cheese, no onion, a side of rice) and set the most a guest can have of each. You can create a new add-on right there. **Manage menu → Add-ons** renames, reprices or deletes an add-on across every dish, and shows how many dishes use each one.
+- **When it's sold.** Give a dish time windows — every day, or a single day, from one time until another (breakfast 07:00–11:00, a Saturday special). With no windows it's sold any time.
+- **Combos.** **Manage menu → Combos** builds a bundle: a name, a price, and the dishes in it with quantities. It shows what they would cost bought separately. Switch a combo on or off, edit it, or delete it; the dishes in it stay on the menu.
+- **Several kitchen stations per dish.** Pick every station a dish's ticket should go to.
+
+### Known gaps
+- **Time windows and combos are stored but not yet used when ordering, on the phone or the web.** A dish outside its window can still be ordered, and a combo can't be rung up as one line yet. Both need a server-side rule, which is the next step. Add-ons, stock and stations do take effect immediately.
+
+<details><summary>Technical — menu editing</summary>
+
+- No server change. `menu_items`, `menu_categories` and `item_station_routes` writes are plain table writes, gated on `menu.edit` by RLS, the same ones the web editor makes. Every write reads back its row, and zero rows is reported as a refusal. Stock goes through the existing `set_item_86` RPC via the outbox (`OutboxKind.menu86`). The switch keeps an optimistic value until the refreshed list arrives.
+- Photos use the web's path `menu-images/{tenant}/{item}.{ext}` (upsert, cache-busted URL), so the two clients replace each other's photo.
+- Stations are saved as a set difference (add the missing ones, delete the extras, leave matching ones alone), so a dish routed to several stations is never collapsed to one. Add-on links upsert on `(item_id, modifier_id)` like the web, and changing the maximum keeps `is_default`. Time windows go to `item_availability` (null day = every day; `HH:MM` local). Combos are `combos.items = [{item_id, qty}]`.
+- `lib/features/menu/`: `item_edit_screen.dart`, `item_addons_screen.dart` (per-dish links + library), `item_availability_screen.dart`, `combos_screen.dart`, `menu_categories_screen.dart`, `stock_toggle.dart`, reworked `menu_screen.dart`. The photo picker moved to `lib/core/widgets/photo_picker.dart` and is shared with expense receipts. Test: `test/menu_edit_item_test.dart`.
+
+</details>
+
+---
+
+## [1.0.14] — 2026-09-26 · Expenses and order alerts
+
+TestFlight build **1.0.14+1**.
+
+### Added
+- **Expenses on the phone.** A new **Expenses** entry in the menu for everyone on staff. Tap **Add expense**, type the amount, tap a category, write a few words, and choose where the money came from (Cash, Online / eSewa, Owner's pocket). You can add a receipt photo from the camera or gallery. **It works with no signal**: the expense is saved on the phone, shown greyed out as "Waiting to send", and sent once when the connection is back, never twice. Page back through earlier days; managers can add to them. Edit, void with a reason, and attach, view or remove a receipt photo from each entry's menu.
+- **Last 7 days and last 30 days.** Managers see rolling expense totals at the top of Expenses, with the category that cost the most, matching the web Reports page.
+- **Count cash & close the day.** Day close now has a **Cash book** card: what should be in hand (sales minus refunds minus cash expenses), the same for online, and a **Count cash & close the day** sheet for what you actually counted. It shows Balanced, Short or Over, and you can recount. Day close also lists the day's expenses. The shift-drawer section only appears for restaurants that use a drawer.
+- Owners and managers can manage expense categories from the tag icon on Expenses.
+- **Order alerts on the phone.** The app now tells staff about every step of an order — **new order, preparing, ready to serve, served, billed, paid**, and cancelled — as a real phone notification with a banner and sound. A waiter hears that a table's food is up without watching the pass. Alerts come from other people's actions: tapping "Served" yourself doesn't buzz your own phone. The amount is shown in the restaurant's currency when there is one.
+- **Asked once, like other apps.** Shortly after you sign in, the app explains what the alerts are for and then shows the phone's own permission prompt. It asks once per device. After that, **Settings → Notifications** shows whether alerts are on, turns them on (or opens the phone's settings if they were blocked), and has a **Mute on this phone** switch for a shared counter tablet that shouldn't buzz.
+- **A bell in every screen's header** with an unread count, opening a **Notifications** screen: every update with an icon for each step, unread ones in bold, pull to refresh, and **Mark all read**. Tapping a phone notification opens this screen, including when the tap is what starts the app. Billed and paid updates open the bill for staff who can take payments.
+- Unread works the same as on the web: only the last 24 hours count, and your own actions never do, so the phone and the browser show the same number.
+- Kitchen and store-room roles get no bell, no alerts and no prompt.
+- **The receipt on the phone looks like the real one, and can be sent.** The bill screen now carries the restaurant's logo, closing words, terms and the **payment QR** a guest scans, the same as the web receipt and the thermal slip. **Share** sends it as a picture, so a guest can get it on Viber or WhatsApp without a printer. Nothing extra shows for a restaurant that hasn't uploaded a logo or QR.
+
+### Fixed
+- **Day close: stepping back a day and then forward again now lands on today properly.** Going forward to today used to pin the screen to that date instead of following "today", so if the trading day rolled over while the app was open, the sheet stayed on the previous day. It could also briefly treat the day you'd just left as today and disable the forward arrow.
+- **Day close could step back a day but never forward again.** The forward arrow stayed disabled once you left today; it now pages forward up to today.
+
+### Known gaps
+- **Alerts need the app to be running.** They arrive while ExtraHelper is open. On Android that includes the background for as long as the phone keeps the app running; iOS pauses a backgrounded app soon after, and whatever came in meanwhile shows in the list when you come back, without a banner. With the app fully closed nothing arrives. That needs push notifications through Firebase/APNs, which is the next step.
+- Not yet checked on a real phone: the permission prompt, a banner while backgrounded, and tapping a notification to open the app.
+- Expenses not yet checked on a real phone either: logging in airplane mode and seeing it arrive once, and attaching a receipt photo from the camera.
+
+<details><summary>Technical — order alerts and day close</summary>
+
+Server half: `../extrahelper/supabase/migrations/20260926120000_order_notifications.sql` and `20260926130000_order_notifications_hardening.sql` (see the web changelog).
+
+- **Dependency.** `flutter_local_notifications` ^22.3.1 (needs Flutter 3.38.1+ / Dart 3.10, compileSdk 35+, AGP 8.11.1+, minSdk 24). Android: core library desugaring on with `desugar_jdk_libs:2.1.4`, `POST_NOTIFICATIONS` in the manifest, monochrome `ic_stat_notify` vector kept from R8 by `res/raw/keep.xml`, high-importance `orders` channel, category `event`. iOS: `UNUserNotificationCenter` delegate set in `AppDelegate.swift` so banners show while the app is open.
+- **Code.** `lib/data/notifications/` (`AppNotification`, `LocalNotifier`), `lib/data/supabase/notifications_repository.dart` (latest 50, cursor, `mark_notifications_read`, realtime INSERT stream on a fresh topic per listen with an `onRejoin` catch-up), `lib/features/notifications/` (feed notifier, bell, screen, `NotifyLoop`), `lib/features/settings/notification_settings_screen.dart`.
+- **Feed notifier.** Rebuilds only when the tenant id, user id or `notifications.view` changes, watched via `select`. `Membership` has no `==` and is rebuilt on every token refresh and connectivity flip, and rebuilding on those tore the channel down mid-service. Every async write carries a build generation, so a slow response from a previous tenant is dropped. `refresh()` merges rather than replaces and keeps the later cursor. It also recovers a feed whose first load failed; before, live rows went into a buffer that was never merged. A failed mark-read restores only the cursor. The screen keeps the list on reload/error (`skipLoadingOnReload`, `skipError`). A tray tap before go_router has its first route retries instead of throwing.
+- **Unread.** `isUnread(n, cursor, userId:, now:)` = `created_at > max(cursor, now − 24h)` and not self-authored. Mirrors the web's rule.
+- **Day close.** `DayCursor.next()` clears the selection (back to "today") when it reaches the known today, instead of naming the date; the screen's listener ignores loading states, whose `valueOrNull` is still the previous day's report.
+- Tests: `test/notifications_test.dart` (alert filtering, unread window, cursor merge, arrival merge, bell) and `test/day_cursor_test.dart` (back → forward → back).
+
+</details>
+
+
+<details><summary>Technical — expenses</summary>
+
+Server side: see `../extrahelper/CHANGELOG.md` → "daily expenses, receipts, night count".
+
+- `data/supabase/expenses_repository.dart`: `PaidFrom`, `Expense`, `ExpenseDay` (`expenses_day`), `ExpenseRange` (`report_expenses`, rolling 7/30 days), record/update/void/categories/`close_day`, and receipts (upload to the private bucket, then `set_expense_receipt`, then clean up the old object; signed URL for 10 minutes).
+- New `OutboxKind.expense`. The outbox idempotency key is the RPC's `_client_key`; it appends rather than last-write-wins. `OrderQueue.recordExpense` / `pendingExpenses`. Tests: `test/outbox_test.dart` → `expenses`.
+- A photo picked while adding is attached after the write syncs (the id is looked up by client key). If the expense was queued offline, the user is told to attach it from the menu later.
+- `features/expenses/` (screen, sheet, categories screen, `receipt_photo.dart`), `features/reports/day_count_sheet.dart`. `DayReport` parses `expenses`, `cash_book` and `cash_drawer_enabled`.
+- iOS `NSPhotoLibraryUsageDescription` added; the camera usage string now mentions receipts.
+
+</details>
+
+---
+
+## [1.0.8 – 1.0.13] — 2026-08-13 → 2026-08-24 · TestFlight builds
+
+Six TestFlight builds went out between 1.0.7 and 1.0.14 without their own entries here. They are gathered into one entry; the per-build notes are in `TASKS.md` under "TestFlight 1.0.11+1", "1.0.12+1" and "1.0.13+1".
+
+### Added
 - **Checkout on the phone.** A waiter or cashier can now settle a bill at the table instead of walking to the till. Tap **Bill** on an order (or a table that has asked for one) and the bill opens: the items, what they come to, and what is still owed. From there you can take cash, card or wallet in full or in part; split the check equally, by item, or across several tenders; discount the bill or a single line; add an extra charge; apply a coupon; add a tip or round the total off; attach a guest and spend their loyalty points; put another round onto the same tab; leave the bill unpaid on a guest's tab; and refund a settled one. A third **Bills** tab lists everything still owed, because opening a bill takes its order off the Orders board.
 - **The receipt prints itself.** Settling a bill on the phone queues the receipt exactly as settling one on the till does, and the phone's own printer picks it up. No new printing code was needed.
+- **Something off the menu.** A new button in the order screen adds a hand-typed line — a plating charge, today's special — with a name, a price, a quantity and a kitchen note. It matches the web: no `item_id`, so it can never stand in for a menu item's price; no stock comes off it; it prints on the expo ticket; and the typed price is clamped and recorded in the manager log. Works when composing a new order and when adding to one already with the kitchen.
+- **Day close on the phone.** The same Z-report as the web: sales, payments, cash drawer, top items and every order of the day, with back and forward through days. (1.0.10)
+- **Sign up, Settings and Team on the phone.** Create a restaurant or join one from the app; change general, charges, branches, printers and appearance settings; approve staff and edit roles. (1.0.11)
+- **A welcome screen before the login form,** and being offline no longer looks like being locked out. The app says it's offline and keeps working from what it has saved. (1.0.12)
 
 ### Fixed
 - **The menu on the phone could go stale and never recover — and it cost money.** The cached-list loader kicked off its background refresh while it was still building, which Riverpod refuses; the refresh died as an unhandled error every time, so whatever was saved on the first run was what the phone showed forever. On a real order this charged nothing: a dish whose price had moved onto size variants still showed the old flat price, was added without asking for a size, and the server snapshotted it at zero. The refresh now runs on the values the build already resolved and touches no providers, so it completes. Pull-to-refresh was never affected — this only ever hit the automatic one.
 - **Variants and add-ons appear again.** Same cause: the stale cache predated them, so dishes that should ask "which size?" were added straight to the order. A dish with options now shows its badge and price range and forces the choice, as it always should have.
-
-### Added
-- **Something off the menu.** A new button in the order screen adds a hand-typed line — a plating charge, today's special — with a name, a price, a quantity and a kitchen note. It matches the web: no `item_id`, so it can never stand in for a menu item's price; no stock comes off it; it prints on the expo ticket; and the typed price is clamped and recorded in the manager log. Works when composing a new order and when adding to one already with the kitchen.
+- **Phone preferences reset on every launch** (theme, text size and similar). This regression shipped in 1.0.12 and was fixed in 1.0.13.
 
 ### Changed
 - **Coming back from an unpaid bill lands on the Bills tab.** Billing an order moves it off the Orders list by design, so backing out of a half-finished bill used to drop you on a list your order had just vanished from. The Orders empty state now says where billed orders go, too.
 - **Tapping a table that has asked for its bill opens the bill**, not a second order. Previously the app looked only at orders still on the floor, and a billed order is not one of them — so the tap would have started a fresh order on a table that was mid-payment.
+- **Taking an order sends it to the kitchen.** The order screen had a **Save draft** button beside **Send to kitchen**, and a saved draft never reached a kitchen screen or a printer. There is now one button. Orders taken with no coverage still queue and go to the kitchen by themselves the moment the phone is back on signal. Matches the same change on the web app.
 
 ### Known gaps
 - **Checkout needs a connection.** Nothing is queued: an order taken with no coverage is safe and still syncs, but it cannot be billed until the phone is back on signal. Every entry point says so rather than hanging.
 - **Card (online) is web-only.** Charging a card through a payment gateway runs server-side on the web and has no RPC behind it, so the phone would record money it never collected. It offers cash, card (on a terminal), wallet and loyalty points. A settled bill that carries an online payment still shows it correctly.
 - **A refund cannot be retried safely.** `refund_payment` takes no idempotency key, so after a lost connection the app asks you to check the bill's payments rather than offering to try again.
-
-### Changed
-- **Taking an order sends it to the kitchen.** The order screen had a **Save draft** button beside **Send to kitchen**, and a saved draft never reached a kitchen screen or a printer. There is now one button. Orders taken with no coverage still queue and go to the kitchen by themselves the moment the phone is back on signal. Matches the same change on the web app.
-
 ---
 
 ## [1.0.7] — 2026-08-07 · First build on a real phone

@@ -276,6 +276,8 @@ class BillCustomer {
     required this.points,
     this.name,
     this.phone,
+    this.owesCents = 0,
+    this.unpaidBills = 0,
   });
 
   final String id;
@@ -283,7 +285,51 @@ class BillCustomer {
   final String? phone;
   final int points;
 
+  /// Unpaid credit on this guest's **other** bills. The bill being settled is
+  /// excluded so an unpaid one does not warn about itself. Zero when the roll-up
+  /// could not be read — a missing warning beats a red screen mid-service.
+  final int owesCents;
+  final int unpaidBills;
+
+  bool get owes => owesCents > 0;
+
   String get label => name ?? phone ?? 'Guest';
+
+  BillCustomer withCredit({required int owesCents, required int unpaidBills}) =>
+      BillCustomer(
+        id: id,
+        points: points,
+        name: name,
+        phone: phone,
+        owesCents: owesCents,
+        unpaidBills: unpaidBills,
+      );
+
+  /// The web's arithmetic, in one place: the RPC sums every open/partial bill
+  /// the guest is on, including this one, so this bill's own balance and its
+  /// own count come back off before the cashier sees a number.
+  static BillCustomer fromCreditRows(
+    BillCustomer customer,
+    List<Map<String, dynamic>> rows, {
+    required int thisBillDueCents,
+  }) {
+    Map<String, dynamic>? mine;
+    for (final r in rows) {
+      if (r['customer_id'] == customer.id) {
+        mine = r;
+        break;
+      }
+    }
+    if (mine == null) return customer;
+    final total = _int(mine['outstanding_cents']);
+    final count = _int(mine['unpaid_bills']);
+    final owes = (total - thisBillDueCents).clamp(0, total);
+    final bills = (count - (thisBillDueCents > 0 ? 1 : 0)).clamp(0, count);
+    return customer.withCredit(owesCents: owes, unpaidBills: bills);
+  }
+
+  static int _int(Object? v) =>
+      v is int ? v : (v is num ? v.toInt() : int.tryParse('${v ?? ''}') ?? 0);
 }
 
 /// A guest already in the tenant's book, offered back for reselection.

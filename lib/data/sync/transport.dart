@@ -68,4 +68,11 @@ abstract class OutboxTransport {
 
   /// The waiter carried it to the table.
   Future<void> markOrderServed(String orderId);
+
+  /// Log a daily expense. [idempotencyKey] is the RPC's `_client_key`, so a
+  /// replay returns the row that already landed instead of adding another.
+  Future<void> recordExpense({
+    required String idempotencyKey,
+    required Map<String, dynamic> payload,
+  });
 }

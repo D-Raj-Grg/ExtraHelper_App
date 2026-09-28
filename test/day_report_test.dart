@@ -193,6 +193,75 @@ void main() {
       expect(r.isQuiet, isTrue);
     });
 
+    test('profit keys are read when present, per item too', () {
+      final r = DayReport.fromJson({
+        ..._payload(),
+        'sales': {
+          ..._payload()['sales'] as Map<String, dynamic>,
+          'net_sales_cents': 577000,
+          'cogs_cents': 200000,
+          'gross_profit_cents': 377000,
+          'margin_pct': 65.3,
+          'uncosted_lines': 1,
+        },
+        'top_items': [
+          {
+            'qty': 2,
+            'description': 'Buff Sekuwa (Half Kg)',
+            'revenue_cents': 120000,
+            'cost_cents': 40000,
+            'profit_cents': 80000,
+          },
+          {
+            'qty': 5,
+            'description': 'Coke (glass)',
+            'revenue_cents': 50000,
+            'cost_cents': null,
+            'profit_cents': null,
+          },
+        ],
+      });
+
+      expect(r.sales.netSalesCents, 577000);
+      expect(r.sales.cogsCents, 200000);
+      expect(r.sales.grossProfitCents, 377000);
+      expect(r.sales.marginPct, closeTo(65.3, 0.001));
+      expect(r.sales.uncostedLines, 1);
+      expect(r.topItems.first.costCents, 40000);
+      expect(r.topItems.first.profitCents, 80000);
+      // An uncosted item is null, not zero: "unknown" is not "no profit".
+      expect(r.topItems.last.costCents, isNull);
+      expect(r.topItems.last.profitCents, isNull);
+    });
+
+    test('profit keys absent (no profit.view) parse to null, never 0', () {
+      final r = DayReport.fromJson(_payload());
+
+      expect(r.sales.netSalesCents, isNull);
+      expect(r.sales.cogsCents, isNull);
+      expect(r.sales.grossProfitCents, isNull);
+      expect(r.sales.marginPct, isNull);
+      expect(r.sales.uncostedLines, isNull);
+      expect(r.topItems.first.costCents, isNull);
+      expect(r.topItems.first.profitCents, isNull);
+    });
+
+    test('an unparsable profit figure is null, not 0', () {
+      final r = DayReport.fromJson({
+        ..._payload(),
+        'sales': {
+          ..._payload()['sales'] as Map<String, dynamic>,
+          'gross_profit_cents': 'n/a',
+          'margin_pct': 'n/a',
+          'uncosted_lines': <String, dynamic>{},
+        },
+      });
+
+      expect(r.sales.grossProfitCents, isNull);
+      expect(r.sales.marginPct, isNull);
+      expect(r.sales.uncostedLines, isNull);
+    });
+
     test('a quiet day is a real answer, not an empty one', () {
       final r = DayReport.fromJson({
         ..._payload(),

@@ -27,6 +27,11 @@ import 'dart:convert';
 /// same last-write-wins argument: a status is an absolute state of one row, so
 /// replaying "ready" writes "ready" again. Kitchen wifi is the worst wifi in the
 /// building and a dead tap mid-rush is worse than a late one.
+///
+/// `expense` is an append, which would normally keep it out — but
+/// `record_expense` takes the idempotency key as its `_client_key` and answers
+/// a repeat with the row that already landed, so a replay cannot log the rice
+/// twice. Someone paying a rickshaw at the back door has no signal either.
 enum OutboxKind {
   order,
   amendAdd,
@@ -38,6 +43,7 @@ enum OutboxKind {
   kotLine,
   kotTicket,
   orderServed,
+  expense,
 }
 
 /// `inflight` is a **persisted** state, not a memory flag (rule 4). A process

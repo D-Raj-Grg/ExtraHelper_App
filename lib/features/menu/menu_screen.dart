@@ -5,16 +5,22 @@ import '../../app/app_scaffold.dart';
 import '../../core/format/money.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/widgets/dish_thumb.dart';
+import '../../core/widgets/veg_mark.dart';
 import '../../data/supabase/menu_repository.dart';
 import '../tenant/tenant_providers.dart';
-import 'item_variants_screen.dart';
+import 'combos_screen.dart';
+import 'item_addons_screen.dart';
+import 'item_edit_screen.dart';
+import 'menu_categories_screen.dart';
 import 'menu_providers.dart';
+import 'stock_toggle.dart';
 
-/// The menu, on a phone: find a dish, fix its variants.
+/// The menu, on a phone: find a dish, mark it sold out or back in stock, add
+/// or change one (photo, price, category, station, sizes), and manage
+/// categories.
 ///
-/// Deliberately narrower than the web editor — photo, add-ons, kitchen routing
-/// and availability stay there. This is the thing an owner does standing in
-/// the restaurant: a variant is wrong, or a variant is in the wrong order.
+/// Add-ons, availability windows and combos stay on the web editor.
 class MenuScreen extends ConsumerStatefulWidget {
   const MenuScreen({super.key});
 
@@ -38,9 +44,55 @@ class _MenuScreenState extends ConsumerState<MenuScreen> {
     final visible = ref.watch(visibleMenuItemsProvider);
     final canEdit = ref.watch(canEditMenuProvider);
     final currency = ref.watch(activeTenantProvider)?.currency ?? 'USD';
+    final categories =
+        ref.watch(menuCategoriesProvider).valueOrNull ?? const [];
+    final picked = ref.watch(menuCategoryFilterProvider);
+    final all = items.valueOrNull ?? const [];
+    final soldOut = all.where((i) => effectiveIs86(ref, i)).length;
 
     return AppScaffold(
       title: 'Menu',
+      actions: [
+        PopupMenuButton<Widget Function()>(
+          tooltip: 'Manage menu',
+          icon: const Icon(Icons.tune),
+          onSelected: (build) => Navigator.of(
+            context,
+          ).push(MaterialPageRoute<void>(builder: (_) => build())),
+          itemBuilder: (_) => [
+            PopupMenuItem(
+              value: () => const MenuCategoriesScreen(),
+              child: const ListTile(
+                leading: Icon(Icons.category_outlined),
+                title: Text('Categories'),
+              ),
+            ),
+            PopupMenuItem(
+              value: () => const AddOnsLibraryScreen(),
+              child: const ListTile(
+                leading: Icon(Icons.add_circle_outline),
+                title: Text('Add-ons'),
+              ),
+            ),
+            PopupMenuItem(
+              value: () => const CombosScreen(),
+              child: const ListTile(
+                leading: Icon(Icons.fastfood_outlined),
+                title: Text('Combos'),
+              ),
+            ),
+          ],
+        ),
+      ],
+      floatingActionButton: canEdit
+          ? FloatingActionButton.extended(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const ItemEditScreen()),
+              ),
+              icon: const Icon(Icons.add),
+              label: const Text('Add dish'),
+            )
+          : null,
       body: Column(
         children: [
           Padding(
@@ -56,6 +108,52 @@ class _MenuScreenState extends ConsumerState<MenuScreen> {
               ),
             ),
           ),
+          if (categories.isNotEmpty)
+            SizedBox(
+              height: 52,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 4,
+                ),
+                children: [
+                  for (final c in [null, ...categories])
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: ChoiceChip(
+                        label: Text(c?.name ?? 'All'),
+                        selected: picked == c?.id,
+                        onSelected: (_) =>
+                            ref
+                                    .read(menuCategoryFilterProvider.notifier)
+                                    .state =
+                                c?.id,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          if (soldOut > 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.remove_shopping_cart_outlined,
+                    size: 16,
+                    color: theme.colorScheme.error,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '$soldOut sold out',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: theme.colorScheme.error,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Expanded(
             child: items.when(
               loading: () => const Center(child: CircularProgressIndicator()),
@@ -71,8 +169,8 @@ class _MenuScreenState extends ConsumerState<MenuScreen> {
                     icon: Icons.restaurant_menu,
                     title: 'No dishes yet',
                     body:
-                        'Add dishes on the web app under Menu. They show up '
-                        'here to price and set variants.',
+                        'Tap Add dish to put the first one on the menu — '
+                        'name, price and a photo is enough to start.',
                   );
                 }
                 if (visible.isEmpty) {
@@ -83,9 +181,14 @@ class _MenuScreenState extends ConsumerState<MenuScreen> {
                   );
                 }
                 return RefreshIndicator(
-                  onRefresh: () async => ref.invalidate(menuEditItemsProvider),
+                  onRefresh: () async {
+                    ref.invalidate(menuEditItemsProvider);
+                    ref.invalidate(menuCategoriesProvider);
+                    ref.invalidate(menuStationsProvider);
+                    ref.invalidate(menuAddOnsProvider);
+                  },
                   child: ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(0, 4, 0, 32),
+                    padding: const EdgeInsets.fromLTRB(0, 4, 0, 96),
                     itemCount: visible.length,
                     separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (_, i) => _ItemRow(
@@ -96,8 +199,7 @@ class _MenuScreenState extends ConsumerState<MenuScreen> {
                           // By id, not by the object: the row is re-derived
                           // from a refreshed list, and a captured snapshot
                           // would show stale variants after the first edit.
-                          builder: (_) =>
-                              ItemVariantsScreen(itemId: visible[i].id),
+                          builder: (_) => ItemEditScreen(itemId: visible[i].id),
                         ),
                       ),
                     ),
@@ -161,34 +263,41 @@ class _ItemRow extends StatelessWidget {
 
     return ListTile(
       onTap: onTap,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      title: Text(item.name),
-      subtitle: Text(
-        item.variants.isEmpty
-            ? (item.categoryName ?? 'No variants')
-            : '${item.variants.length} '
-                  '${item.variants.length == 1 ? 'variant' : 'variants'}'
-                  ' · ${item.variants.map((v) => v.name).join(', ')}',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Text(
-            moneyRange(lo, hi, currency),
-            style: theme.textTheme.bodyMedium?.tabular,
+      minTileHeight: 72,
+      contentPadding: const EdgeInsets.fromLTRB(12, 4, 8, 4),
+      leading: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: SizedBox.square(
+          dimension: 52,
+          child: DishThumb(
+            name: item.name,
+            imageUrl: item.imageUrl,
+            monogramSize: 18,
           ),
-          if (item.is86)
-            Text(
-              '86',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.error,
-              ),
-            ),
+        ),
+      ),
+      title: Row(
+        children: [
+          if (item.isVeg != null) ...[
+            VegMark(isVeg: item.isVeg),
+            const SizedBox(width: 6),
+          ],
+          Flexible(child: Text(item.name, overflow: TextOverflow.ellipsis)),
         ],
       ),
+      subtitle: Text(
+        [
+          moneyRange(lo, hi, currency),
+          if (item.categoryName != null) item.categoryName!,
+          if (item.variants.isNotEmpty)
+            '${item.variants.length} '
+                '${item.variants.length == 1 ? 'size' : 'sizes'}',
+        ].join(' · '),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.bodySmall?.tabular,
+      ),
+      trailing: StockSwitch(item: item),
     );
   }
 }

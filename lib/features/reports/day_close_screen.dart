@@ -9,8 +9,11 @@ import '../../core/format/when.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/tokens.dart';
 import '../../data/supabase/day_report_repository.dart';
+import '../../data/supabase/expenses_repository.dart';
+import '../../data/supabase/pos_repository.dart' show PosFailure;
 import '../tenant/tenant_providers.dart';
 import 'day_bar.dart';
+import 'day_count_sheet.dart';
 import 'day_cutoff_card.dart';
 import 'day_orders.dart';
 import 'day_report_providers.dart';
@@ -37,6 +40,10 @@ class DayCloseScreen extends ConsumerWidget {
     // state-write-during-build. This is the only way the app learns what
     // "today" is — it cannot work it out.
     ref.listen(dayReportProvider, (_, next) {
+      // Settled data only. While a new day loads, the AsyncValue still carries
+      // the *previous* day's report — after stepping forward or back to today
+      // that would record the day just left as "today".
+      if (next.isLoading) return;
       final day = next.valueOrNull?.day;
       if (day != null) ref.read(dayCursorProvider.notifier).rememberToday(day);
     });
@@ -150,8 +157,36 @@ class _Sheet extends ConsumerWidget {
               value: money(r.refunds.totalCents, cur),
               warn: r.refunds.totalCents > 0,
             ),
+            // Only with `profit.view`: the server leaves the keys out
+            // otherwise, and an absent figure must not read as zero profit.
+            if (s.grossProfitCents != null) ...[
+              _Kpi(
+                icon: Icons.trending_up_outlined,
+                label: 'Gross profit',
+                value: money(s.grossProfitCents!, cur),
+              ),
+              _Kpi(
+                icon: Icons.pie_chart_outline,
+                label: 'Margin',
+                // Profit without a margin (no net sales to divide by) is a
+                // dash, not a 0.0% that reads as "sold at cost".
+                value: s.marginPct == null
+                    ? '—'
+                    : '${s.marginPct!.toStringAsFixed(1)}%',
+              ),
+            ],
           ],
         ),
+        if ((s.uncostedLines ?? 0) > 0) ...[
+          const SizedBox(height: 8),
+          Text(
+            '${s.uncostedLines} ${s.uncostedLines == 1 ? 'line' : 'lines'} '
+            'had no cost — enter costs on the web Inventory → Costing tab.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
         const SizedBox(height: 16),
 
         PrintDayReportButton(day: r.day),
@@ -222,22 +257,61 @@ class _Sheet extends ConsumerWidget {
         ],
         const SizedBox(height: 16),
 
+        _CashBookSection(r: r),
+        const SizedBox(height: 16),
+
         _Section(
-          title: 'Cash drawer',
-          empty: r.cash.sessions.isEmpty
-              ? 'No drawer was closed on this day.'
+          title: 'Expenses · ${money(r.expenses.totalCents, cur)}',
+          empty: r.expenses.items.isEmpty
+              ? 'No expenses logged on this day. Staff add them under '
+                    'Expenses as they spend.'
               : null,
           children: [
-            for (final x in r.cash.sessions) _CashSession(x: x, currency: cur),
-            if (r.cash.sessions.length > 1)
+            for (final x in r.expenses.items)
               _Line(
-                label: 'Total variance',
-                value: _signed(r.cash.totals.varianceCents, cur),
-                strong: true,
+                label: x.note,
+                note:
+                    '${x.time} · ${x.category} · '
+                    '${PaidFrom.from(x.paidFrom).label}',
+                value: money(x.amountCents, cur),
               ),
+            const Divider(height: 16),
+            for (final c in r.expenses.byCategory)
+              _Line(
+                label: c.name,
+                note: '×${c.count}',
+                value: money(c.amountCents, cur),
+              ),
+            _Line(
+              label: 'Total expenses',
+              value: money(r.expenses.totalCents, cur),
+              strong: true,
+            ),
           ],
         ),
         const SizedBox(height: 16),
+
+        // The shift drawer only for restaurants that run one, or on a day a
+        // session happened to close anyway.
+        if (r.cashDrawerEnabled || r.cash.sessions.isNotEmpty) ...[
+          _Section(
+            title: 'Cash drawer',
+            empty: r.cash.sessions.isEmpty
+                ? 'No drawer was closed on this day.'
+                : null,
+            children: [
+              for (final x in r.cash.sessions)
+                _CashSession(x: x, currency: cur),
+              if (r.cash.sessions.length > 1)
+                _Line(
+                  label: 'Total variance',
+                  value: _signed(r.cash.totals.varianceCents, cur),
+                  strong: true,
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+        ],
 
         _Section(
           title: 'Top items',
@@ -246,7 +320,9 @@ class _Sheet extends ConsumerWidget {
             for (final t in r.topItems)
               _Line(
                 label: t.description,
-                note: '×${t.qty}',
+                note: t.profitCents == null
+                    ? '×${t.qty}'
+                    : '×${t.qty} · profit ${money(t.profitCents!, cur)}',
                 value: money(t.revenueCents, cur),
               ),
           ],
@@ -284,6 +360,165 @@ class _Sheet extends ConsumerWidget {
 
         const SizedBox(height: 16),
         DayCutoffCard(report: r),
+      ],
+    );
+  }
+}
+
+/// Expected against counted, for cash and for online. The count itself is a
+/// sheet, saved through `close_day`; re-closing overwrites the earlier count.
+class _CashBookSection extends ConsumerStatefulWidget {
+  const _CashBookSection({required this.r});
+
+  final DayReport r;
+
+  @override
+  ConsumerState<_CashBookSection> createState() => _CashBookSectionState();
+}
+
+class _CashBookSectionState extends ConsumerState<_CashBookSection> {
+  bool _busy = false;
+
+  Future<void> _count() async {
+    final tenant = ref.read(activeTenantProvider);
+    if (tenant == null || _busy) return;
+    final r = widget.r;
+    final draft = await showDayCountSheet(
+      context,
+      book: r.cashBook,
+      currency: r.currency,
+    );
+    if (draft == null) return;
+    setState(() => _busy = true);
+    String message;
+    try {
+      await ref
+          .read(expensesRepositoryProvider(tenant.tenantId))
+          .closeDay(
+            day: r.day,
+            cashCents: draft.cashCents,
+            onlineCents: draft.onlineCents,
+            note: draft.note,
+          );
+      message = 'Day closed.';
+      ref.invalidate(dayReportProvider);
+    } on PosFailure catch (e) {
+      message = e.message;
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final b = widget.r.cashBook;
+    final cur = widget.r.currency;
+    final theme = Theme.of(context);
+
+    List<Widget> ledger({
+      required String title,
+      required int sales,
+      required int refunds,
+      required int expenses,
+      required int expected,
+      required int? counted,
+      required int? diff,
+    }) {
+      final v = diff == null ? null : variance(diff);
+      return [
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            title,
+            style: theme.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        _Line(label: 'Taken in sales', value: money(sales, cur)),
+        if (refunds > 0)
+          _Line(label: 'Refunded', value: '−${money(refunds, cur)}'),
+        _Line(
+          label: 'Expenses paid',
+          value: expenses > 0 ? '−${money(expenses, cur)}' : '—',
+        ),
+        _Line(label: 'Should have', value: money(expected, cur), strong: true),
+        _Line(
+          label: 'Counted',
+          value: counted == null ? 'Not counted' : money(counted, cur),
+        ),
+        // Sign, word and colour together — never colour alone.
+        if (v != null && diff != null)
+          _Line(
+            label: v.label,
+            value: _signed(diff, cur),
+            color: v.color(context),
+            strong: true,
+          ),
+      ];
+    }
+
+    return _Section(
+      title: 'Cash book',
+      children: [
+        Text(
+          b.closed && b.closedAt != null
+              ? 'Counted by ${b.closedBy ?? 'someone'} · '
+                    '${billDateTime(b.closedAt!)}'
+              : 'At night, count the cash in hand and check online received.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        ...ledger(
+          title: 'Cash',
+          sales: b.cashSalesCents,
+          refunds: b.cashRefundsCents,
+          expenses: b.cashExpensesCents,
+          expected: b.expectedCashCents,
+          counted: b.countedCashCents,
+          diff: b.cashVarianceCents,
+        ),
+        const Divider(height: 16),
+        ...ledger(
+          title: 'Online',
+          sales: b.onlineSalesCents,
+          refunds: b.onlineRefundsCents,
+          expenses: b.onlineExpensesCents,
+          expected: b.expectedOnlineCents,
+          counted: b.countedOnlineCents,
+          diff: b.onlineVarianceCents,
+        ),
+        if (b.note != null && b.note!.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text('Note: ${b.note}', style: theme.textTheme.bodySmall),
+          ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: b.closed
+              ? OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                  ),
+                  onPressed: _busy ? null : _count,
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Recount'),
+                )
+              : FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                  ),
+                  onPressed: _busy ? null : _count,
+                  icon: const Icon(Icons.check_circle_outline),
+                  label: const Text('Count cash & close the day'),
+                ),
+        ),
       ],
     );
   }

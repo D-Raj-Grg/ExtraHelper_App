@@ -24,11 +24,18 @@ class AppDrawer extends ConsumerWidget {
     // avoids offering a door that won't open.
     final canSeeKitchen = ref.watch(hasPermissionProvider('kds.view'));
     final canSeeReports = ref.watch(hasPermissionProvider('reports.view'));
+    // Every base role holds `expenses.create` — whoever paid for the rice
+    // logs it. The RPCs decide what each person may see and change.
+    final canLogExpenses = ref.watch(hasPermissionProvider('expenses.create'));
     final canSeeStock = ref.watch(hasPermissionProvider('inventory.view'));
     // `audit_logs` RLS is owner/manager only; `order.void` is held by exactly
     // those two, so it is the honest key to hang the manager log on.
     final canReview = ref.watch(hasPermissionProvider('order.void'));
     final canSeeMenu = ref.watch(hasPermissionProvider('menu.view'));
+    // `loyalty.view` is Owner/Manager by default; `loyalty.edit` gates the
+    // levers inside. The credit roll-up on the screen is the reason a manager
+    // opens it at all.
+    final canSeeCustomers = ref.watch(hasPermissionProvider('loyalty.view'));
     // Owner and manager by default. False while permissions load, which is the
     // right way round: a door that appears late is better than one that
     // vanishes under a thumb already moving towards it.
@@ -74,6 +81,14 @@ class AppDrawer extends ConsumerWidget {
                 route: Routes.dashboard,
                 location: location,
               ),
+            if (canLogExpenses)
+              _DrawerItem(
+                icon: Icons.account_balance_wallet_outlined,
+                selectedIcon: Icons.account_balance_wallet,
+                label: 'Expenses',
+                route: Routes.expenses,
+                location: location,
+              ),
             // Same key as the dashboard: the day close exposes strictly less
             // than the web Sales tab a `reports.view` holder already sees.
             if (canSeeReports)
@@ -104,6 +119,14 @@ class AppDrawer extends ConsumerWidget {
                 selectedIcon: Icons.restaurant_menu,
                 label: 'Menu',
                 route: Routes.menu,
+                location: location,
+              ),
+            if (canSeeCustomers)
+              _DrawerItem(
+                icon: Icons.people_outline,
+                selectedIcon: Icons.people,
+                label: 'Customers',
+                route: Routes.customers,
                 location: location,
               ),
             if (canReview)

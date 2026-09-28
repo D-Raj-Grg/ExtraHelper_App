@@ -22,6 +22,11 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
         android:maxSdkVersion="30"/>
     <uses-feature android:name="android.hardware.bluetooth" android:required="false"/>
+    <!-- Order alerts (flutter_local_notifications). Android 13+ asks the user
+         for this at runtime; the app asks once, after a sentence of why. The
+         plugin's own manifest declares it too — stated here so the app's
+         permissions are readable in one place. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="ExtraHelper"
         android:name="${applicationName}"

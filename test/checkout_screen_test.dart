@@ -741,4 +741,42 @@ void main() {
 
     expect(find.textContaining('Aug 13, 2026'), findsOneWidget);
   });
+
+  testWidgets('the guest card says what the guest already owes elsewhere', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        permissions: cashier,
+        snapshot: _snapshot(
+          customer: const BillCustomer(
+            id: 'c1',
+            name: 'Sona',
+            points: 0,
+            owesCents: 241500,
+            unpaidBills: 1,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(find.textContaining('Owes '), 200);
+    expect(find.textContaining('Owes '), findsOneWidget);
+    expect(find.textContaining('1 unpaid bill'), findsOneWidget);
+  });
+
+  testWidgets('a guest with nothing owing gets no warning', (tester) async {
+    await tester.pumpWidget(
+      _app(
+        permissions: cashier,
+        snapshot: _snapshot(
+          customer: const BillCustomer(id: 'c1', name: 'Sona', points: 0),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Owes '), findsNothing);
+  });
 }

@@ -1752,6 +1752,121 @@ provided, the tests that mock that dependency are the *least* likely to notice.
 **Never assign `state` from inside `build()`**, including indirectly from a `fireImmediately`
 listener. Read the value and return it.
 
+## Receipt branding and sending a receipt (2026-09-03)
+
+Two things the web had and the phone did not.
+
+**The day-close forward chevron was dead.** `DayCloseScreen` fed *every* report payload into
+`DayCursor.rememberToday`, but `DayReport.day` names the day the report covers, not today. One step
+back and `knownToday` was overwritten with the past day, so `canGoForward` (`selected < knownToday`)
+went false and `isToday` went true — which also hid "Back to today". No way forward at all. Fixed by
+guarding `rememberToday` on `state.selected == null`: only a payload for a null request is an answer
+about today. It also drops a stale today-response that lands after a step back. The old tests passed
+because they never re-fired the listener for the past day.
+
+**The receipt carried no branding.** `bill_view_screen.dart` titled itself "Receipt" but showed no
+logo, no footer, no terms and — the point — no **payment QR**, while `receipt-view.tsx` and the
+thermal slip both do. All of it was already on the device in `TenantSettings.receipt`; the app could
+even upload the QR and never displayed it. Now: logo (capped at 64), QR at **0.62** of the paper
+(the ratio `bake_image.dart` and the web both use), bold caption, footer falling back to
+"Thank you!", terms. Nothing renders when a restaurant has not uploaded one — a guest is looking at
+this. `header` stays paper-only, as on the web.
+
+**Sending it.** `_Paper` was the `ListView`; it is now `BillPaper`, a document with no scroller, and
+the share path mounts *that same widget* off-screen and photographs it — no second renderer to drift
+from the server-side template. Traps paid for:
+
+- **A `RepaintBoundary` inside a scrolling list is a trap.** A viewport only paints what is in its
+  extent and `toImage` throws on a boundary that was never painted. Today's single-child list would
+  work by accident. The export child is `Positioned` off-screen inside a `Stack` — painted but
+  invisible — because `Offstage`/`Visibility(false)`/`Opacity(0)` all skip painting. Ancestor clips
+  do not reach the boundary's own layer, so the picture is complete.
+- **`precacheImage` reports success when a fetch fails** unless `onError` rethrows. Without that the
+  logo and QR export as blank squares. Screen and export must also build the provider identically —
+  `NetworkImage` keys on `(url, scale)` — hence the single `brandImage` factory.
+- The export pins `TextScaler.noScaling` (the particulars restack above 1.3×), forces
+  `AppTheme.light()` (a dark capture is a black slip) and paints an opaque background (a
+  `RepaintBoundary` keeps its alpha, and transparent margins go black in a messenger's dark mode).
+  A golden under an ambient dark theme guards all three.
+- `exportPixelRatio` clamps on height: a 50-line bill loses sharpness rather than a texture
+  allocation. `image.dispose()` in a `finally` — tens of MB otherwise.
+- Files go to the **cache** dir (`receipt-<INVOICE8>-<stamp>.png`), swept at 6h on the way *in* to
+  the next export, never after sharing: Android hands the receiver a content URI and messengers read
+  it lazily.
+- Share stays enabled **offline** and on a **void** bill, unlike printing — the picture is made on
+  the device, and a voided bill in writing is evidence.
+- `share_plus` sits behind `fileSharerProvider` in one file. Its API broke across a major
+  (`Share.shareXFiles` → `SharePlus.instance.share(ShareParams(...))`); 13.3.0 is what resolved.
+  `sharePositionOrigin` is passed from the button's `GlobalKey` — without it the iPad popover points
+  at nothing.
+- Testing the capture needs alternating `tester.pump` and `tester.runAsync`: frames only advance
+  under the first, `toImage` and file writes only under the second. `path_provider` needs its
+  channel mocked.
+
+Not done, deliberately: a full-screen "scan to pay" mode, and opening the receipt automatically
+after payment.
+
+## Live order alerts on the phone (2026-09-26, both clients)
+
+Backend: `../extrahelper/supabase/migrations/20260926120000_order_notifications.sql` —
+`notifications` rows written by triggers on `orders.status` / `bills.status`, per-user read cursor
+in `notification_reads`, `mark_notifications_read(_tenant)`. RLS = `notifications.view`.
+
+- [x] `flutter_local_notifications` 22.3.1 (matches Flutter 3.38 / compileSdk 36 / AGP 8.11.1);
+      core library desugaring in `android/app/build.gradle.kts`; `POST_NOTIFICATIONS`; monochrome
+      `ic_stat_notify` vector + `res/raw/keep.xml`; iOS `UNUserNotificationCenter` delegate.
+- [x] `data/notifications/` — `AppNotification` (parse, self-authored filter, unread, merge) and
+      `LocalNotifier` (init, permission, show, tap stream, launch payload).
+- [x] `data/supabase/notifications_repository.dart` — latest 50, read cursor, mark read, Realtime
+      INSERT stream (fresh topic per listen, JWT set on join).
+- [x] `NotifyLoop` above the router: keeps the feed alive, one-time pre-prompt then OS prompt, tap →
+      `/notifications`, refresh on resume. Bell with unread badge in `AppScaffold`.
+- [x] Settings → Notifications: OS permission state, "Turn on" / "Open phone settings", per-device
+      mute.
+- [ ] Real-device pass, both platforms: prompt, banner backgrounded, tap-to-open, cold launch from
+      the tray, Android 12 (no runtime prompt) vs 13+.
+- [ ] Phase 2: FCM/APNs push, so alerts reach a phone whose app has been killed.
+
+## Daily expenses + night cash count (2026-09-26, both clients)
+
+Backend + web: see `../extrahelper/TASKS.md` → "Daily expenses + night cash count".
+
+- [x] `data/supabase/expenses_repository.dart`: `PaidFrom`, `Expense`, `ExpenseDay` (from `expenses_day`), and the
+      record/update/void/category/close_day RPCs.
+- [x] `OutboxKind.expense`: logging an expense queues offline. The outbox key is the RPC's `_client_key`, so a
+      replay can't double-log. It appends rather than last-write-wins, since two Rs 100 rides are two entries.
+      Pending entries show greyed on the list. Covered in `test/outbox_test.dart` → `expenses`.
+- [x] `features/expenses/`: Expenses screen (day switcher, totals by paid-from, edit/void menu, pending rows),
+      add/edit bottom sheet (chips), void dialog, and a categories screen (`expenses.manage`). Drawer entry is gated on `expenses.create`.
+- [x] Day close: Cash book section (expected vs counted, variance with word + sign), "Count cash & close the
+      day" / "Recount" sheet → `close_day`, and an Expenses section. The drawer section is hidden when the drawer is off.
+- [ ] Real-device pass: log offline in airplane mode → reconnect → appears once; recount a closed day.
+
+## Menu editing on the phone (2026-09-26)
+
+- [x] Add / edit / delete a dish: name, price, category, station, veg mark, description (`item_edit_screen.dart`).
+- [x] Dish photo: camera or gallery → `menu-images` (same path as the web), change, remove. Thumbnails in the list.
+- [x] In stock / Sold out switch per dish via `set_item_86` through the outbox, and a sold-out count.
+- [x] Category filter chips, and a categories screen (add, rename, hide/show).
+- [ ] Real-device pass: camera permission prompt, upload on a slow connection, sold out with no signal → reconnect.
+- [x] Add-ons: link/unlink per dish with max qty, create from the dish, and a library screen (rename/reprice/delete).
+- [x] Availability windows per dish (every day or one day, start–end).
+- [x] Combos: create/edit/delete, on/off, dishes with quantities.
+- [x] Several kitchen stations per dish (set-difference save).
+- [x] Review fixes: a photo that fails after a new dish is saved no longer strands it; the delete copy names what cascades (sizes, add-ons, windows, recipe); the kitchen can use the stock switch on a read-only dish; saving no longer collapses multi-station dishes.
+- [ ] **Enforce availability windows and combos when ordering**, server-side in `place_staff_order` / QR / storefront menus plus both POS clients. Today (web and phone) they are data only.
+
+## Customers / Loyalty & CRM on the phone (2026-09-27)
+
+- [x] Customer list with search, credit roll-up, debtors first; detail page with points earn/redeem,
+      unpaid bills → Collect (checkout), past orders; edit / merge / delete on `loyalty.edit`.
+      All rules server-side via the RPCs the web uses. Built with two parallel agents (data layer,
+      screens) against a fixed API contract; wired routes and drawer by hand.
+- [ ] Not gated on the tenant's loyalty *feature* flag (web is). Decide whether the phone should
+      read `tenant_features` or whether the credit book should be plan-independent on both.
+- [ ] Device pass outstanding: not run on a phone. `flutter analyze` clean, 669 tests.
+- [ ] Owes line at checkout + expense sheet dropdown/close also unshipped. Next TestFlight is 1.0.16+.
+
 ## Open Questions
 
 - [x] Confirm bundle id `com.extrahelper.app` before the first signed build. Confirmed and shipped in

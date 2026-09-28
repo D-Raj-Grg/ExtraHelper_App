@@ -160,7 +160,9 @@ class BillRepository {
     // worth asking for while the bill can still take one.
     List<Map<String, dynamic>> modifierRows = const [];
     List<Map<String, dynamic>> mergeableRows = const [];
+    List<Map<String, dynamic>> creditRows = const [];
     String? waiterName;
+    var customer = _customerOf(orderRow);
     try {
       final results = await Future.wait<dynamic>([
         if (orderItemIds.isEmpty)
@@ -189,9 +191,24 @@ class BillRepository {
                 'served',
               ])
               .order('created_at', ascending: false),
+        // What the guest already owes elsewhere. Only asked while the bill can
+        // still be left unpaid: on a paid bill there is no credit decision.
+        // Failure is caught *here*, not by the block below: this call shares a
+        // `Future.wait` with the modifiers, and a missing warning must not
+        // take the add-on names down with it.
+        if (customer == null || !bill.isSettleable)
+          Future<List<Map<String, dynamic>>>.value(const [])
+        else
+          _client
+              .rpc<dynamic>(
+                'customer_credit_summary',
+                params: {'_tenant': _tenantId},
+              )
+              .then<dynamic>((r) => r, onError: (_) => const <dynamic>[]),
       ]);
       modifierRows = _rows(results[0]);
       mergeableRows = _rows(results[1]);
+      creditRows = _rows(results[2]);
 
       // The FK points at `auth.users`, which PostgREST cannot embed through to
       // `profiles` — same second query the audit log needs.
@@ -209,6 +226,20 @@ class BillRepository {
     } catch (_) {
       // Trimmings. A bill that renders without its add-on names beats a red
       // screen mid-service, and the money is all in pass one.
+    }
+
+    if (customer != null && creditRows.isNotEmpty) {
+      final paid = paymentRows.fold<int>(
+        0,
+        (n, p) => n + PaymentRow.fromRow(p).amountCents,
+      );
+      customer = BillCustomer.fromCreditRows(
+        customer,
+        creditRows,
+        thisBillDueCents: bill.isSettleable
+            ? (bill.totalCents - paid).clamp(0, bill.totalCents)
+            : 0,
+      );
     }
 
     final modsByItem = <String, List<BillLineModifier>>{};
@@ -238,7 +269,7 @@ class BillRepository {
       charges: chargeRows.map(ChargeRow.fromRow).toList(),
       discounts: discounts,
       settings: TenantMoneySettings.fromRow(settingsRow),
-      customer: _customerOf(orderRow),
+      customer: customer,
       mergeable: mergeableRows.map(MergeableOrder.fromRow).toList(),
       waiterName: waiterName,
       orderId: soleOrderId,

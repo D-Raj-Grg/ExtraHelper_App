@@ -23,8 +23,12 @@ final visibleMenuItemsProvider = Provider.autoDispose<List<MenuEditItem>>((
 ) {
   final all = ref.watch(menuEditItemsProvider).valueOrNull ?? const [];
   final q = ref.watch(menuSearchProvider).trim().toLowerCase();
-  if (q.isEmpty) return all;
-  return all
+  final cat = ref.watch(menuCategoryFilterProvider);
+  final inCat = cat == null
+      ? all
+      : all.where((i) => i.categoryId == cat).toList();
+  if (q.isEmpty) return inCat;
+  return inCat
       .where(
         (i) =>
             i.name.toLowerCase().contains(q) ||
@@ -45,3 +49,45 @@ final canEditMenuProvider = Provider<bool>(
 final canSeeMenuProvider = Provider<bool>(
   (ref) => ref.watch(hasPermissionProvider('menu.view')),
 );
+
+final menuCategoriesProvider = FutureProvider<List<MenuEditCategory>>((
+  ref,
+) async {
+  final tenant = ref.watch(activeTenantProvider);
+  if (tenant == null) return const [];
+  return ref.watch(menuRepositoryProvider(tenant.tenantId)).categories();
+});
+
+final menuStationsProvider = FutureProvider<List<MenuStation>>((ref) async {
+  final tenant = ref.watch(activeTenantProvider);
+  if (tenant == null) return const [];
+  return ref.watch(menuRepositoryProvider(tenant.tenantId)).stations();
+});
+
+/// The category chip picked above the list; null is "All".
+final menuCategoryFilterProvider = StateProvider.autoDispose<String?>(
+  (_) => null,
+);
+
+/// Who may mark a dish sold out or back in stock. `set_item_86` checks the
+/// role (owner, manager, kitchen) rather than a permission key, so the switch
+/// follows the same rule; the RPC is what actually enforces it.
+final canSetStockProvider = Provider<bool>((ref) {
+  final role = ref.watch(activeTenantProvider)?.role;
+  return role == 'owner' || role == 'manager' || role == 'kitchen';
+});
+
+/// The add-on library ("Extra cheese", "No onion").
+final menuAddOnsProvider = FutureProvider<List<MenuAddOn>>((ref) async {
+  final tenant = ref.watch(activeTenantProvider);
+  if (tenant == null) return const [];
+  return ref.watch(menuRepositoryProvider(tenant.tenantId)).addOns();
+});
+
+final menuCombosProvider = FutureProvider.autoDispose<List<MenuCombo>>((
+  ref,
+) async {
+  final tenant = ref.watch(activeTenantProvider);
+  if (tenant == null) return const [];
+  return ref.watch(menuRepositoryProvider(tenant.tenantId)).combos();
+});

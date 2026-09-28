@@ -242,6 +242,39 @@ class OrderQueue {
     payload: const {},
   );
 
+  /// Log a daily expense.
+  ///
+  /// An append, not last-write-wins: two Rs 100 rides are two entries. The
+  /// minted key is the server's `_client_key`, so the replay is still safe.
+  Future<QueueOutcome> recordExpense({
+    required String categoryId,
+    required int amountCents,
+    required String note,
+    required String paidFrom,
+    String? businessDate,
+  }) async {
+    final key = _uuid.v4();
+    final entry = await _store.enqueue(
+      tenantId: _tenantId,
+      kind: OutboxKind.expense,
+      orderRef: 'expense:$key',
+      idempotencyKey: key,
+      payload: {
+        'category_id': categoryId,
+        'amount_cents': amountCents,
+        'note': note,
+        'paid_from': paidFrom,
+        'business_date': ?businessDate,
+      },
+    );
+    return _drainAndReport(entry.id, entry.orderRef);
+  }
+
+  /// Expenses still owed to the server, so the list can show them greyed.
+  Future<List<OutboxEntry>> pendingExpenses() async => (await _store.due())
+      .where((e) => e.kind == OutboxKind.expense && e.tenantId == _tenantId)
+      .toList();
+
   /// Enqueue, or replace the payload of a pending write for the same row.
   Future<QueueOutcome> _lastWriteWins({
     required OutboxKind kind,

@@ -43,6 +43,12 @@ class _Transport implements OutboxTransport {
   }
 
   @override
+  Future<void> recordExpense({
+    required String idempotencyKey,
+    required Map<String, dynamic> payload,
+  }) async {}
+
+  @override
   Future<String> placeOrder({
     required String idempotencyKey,
     required Map<String, dynamic> payload,
