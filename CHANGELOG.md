@@ -12,6 +12,9 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 ## [Unreleased]
 
+### Fixed
+- **A refunded bill no longer shows as "Part paid" under Credit.** Server fix, no app update needed: refunding part of a paid bill used to flip it back to part-paid, so it sat in the Credit list with nothing owed and fell out of Day close. A partial refund now leaves the bill Paid; the two bills from 28 Sep are back where they belong. Pull to refresh. (Web migration `20260929090000_refund_keeps_bill_paid`, see `../extrahelper/CHANGELOG.md`.)
+
 ## [1.0.16] — 2026-09-28 · Costs, coupons, customers and passwords
 
 _Build 2 adds the Coupons screen, staff passwords and the Bills tab change below; build 1 shipped the rest earlier the same day._
