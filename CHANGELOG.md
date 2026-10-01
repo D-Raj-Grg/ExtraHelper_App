@@ -13,7 +13,7 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 ## [Unreleased]
 
 ### Changed
-- **Flyer coupons stay out of the Coupons screen.** Server change, no app update needed: the web can now make a print run of hundreds of single-use flyer codes, and those are managed on the web (Coupons → Flyer print runs). The Coupons list here keeps showing campaigns only. Scanning a flyer's QR with **Adjust → Scan coupon** works as for any coupon. (Web migration `20260930100000_coupon_batches`, see `../extrahelper/CHANGELOG.md`.)
+- **Flyer coupons stay out of the Coupons screen.** Server change, no app update needed: the web can now make a print run of hundreds of single-use flyer codes, and those are managed on the web (Coupons → Flyers tab). The Coupons list here keeps showing campaigns only. Scanning a flyer's QR with **Adjust → Scan coupon** works as for any coupon. (Web migration `20260930100000_coupon_batches`, see `../extrahelper/CHANGELOG.md`.)
 
 ### Fixed
 - **A refunded bill no longer shows as "Part paid" under Credit.** Server fix, no app update needed: refunding part of a paid bill used to flip it back to part-paid, so it sat in the Credit list with nothing owed and fell out of Day close. A partial refund now leaves the bill Paid; the two bills from 28 Sep are back where they belong. Pull to refresh. (Web migration `20260929090000_refund_keeps_bill_paid`, see `../extrahelper/CHANGELOG.md`.)
