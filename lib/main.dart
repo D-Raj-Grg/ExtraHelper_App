@@ -14,7 +14,28 @@ import 'features/notifications/notify_loop.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  Env.assertConfigured();
+  if (!Env.isConfigured) {
+    // Throwing here leaves the app frozen on the splash screen with no
+    // explanation, so paint the reason instead.
+    runApp(
+      const MaterialApp(
+        home: Scaffold(
+          body: Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(
+              child: Text(
+                'Built without Supabase config.\n\n'
+                'Rebuild with --dart-define-from-file=env.json '
+                '(or use ./build_apk.sh).',
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    return;
+  }
 
   await Supabase.initialize(
     url: Env.supabaseUrl,
