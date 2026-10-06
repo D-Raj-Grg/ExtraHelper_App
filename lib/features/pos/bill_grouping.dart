@@ -14,13 +14,9 @@ import 'bill_models.dart';
 /// on exactly one `order_item_id`.
 ///
 /// One deliberate divergence from the paper: this key also carries the
-/// modifiers and whether the line can be adjusted (see [_key]), while
-/// `groupParticulars` keys on description and unit price alone. Two drinks at
-/// the same price that differ only by a modifier therefore read as two rows
-/// here and one row on the slip. The totals still agree — only the breakdown
-/// differs — and folding them on screen would put a delete button on a row
-/// whose label describes a different drink. The fix belongs on the paper side,
-/// in `docs.ts`.
+/// modifiers and whether the line can be adjusted (see [_key]). The web's
+/// `groupParticulars` (`docs.ts`) uses the same key since 2026-10-06, so the
+/// slip and the screen fold the same rows.
 class GroupedBillLine {
   const GroupedBillLine({
     required this.description,
@@ -110,7 +106,9 @@ GroupedBillLine _fold(List<BillLine> sources) {
 ///   the cashier is looking at.
 String _key(BillLine line) {
   final mods =
-      line.modifiers.map((m) => '${m.id}×${m.qty}').toList(growable: false)
+      line.modifiers
+          .map((m) => '${m.identity}×${m.qty}')
+          .toList(growable: false)
         ..sort();
   return [
     line.description,

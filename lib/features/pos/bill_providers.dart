@@ -300,11 +300,11 @@ final filteredBillsProvider = FutureProvider.autoDispose<List<OpenBillRow>>((
   return repo.bills(
     statuses: filter.statuses,
     since: since,
-    // Settled lists are bound on when the bill was *settled*, not opened — see
-    // `BillRepository.bills`. "All today" includes owed bills, which have no
-    // settlement to speak of, so it stays on when they were opened.
-    sinceColumn: filter == BillFilter.paid || filter == BillFilter.voided
-        ? 'updated_at'
-        : 'created_at',
+    // Day-bound lists are bound on when the bill was last *touched*, not
+    // opened — see `BillRepository.bills`. "All today" has to agree with Paid
+    // and Void, or a bill opened before midnight and settled today shows under
+    // Paid but is missing here. A bill opened today has `updated_at` ≥ its
+    // `created_at`, so nothing from today drops out.
+    sinceColumn: filter.dayBound ? 'updated_at' : 'created_at',
   );
 });

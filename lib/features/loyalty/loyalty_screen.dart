@@ -75,11 +75,13 @@ class _LoyaltyScreenState extends ConsumerState<LoyaltyScreen> {
           ),
         ),
         IdentityStatus.ready when !canView => const NoCustomerAccess(),
-        IdentityStatus.ready => _Body(
-          search: _search,
-          onSearch: _onSearch,
-          onRetry: _refresh,
-          onRefresh: _reload,
+        IdentityStatus.ready => LoyaltyFeatureGate(
+          child: _Body(
+            search: _search,
+            onSearch: _onSearch,
+            onRetry: _refresh,
+            onRefresh: _reload,
+          ),
         ),
         _ => const Center(child: CircularProgressIndicator()),
       },

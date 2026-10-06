@@ -211,36 +211,38 @@ class _CustomerDetailScreenState extends ConsumerState<CustomerDetailScreen> {
           ),
         ),
         IdentityStatus.ready when !canView => const NoCustomerAccess(),
-        IdentityStatus.ready => RefreshIndicator(
-          onRefresh: _reload,
-          child: loaded.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (e, _) => ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                RetryNotice(
-                  message: "Couldn't load this customer.",
-                  detail: '$e',
-                  icon: Icons.cloud_off_outlined,
-                  onRetry: _refresh,
-                ),
-              ],
-            ),
-            data: (c) => c == null
-                ? const _NotFound()
-                : _Detail(
-                    customer: c,
-                    currency: currency,
-                    canEdit: canEdit,
-                    canCollect: canCollect,
-                    busy: _busy,
-                    points: _points,
-                    onEarn: () => _adjust('earn'),
-                    onRedeem: () => _adjust('burn'),
-                    history: ref.watch(customerHistoryProvider(c.id)),
-                    onRetryHistory: () =>
-                        ref.invalidate(customerHistoryProvider(c.id)),
+        IdentityStatus.ready => LoyaltyFeatureGate(
+          child: RefreshIndicator(
+            onRefresh: _reload,
+            child: loaded.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  RetryNotice(
+                    message: "Couldn't load this customer.",
+                    detail: '$e',
+                    icon: Icons.cloud_off_outlined,
+                    onRetry: _refresh,
                   ),
+                ],
+              ),
+              data: (c) => c == null
+                  ? const _NotFound()
+                  : _Detail(
+                      customer: c,
+                      currency: currency,
+                      canEdit: canEdit,
+                      canCollect: canCollect,
+                      busy: _busy,
+                      points: _points,
+                      onEarn: () => _adjust('earn'),
+                      onRedeem: () => _adjust('burn'),
+                      history: ref.watch(customerHistoryProvider(c.id)),
+                      onRetryHistory: () =>
+                          ref.invalidate(customerHistoryProvider(c.id)),
+                    ),
+            ),
           ),
         ),
         _ => const Center(child: CircularProgressIndicator()),

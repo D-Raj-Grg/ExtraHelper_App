@@ -69,13 +69,13 @@ final menuCategoryFilterProvider = StateProvider.autoDispose<String?>(
   (_) => null,
 );
 
-/// Who may mark a dish sold out or back in stock. `set_item_86` checks the
-/// role (owner, manager, kitchen) rather than a permission key, so the switch
-/// follows the same rule; the RPC is what actually enforces it.
-final canSetStockProvider = Provider<bool>((ref) {
-  final role = ref.watch(activeTenantProvider)?.role;
-  return role == 'owner' || role == 'manager' || role == 'kitchen';
-});
+/// Who may mark a dish sold out or back in stock: `menu.86`, the same key
+/// `set_item_86` checks. Deliberately not `menu.edit` — the kitchen knows the
+/// dish ran out and holds `menu.86` by default without being able to edit the
+/// menu. The RPC is what actually enforces it.
+final canSetStockProvider = Provider<bool>(
+  (ref) => ref.watch(hasPermissionProvider('menu.86')),
+);
 
 /// The add-on library ("Extra cheese", "No onion").
 final menuAddOnsProvider = FutureProvider<List<MenuAddOn>>((ref) async {

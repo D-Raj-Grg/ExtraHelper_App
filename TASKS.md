@@ -1202,10 +1202,9 @@ pressure and there is no room for a text field per share. Revisit if a cashier a
       airplane mode off — the order must reach the kitchen exactly once. Then a cold start with no
       coverage at all, which must render the shell from cache, not "No ordering access". Everything
       else in Milestone F is verified on the Android emulator.
-- [ ] **Decide on a `menu.86` permission key.** The kitchen must be able to 86 a dish but must not
-      hold `menu.edit` (which is full menu editing, prices included), so `set_item_86` checks the
-      role directly today. A dedicated key is the clean fix; it is a shared-catalog change, so it
-      lands in `../extrahelper/TASKS.md` too.
+- [x] **`menu.86` permission key** (2026-10-06). Migration `20260930150000_menu_86_permission`: catalog row,
+      kitchen default, backfill for owner/manager/kitchen roles, `set_item_86` checks the key. Web 86 buttons,
+      KDS 86 board, phone stock switch and composer long-press gate on it. Not called as each role live.
 - [ ] Inventory — stock counts and adjustments in the store room; barcode/QR scan via camera.
 - [x] **iOS signing + TestFlight internal.** `Apple Development` identity (the old `iPhone Developer`
       string makes an archive undistributable), `CODE_SIGN_STYLE = Automatic` pinned on the Runner
@@ -1229,7 +1228,8 @@ pressure and there is no room for a text field per share. Revisit if a cashier a
             to live financial tables, so decide it deliberately rather than in a rejection reply.
       - [ ] Screenshots: iPhone and iPad, since the binary is universal.
       - [ ] External TestFlight testers need Beta App Review — same demo-account requirement.
-- [ ] **Play internal testing track.** `android/app/build.gradle.kts` still signs release with the
+- [~] **Play internal testing track.** Signing wired 2026-10-06 (reads `android/key.properties`, falls back to debug); owner still has to create the keystore — see README.
+      Original note: `android/app/build.gradle.kts` still signs release with the
       **debug** keystore (the untouched template TODO). Needs a real keystore, `key.properties`
       gitignored, and `flutter build appbundle` — Play takes an AAB, not the APK the README documents.
 - [ ] **iPad layout pass.** The binary is universal (`TARGETED_DEVICE_FAMILY = "1,2"`) but only
@@ -1893,7 +1893,7 @@ Backend + web: see `../extrahelper/TASKS.md` → "Daily expenses + night cash co
       unpaid bills → Collect (checkout), past orders; edit / merge / delete on `loyalty.edit`.
       All rules server-side via the RPCs the web uses. Built with two parallel agents (data layer,
       screens) against a fixed API contract; wired routes and drawer by hand.
-- [ ] Not gated on the tenant's loyalty *feature* flag (web is). Decide whether the phone should
+- [x] Customers screens and drawer entry now gated on the plan's `loyalty` feature via `tenant_has_feature` (2026-10-06), like the web. Checkout and the credit-book customer attach stay ungated on purpose (web doesn't gate them; gating would break credit tabs). Open: detail app bar can still show the name behind the plan-locked panel.
       read `tenant_features` or whether the credit book should be plan-independent on both.
 - [ ] Device pass outstanding: not run on a phone. `flutter analyze` clean, 669 tests.
 - [ ] Owes line at checkout + expense sheet dropdown/close also unshipped. Next TestFlight is 1.0.16+.
@@ -1906,13 +1906,10 @@ Backend + web: see `../extrahelper/TASKS.md` → "Daily expenses + night cash co
       surface? Decide before the manager-ops phase.
 - [x] Cashier/payments on mobile — **answered 2026-08-13: yes, at full parity with the web.** Shipped
       as the Checkout milestone below.
-- [ ] `BillFilter.today` day-bounds on `created_at` while `paid`/`voided` bound on `updated_at`
-      (`features/pos/bill_providers.dart`), so a bill opened before midnight and settled today is
-      missing from "All today" even though it shows under Paid. Found while fixing the stale-bill
-      complaint; a different symptom, left alone deliberately. One-line fix.
-- [ ] The printed bill's `groupParticulars` (`../extrahelper/lib/print/docs.ts`) keys on description
-      and unit price alone, so two drinks at the same price differing only by a modifier fold into
-      one row on paper while the Flutter checkout and bill view keep them apart. Totals agree; only
-      the breakdown differs. Fix belongs on the paper side — add the modifier set to the key.
+- [x] `BillFilter.today` now day-bounds on `updated_at` like Paid and Void (2026-10-06), so a bill
+      opened before midnight and settled today shows under All today too.
+- [x] The printed bill's `groupParticulars` now keys on modifiers + adjustability like `bill_grouping.dart`
+      (2026-10-06, `lib/print/docs.ts` + `job-render.ts`). Still keyed on description + price only:
+      `components/receipt-view.tsx` and `components/checkout/invoice-preview.tsx` — one-line follow-ups.
 - [ ] Push notifications (FCM/APNs) for new orders — needed, and on whose device?
 - [ ] Pilot distribution — TestFlight + Play internal track, or a direct `.apk`?

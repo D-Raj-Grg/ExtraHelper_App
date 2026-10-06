@@ -200,6 +200,23 @@ final permissionsProvider = FutureProvider<Set<String>>((ref) async {
   );
 });
 
+/// Whether the active restaurant's *plan* includes a feature (`loyalty`,
+/// `online_store`, ...), straight from `tenant_has_feature` — the gate the web
+/// applies with `requireFeature`. Not a permission: a manager can hold
+/// `loyalty.view` on a plan that does not include loyalty.
+///
+/// Network-only, because a plan can change under us (upgrade, lapse) and the
+/// screens it gates are network-only anyway. Stays in loading with no tenant,
+/// and surfaces a failed read as an error rather than guessing "no".
+final tenantFeatureProvider = FutureProvider.autoDispose.family<bool, String>((
+  ref,
+  key,
+) async {
+  final tenantId = ref.watch(activeTenantProvider.select((m) => m?.tenantId));
+  if (tenantId == null) return _unknown();
+  return ref.watch(tenantRepositoryProvider).hasFeature(tenantId, key);
+});
+
 /// What the shell actually knows about who this person is.
 ///
 /// [hasPermissionProvider] is fail-closed and stays that way — for an *action*,

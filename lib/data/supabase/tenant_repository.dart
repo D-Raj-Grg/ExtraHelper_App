@@ -239,6 +239,18 @@ class TenantRepository {
             as List<dynamic>;
     return data.map((e) => e as String).toSet();
   }
+
+  /// Does the restaurant's plan (or trial) include [key]? Straight from
+  /// `tenant_has_feature` — the same gate the web's `requireFeature` uses, and
+  /// the plan's `features` JSON is the only source. A tenant with no live
+  /// subscription comes back null from the RPC, which reads as "no".
+  Future<bool> hasFeature(String tenantId, String key) async {
+    final data = await _client.rpc(
+      'tenant_has_feature',
+      params: {'_tenant': tenantId, '_key': key},
+    );
+    return data == true;
+  }
 }
 
 class TenantFailure implements Exception {

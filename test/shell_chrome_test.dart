@@ -40,6 +40,7 @@ const _waiter = {'tables.view', 'order.create'};
 Widget _drawerApp({
   required Set<String> permissions,
   List<Membership> memberships = const [],
+  bool loyaltyOnPlan = true,
 }) {
   final ms = memberships.isEmpty
       ? [_membership('t1', 'The Sekuwa Station', 'owner')]
@@ -55,6 +56,7 @@ Widget _drawerApp({
     overrides: [
       membershipsProvider.overrideWith((ref) => ms),
       permissionsProvider.overrideWith((ref) => permissions),
+      tenantFeatureProvider.overrideWith((ref, key) async => loyaltyOnPlan),
     ],
     child: MaterialApp.router(
       routerConfig: GoRouter(
@@ -123,6 +125,31 @@ void main() {
       // of the phone, not of the person holding it.
       expect(find.text('Settings'), findsNothing);
       expect(find.text('Printing'), findsOneWidget);
+    });
+
+    testWidgets('Customers needs the permission and a plan with loyalty', (
+      tester,
+    ) async {
+      Future<void> open({
+        required Set<String> permissions,
+        required bool onPlan,
+      }) async {
+        await tester.pumpWidget(const SizedBox()); // fresh ProviderScope
+        await tester.pumpWidget(
+          _drawerApp(permissions: permissions, loyaltyOnPlan: onPlan),
+        );
+        await tester.pumpAndSettle();
+        await _openDrawer(tester);
+      }
+
+      await open(permissions: {..._waiter, 'loyalty.view'}, onPlan: true);
+      expect(find.text('Customers'), findsOneWidget);
+
+      await open(permissions: {..._waiter, 'loyalty.view'}, onPlan: false);
+      expect(find.text('Customers'), findsNothing);
+
+      await open(permissions: _waiter, onPlan: true);
+      expect(find.text('Customers'), findsNothing);
     });
 
     testWidgets('tapping a destination navigates to it', (tester) async {

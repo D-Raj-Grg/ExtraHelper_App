@@ -170,7 +170,9 @@ class BillRepository {
         else
           _client
               .from('order_item_modifiers')
-              .select('id, order_item_id, name_snapshot, price_cents, qty')
+              .select(
+                'id, order_item_id, modifier_id, name_snapshot, price_cents, qty',
+              )
               .inFilter('order_item_id', orderItemIds)
               .eq('tenant_id', _tenantId),
         if (!bill.isSettleable)
@@ -321,7 +323,8 @@ class BillRepository {
   /// not a `bill_status` value — the enum is open/partial/paid/void — and
   /// filtering on one Postgres doesn't have is a runtime 22P02.
   ///
-  /// [sinceColumn] is `updated_at` for the settled lists, and that is the whole
+  /// [sinceColumn] is `updated_at` for every day-bound list (All today, Paid,
+  /// Void), and that is the whole
   /// point of it existing: a bill **opened at 23:50 and paid at 00:10** was
   /// created yesterday. Bounding those on `created_at` would drop it out of
   /// Paid the moment it was settled — unreachable from the phone within minutes

@@ -82,7 +82,11 @@ final _history = [
   ),
 ];
 
-Widget _app({required Set<String> permissions, required Widget home}) {
+Widget _app({
+  required Set<String> permissions,
+  required Widget home,
+  bool loyaltyOnPlan = true,
+}) {
   return ProviderScope(
     overrides: [
       membershipsProvider.overrideWith(
@@ -98,6 +102,7 @@ Widget _app({required Set<String> permissions, required Widget home}) {
         ],
       ),
       permissionsProvider.overrideWith((ref) => permissions),
+      tenantFeatureProvider.overrideWith((ref, key) async => loyaltyOnPlan),
       isOnlineProvider.overrideWith((ref) => Stream.value(true)),
       crmOverviewProvider.overrideWith((ref) async => _overview),
       // The detail resolves its guest by id, never off the overview list —
@@ -154,6 +159,29 @@ void main() {
 
     expect(find.text('No customer access'), findsOneWidget);
     expect(find.text('Ramesh Thapa'), findsNothing);
+  });
+
+  testWidgets('a plan without loyalty locks the list and the detail', (
+    tester,
+  ) async {
+    for (final home in const <Widget>[
+      LoyaltyScreen(),
+      CustomerDetailScreen(customerId: 'c-ramesh'),
+    ]) {
+      await tester.pumpWidget(const SizedBox()); // fresh ProviderScope
+      await tester.pumpWidget(
+        _app(
+          permissions: const {'loyalty.view'},
+          home: home,
+          loyaltyOnPlan: false,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Not included in your plan'), findsOneWidget);
+      expect(find.text('Silver'), findsNothing);
+      expect(find.text('Sita Rai'), findsNothing);
+    }
   });
 
   testWidgets('a cashier with payment.take can collect an unpaid bill', (

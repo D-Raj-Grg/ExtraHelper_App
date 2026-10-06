@@ -79,6 +79,23 @@ void main() {
     expect(rows.last.modifiers.single.name, 'No ice');
   });
 
+  test('the same add-on on two lines folds, whatever its row ids', () {
+    BillLineModifier ice(String rowId) => BillLineModifier(
+      id: rowId,
+      modifierId: 'm-ice',
+      name: 'No ice',
+      priceCents: 0,
+      qty: 1,
+    );
+    final rows = groupBillLines([
+      _line(id: 'a', modifiers: [ice('r1')]),
+      _line(id: 'b', modifiers: [ice('r2')]),
+    ]);
+
+    expect(rows, hasLength(1));
+    expect(rows.single.qty, 2);
+  });
+
   test('a line with no order item behind it never folds into one that has', () {
     final rows = groupBillLines([
       _line(id: 'a'),

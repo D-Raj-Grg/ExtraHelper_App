@@ -43,6 +43,29 @@ flutter devices        # list simulators, emulators, attached phones
 flutter doctor         # toolchain health
 ```
 
+## Android release (Play internal testing)
+
+Release builds sign with `android/key.properties` when it exists, and fall back to the debug
+keystore when it does not (so `build_apk.sh` sideload builds keep working). Debug-signed bundles
+are rejected by Play, so create the upload key once:
+
+```bash
+keytool -genkey -v -keystore android/upload-keystore.jks -storetype JKS \
+  -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+cp android/key.properties.example android/key.properties   # then fill in the passwords
+```
+
+`key.properties` and `*.jks`/`*.keystore` are gitignored. **Back the keystore and passwords up
+somewhere safe (password manager plus an offline copy)**; losing the upload key means a Play
+support reset. Build the bundle:
+
+```bash
+flutter build appbundle --dart-define-from-file=env.json
+# -> build/app/outputs/bundle/release/app-release.aab
+```
+
+Bump `version:` in `pubspec.yaml` (the `+build` number) before each upload.
+
 ## Checks
 
 ```bash

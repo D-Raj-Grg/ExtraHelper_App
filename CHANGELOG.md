@@ -13,10 +13,26 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 ## [Unreleased]
 
 ### Changed
+- **Customers follows your plan.** A restaurant whose plan doesn't include Loyalty no longer sees Customers in the menu, and opening it says "Not included in your plan", as on the web. Checkout is untouched, so credit tabs still work on every plan.
+- **Marking a dish sold out (86) has its own permission.** Server change plus a small app change: *Mark dishes sold out (86)* sits under Menu. Owner, manager and kitchen have it by default, so nothing changes today, and a custom role can now be given it without menu editing. The composer's long-press 86 now follows it too, so the kitchen can use it there. Web migration `20260930150000_menu_86_permission`, see `../extrahelper/CHANGELOG.md`.
+- **Web Kitchen Display buttons restored.** Web-only fix, no app update needed: the browser Kitchen Display had lost its bump and status controls; they are back, and a whole ticket's status can be changed from its footer. The phone's kitchen board is unchanged. (See `../extrahelper/CHANGELOG.md`.)
 - **Flyer coupons stay out of the Coupons screen.** Server change, no app update needed: the web can now make a print run of hundreds of single-use flyer codes, and those are managed on the web (Coupons → Flyers tab). The Coupons list here keeps showing campaigns only. Scanning a flyer's QR with **Adjust → Scan coupon** works as for any coupon. (Web migration `20260930100000_coupon_batches`, see `../extrahelper/CHANGELOG.md`.)
 
 ### Fixed
+- **Printed bills match the checkout screen.** Two drinks at the same price with different add-ons now print as separate lines instead of one, as they already showed on the phone. Totals are unchanged. Server change, no app update needed.
+- **A bill opened last night and paid today now shows under All today.** It was already under Paid but missing from All today. The tab now looks at when a bill was last touched, same as Paid and Void.
 - **A refunded bill no longer shows as "Part paid" under Credit.** Server fix, no app update needed: refunding part of a paid bill used to flip it back to part-paid, so it sat in the Credit list with nothing owed and fell out of Day close. A partial refund now leaves the bill Paid; the two bills from 28 Sep are back where they belong. Pull to refresh. (Web migration `20260929090000_refund_keeps_bill_paid`, see `../extrahelper/CHANGELOG.md`.)
+
+<details><summary>Technical — print grouping, Android signing</summary>
+
+- `groupParticulars` (`../extrahelper/lib/print/docs.ts`) key is now `description|unitPriceCents|orderItemId != null|sorted(modifier id×qty)`, matching `_key` in `bill_grouping.dart`. `buildBillDoc` (`job-render.ts`) selects `order_item_id` from `bill_items` and does one extra tenant-scoped `order_item_modifiers` query; if it fails, lines group as before. Callers that omit the new fields behave as before. Not yet applied to `receipt-view.tsx` / `invoice-preview.tsx`.
+- `android/app/build.gradle.kts` loads `key.properties` via `java.util.Properties`, creates `signingConfigs.release` only if it exists, and falls back to `signingConfigs.debug` otherwise. `./gradlew help` configures; the key.properties branch is unrun (no keystore yet).
+- `menu.86`: `canSetStockProvider` reads `hasPermissionProvider('menu.86')`; `order_composer.dart` long-press moved from `menu.edit` to it. `test/stock_permission_test.dart`. Prod verified by catalog/ACL queries, not by calling `set_item_86` as each role.
+- Loyalty gate: `TenantRepository.hasFeature` → `tenant_has_feature` RPC (null = no); `tenantFeatureProvider` is an autoDispose family; `LoyaltyFeatureGate` wraps both Customers screens inside the `loyalty.view` check; drawer hides the entry while loading or on error. Tests in `loyalty_screen_test.dart`, `shell_chrome_test.dart`.
+- Grouping review fix: the key used the `order_item_modifiers` row id (unique per line), so lines with add-ons never folded. `BillLineModifier.identity` = `modifier_id` or `name:<snapshot>`; the web's `job-render.ts` does the same.
+- `BillFilter` day-bound lists all use `updated_at`.
+
+</details>
 
 ## [1.0.16] — 2026-09-28 · Costs, coupons, customers and passwords
 

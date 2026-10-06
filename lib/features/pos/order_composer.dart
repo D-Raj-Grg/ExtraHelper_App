@@ -388,7 +388,7 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
     final tenant = ref.watch(activeTenantProvider);
     final currency = tenant?.currency ?? 'USD';
     final menu = ref.watch(menuProvider);
-    final can86 = ref.watch(hasPermissionProvider('menu.edit'));
+    final can86 = ref.watch(hasPermissionProvider('menu.86'));
     final categories = ref.watch(categoriesProvider).valueOrNull ?? const [];
 
     final destination = _isAmend

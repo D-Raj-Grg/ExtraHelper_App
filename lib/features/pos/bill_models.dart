@@ -113,15 +113,25 @@ class BillLineModifier {
     required this.name,
     required this.priceCents,
     required this.qty,
+    this.modifierId,
   });
 
+  /// The `order_item_modifiers` row — unique to one line, so never a grouping key.
   final String id;
+
+  /// The menu modifier it was taken from; null once that modifier is deleted.
+  final String? modifierId;
   final String name;
   final int priceCents;
   final int qty;
 
+  /// Same add-on on two lines gives the same identity: the menu modifier, or
+  /// its name when the modifier has since been deleted.
+  String get identity => modifierId ?? 'name:$name';
+
   static BillLineModifier fromRow(Map<String, dynamic> r) => BillLineModifier(
     id: r['id'] as String,
+    modifierId: r['modifier_id'] as String?,
     name: (r['name_snapshot'] as String?) ?? '',
     priceCents: (r['price_cents'] as int?) ?? 0,
     qty: (r['qty'] as int?) ?? 1,

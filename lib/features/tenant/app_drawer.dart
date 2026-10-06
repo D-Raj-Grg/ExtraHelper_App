@@ -35,7 +35,12 @@ class AppDrawer extends ConsumerWidget {
     // `loyalty.view` is Owner/Manager by default; `loyalty.edit` gates the
     // levers inside. The credit roll-up on the screen is the reason a manager
     // opens it at all.
-    final canSeeCustomers = ref.watch(hasPermissionProvider('loyalty.view'));
+    // Also on the plan: the web redirects a plan without `loyalty` to /billing,
+    // so the phone hides the door rather than drawing a locked one. Unknown or
+    // failed reads hide it too (fail-closed, like the permission above).
+    final canSeeCustomers =
+        ref.watch(hasPermissionProvider('loyalty.view')) &&
+        (ref.watch(tenantFeatureProvider('loyalty')).valueOrNull ?? false);
     // `coupons.view` is Owner/Manager by default; `coupons.manage` gates the
     // levers inside. A waiter who can see the list can still show the QR.
     final canSeeCoupons = ref.watch(hasPermissionProvider('coupons.view'));
