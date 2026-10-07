@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../app/router.dart';
 import '../../core/format/labels.dart';
 import '../../core/format/money.dart';
+import '../../core/layout/max_width_body.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/choice_chip.dart';
@@ -286,13 +287,19 @@ class _PosScreenState extends ConsumerState<PosScreen> {
       controller: widget.tabs,
       children: [
         _TablesTab(onOpen: canOrder ? _openTable : null),
-        _OrdersTab(
-          onOpen: _openOrder,
-          onNewTakeaway: canOrder ? _newTakeaway : null,
-          onBill: canCheckout ? _billOrder : null,
+        // Lists of cards read as a stretched phone on an iPad, so they sit in a
+        // centred column; the tables board above keeps the width for its grid.
+        MaxWidthBody(
+          child: _OrdersTab(
+            onOpen: _openOrder,
+            onNewTakeaway: canOrder ? _newTakeaway : null,
+            onBill: canCheckout ? _billOrder : null,
+          ),
         ),
-        _BillsTab(onOpen: canCheckout ? _openBill : null),
-        CompletedTab(onOpenBill: canCheckout ? _openBill : null),
+        MaxWidthBody(child: _BillsTab(onOpen: canCheckout ? _openBill : null)),
+        MaxWidthBody(
+          child: CompletedTab(onOpenBill: canCheckout ? _openBill : null),
+        ),
       ],
     );
   }

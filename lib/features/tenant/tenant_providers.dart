@@ -47,22 +47,48 @@ final membershipsProvider = FutureProvider<List<Membership>?>((ref) async {
     return const [];
   }
 
-  final isOnline = _connectivity(ref);
-  return cacheBackedRead<List<Membership>>(
-    isOnline: isOnline,
-    fetch: () async {
-      final fresh = await ref
-          .watch(tenantRepositoryProvider)
-          .activeMemberships();
-      await cache.saveMemberships(fresh);
-      return fresh;
-    },
+  // Everything the background refresh needs is resolved here, at build time —
+  // never through `ref` from inside it (see `_CachedList` for the failure that
+  // caused once).
+  final repo = ref.watch(tenantRepositoryProvider);
+  final memo = ref.read(_refreshMemoProvider);
+  var mounted = true;
+  ref.onDispose(() => mounted = false);
+
+  return staleWhileRevalidate<List<Membership>>(
+    memo: memo,
+    key: ('memberships', user.id),
+    isOnline: _connectivity(ref),
+    fetch: repo.activeMemberships,
+    persist: cache.saveMemberships,
     cached: () async {
       final rows = await cache.memberships();
       return rows.isEmpty ? null : rows;
     },
+    same: _sameMemberships,
+    isMounted: () => mounted,
+    onFresh: ref.invalidateSelf,
   );
 });
+
+bool _sameMemberships(List<Membership> a, List<Membership> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    final x = a[i], y = b[i];
+    if (x.tenantId != y.tenantId ||
+        x.name != y.name ||
+        x.slug != y.slug ||
+        x.role != y.role ||
+        x.currency != y.currency ||
+        x.timezone != y.timezone) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// Shared by both identity reads; see [RefreshMemo].
+final _refreshMemoProvider = Provider<RefreshMemo>((ref) => RefreshMemo());
 
 /// Connectivity for the identity reads, resolved **before** the first await so
 /// the dependency is registered at build time rather than across an async gap.
@@ -186,17 +212,22 @@ final permissionsProvider = FutureProvider<Set<String>>((ref) async {
     return _unknown();
   }
   final cache = ref.watch(identityCacheProvider);
-  final isOnline = _connectivity(ref);
-  return cacheBackedRead<Set<String>>(
-    isOnline: isOnline,
-    fetch: () async {
-      final fresh = await ref
-          .watch(tenantRepositoryProvider)
-          .permissions(tenant.tenantId);
-      await cache.savePermissions(tenant.tenantId, fresh);
-      return fresh;
-    },
-    cached: () async => cache.permissionsIfFetched(tenant.tenantId),
+  final repo = ref.watch(tenantRepositoryProvider);
+  final memo = ref.read(_refreshMemoProvider);
+  final tenantId = tenant.tenantId;
+  var mounted = true;
+  ref.onDispose(() => mounted = false);
+
+  return staleWhileRevalidate<Set<String>>(
+    memo: memo,
+    key: ('permissions', tenantId),
+    isOnline: _connectivity(ref),
+    fetch: () => repo.permissions(tenantId),
+    persist: (fresh) => cache.savePermissions(tenantId, fresh),
+    cached: () => cache.permissionsIfFetched(tenantId),
+    same: (a, b) => a.length == b.length && a.containsAll(b),
+    isMounted: () => mounted,
+    onFresh: ref.invalidateSelf,
   );
 });
 

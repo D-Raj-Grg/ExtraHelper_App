@@ -27,6 +27,8 @@ class DashboardScreen extends ConsumerWidget {
 
     return AppScaffold(
       title: 'Dashboard',
+      // Reads as one capped column, centred, on an iPad — a KPI grid and a chart
+      // gain nothing from 1300dp of width.
       // The timezone is the caveat on every figure below — these are the
       // restaurant's days, not the phone's.
       subtitle: tenant == null

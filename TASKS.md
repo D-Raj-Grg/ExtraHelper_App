@@ -1232,11 +1232,7 @@ pressure and there is no room for a text field per share. Revisit if a cashier a
       Original note: `android/app/build.gradle.kts` still signs release with the
       **debug** keystore (the untouched template TODO). Needs a real keystore, `key.properties`
       gitignored, and `flutter build appbundle` — Play takes an AAB, not the APK the README documents.
-- [ ] **iPad layout pass.** The binary is universal (`TARGETED_DEVICE_FAMILY = "1,2"`) but only
-      `kds_screen.dart:240` and `dashboard_screen.dart:222` have breakpoints; POS, composer, store
-      room, manager log, auth and the drawer are fixed single-column and read as a stretched phone on
-      a 12.9". No `SystemChrome.setPreferredOrientations` anywhere either, so every screen rotates
-      freely with no layout that accounts for it. Fine for internal testing, not for review.
+- [x] **iPad layout pass** (2026-10-07). `lib/core/layout/` (breakpoints, `MaxWidthBody`, `TwoPane`): `AppScaffold` caps the body at 720dp by default (1100dp on the POS shell, none on KDS/dashboard, which lay themselves out), POS list tabs are centred columns, the composer shows the cart as a side panel when wide, welcome is capped. Phones (<600dp) unchanged. Not done: a real master/detail on bills/store room, and no orientation lock (phones rotate freely by choice). Not eyeballed on an iPad.
 - [ ] Deep links (order links, QR) — needs universal links + app links and the associated-domain
       files, so it lands with a real bundle id and a hosted domain.
 - [ ] Widget/integration tests for the composer beyond the unit-tested sync layer.
@@ -1697,19 +1693,14 @@ there since the tabs were added and hits exactly the roles this milestone is abo
 and explicitly does not `_removeSession()` or emit `signedOut`, so the `cache.clear()` in
 `membershipsProvider` is unreachable from being offline.
 
-- [ ] **True stale-while-revalidate for the identity reads** — serve the cache instantly and refresh
-      behind it, the shape `_CachedList` (`features/pos/pos_providers.dart`) already uses. It needs
-      an anti-loop memo keyed on tenant + connectivity transition, so it was deferred in favour of
-      the warm cap. Worth doing if ~4s still reads as slow on a real handset.
+- [x] **Stale-while-revalidate for the identity reads** (2026-10-07): `staleWhileRevalidate` in `cache_backed.dart`; memberships and permissions serve cache at once and refresh behind. Open: switching to a never-cached tenant on a slow network shows the previous tenant's permission keys for up to 6s (Riverpod keeps the old AsyncValue); RPCs still enforce.
 - [ ] **The device pass this all points at**, still the open box from Milestone F below. Warm cache
       in airplane mode → shell immediately. A wifi with no route out → shell in ~4s, **and that
       figure is arithmetic, not a measurement** — only a stopwatch on real restaurant wifi settles
       it. A cold permission cache offline → the "not saved to this phone yet" notice with a working
       retry. A kitchen-only account offline → `/kds`, never a dead POS. And the v4→v5 migration on a
       phone that already holds a queued outbox, which must survive in place.
-- [ ] **The Drift migration is not covered by a test.** Verifying v4→v5 properly needs `drift_dev`
-      schema dumps, which this repo does not keep. It rests on the migration being additive plus the
-      device pass above.
+- [x] **Drift v4→v5 migration test** (2026-10-07): `test/migration_test.dart` on a frozen v4 fixture (`test/support/schema_v4.dart`); `drift_dev` 2.34.0 does not compile against drift 2.34.2 here, so no SchemaVerifier.
 
 ## TestFlight 1.0.12+1 (2026-08-24)
 
@@ -1885,7 +1876,8 @@ Backend + web: see `../extrahelper/TASKS.md` → "Daily expenses + night cash co
 - [x] Combos: create/edit/delete, on/off, dishes with quantities.
 - [x] Several kitchen stations per dish (set-difference save).
 - [x] Review fixes: a photo that fails after a new dish is saved no longer strands it; the delete copy names what cascades (sizes, add-ons, windows, recipe); the kitchen can use the stock switch on a read-only dish; saving no longer collapses multi-station dishes.
-- [ ] **Enforce availability windows and combos when ordering**, server-side in `place_staff_order` / QR / storefront menus plus both POS clients. Today (web and phone) they are data only.
+- [x] **Availability windows enforced** (2026-10-07, migration `20260930160000_enforce_item_availability`): `item_available_now` on the tenant clock; `place_staff_order`, `amend_order_add_item`, `place_qr_order`, `place_online_order` reject, `qr_menu`/`storefront_menu` hide, `unavailable_items()` flags them for both POS clients. Per item only (categories have no windows). Storefront menu path not exercised live.
+- [ ] **Combos are still data only.** `order_items` has no combo link, so a combo can't be shown/voided as a unit or priced per member. Needs a schema change (likely a priced header line + zero-price member lines) and a POS combo picker. No combo rows in prod.
 
 ## Customers / Loyalty & CRM on the phone (2026-09-27)
 

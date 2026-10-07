@@ -13,12 +13,16 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 ## [Unreleased]
 
 ### Changed
+- **Dishes with availability windows can't be ordered outside them.** Server change plus a small app change. Outside its window a dish is greyed out on the menu with a clock and "Back today 18:00", and an order that slips through is refused naming the dish; the QR and online menus hide it. Judged on the restaurant's clock, not the phone's. Web migration `20260930160000_enforce_item_availability`, see `../extrahelper/CHANGELOG.md`. Combos are still not enforced.
+- **iPad layouts.** Lists, forms and the welcome screen sit in a centred column instead of stretching edge to edge, the POS tables board keeps a wider grid, and the order screen shows the cart beside the menu on a wide screen. Phones look exactly as before.
+- **Opens from what it already knows.** Your restaurants and permissions load instantly from the phone and refresh quietly behind, instead of waiting on a weak connection.
 - **Customers follows your plan.** A restaurant whose plan doesn't include Loyalty no longer sees Customers in the menu, and opening it says "Not included in your plan", as on the web. Checkout is untouched, so credit tabs still work on every plan.
 - **Marking a dish sold out (86) has its own permission.** Server change plus a small app change: *Mark dishes sold out (86)* sits under Menu. Owner, manager and kitchen have it by default, so nothing changes today, and a custom role can now be given it without menu editing. The composer's long-press 86 now follows it too, so the kitchen can use it there. Web migration `20260930150000_menu_86_permission`, see `../extrahelper/CHANGELOG.md`.
 - **Web Kitchen Display buttons restored.** Web-only fix, no app update needed: the browser Kitchen Display had lost its bump and status controls; they are back, and a whole ticket's status can be changed from its footer. The phone's kitchen board is unchanged. (See `../extrahelper/CHANGELOG.md`.)
 - **Flyer coupons stay out of the Coupons screen.** Server change, no app update needed: the web can now make a print run of hundreds of single-use flyer codes, and those are managed on the web (Coupons → Flyers tab). The Coupons list here keeps showing campaigns only. Scanning a flyer's QR with **Adjust → Scan coupon** works as for any coupon. (Web migration `20260930100000_coupon_batches`, see `../extrahelper/CHANGELOG.md`.)
 
 ### Fixed
+- **The customer screen no longer shows a name you can't open.** On a plan without Loyalty, or without access, the header says "Customer" instead of the guest's name and hides Edit/Merge/Delete.
 - **Printed bills match the checkout screen.** Two drinks at the same price with different add-ons now print as separate lines instead of one, as they already showed on the phone. Totals are unchanged. Server change, no app update needed.
 - **A bill opened last night and paid today now shows under All today.** It was already under Paid but missing from All today. The tab now looks at when a bill was last touched, same as Paid and Void.
 - **A refunded bill no longer shows as "Part paid" under Credit.** Server fix, no app update needed: refunding part of a paid bill used to flip it back to part-paid, so it sat in the Credit list with nothing owed and fell out of Day close. A partial refund now leaves the bill Paid; the two bills from 28 Sep are back where they belong. Pull to refresh. (Web migration `20260929090000_refund_keeps_bill_paid`, see `../extrahelper/CHANGELOG.md`.)
@@ -30,6 +34,11 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 - `menu.86`: `canSetStockProvider` reads `hasPermissionProvider('menu.86')`; `order_composer.dart` long-press moved from `menu.edit` to it. `test/stock_permission_test.dart`. Prod verified by catalog/ACL queries, not by calling `set_item_86` as each role.
 - Loyalty gate: `TenantRepository.hasFeature` → `tenant_has_feature` RPC (null = no); `tenantFeatureProvider` is an autoDispose family; `LoyaltyFeatureGate` wraps both Customers screens inside the `loyalty.view` check; drawer hides the entry while loading or on error. Tests in `loyalty_screen_test.dart`, `shell_chrome_test.dart`.
 - Grouping review fix: the key used the `order_item_modifiers` row id (unique per line), so lines with add-ons never folded. `BillLineModifier.identity` = `modifier_id` or `name:<snapshot>`; the web's `job-render.ts` does the same.
+- Availability: `PosMenuItem.unavailableNow`/`availableAgain`, `applyAvailability`; `PosRepository.menu()` overlays `unavailable_items()` (a failed call flags nothing; flags are not cached in Drift); `MenuTile` shows a non-tappable "Back …" pill with a schedule icon. A server reject is dead in the outbox, not retried, so an offline order that syncs after its window closes is rejected whole.
+- iPad: `core/layout/` (`Breakpoints`, `MaxWidthBody`, `TwoPane`), `AppScaffold.maxBodyWidth`, `home_shell` 1100dp, `pos_screen` list tabs capped, `order_composer` side cart when wide. `test/layout_test.dart`.
+- Identity SWR: `RefreshMemo` + `staleWhileRevalidate`; refresh dropped if the owning provider was disposed; 30s anti-loop memo keyed on user/tenant + connectivity. `test/identity_swr_test.dart`. Known gap: cold-cache tenant switch briefly shows the old tenant's keys (UI only).
+- Drift: `test/migration_test.dart` upgrades a real v4 file with the current `AppDatabase`; disabling the `from < 5` branch fails 4 of 6.
+- Customer detail header gated on `tenantFeatureProvider('loyalty')` + `loyalty.view`.
 - `BillFilter` day-bound lists all use `updated_at`.
 
 </details>

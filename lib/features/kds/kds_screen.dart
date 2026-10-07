@@ -79,6 +79,8 @@ class _KdsScreenState extends ConsumerState<KdsScreen> {
 
     return AppScaffold(
       title: 'Kitchen',
+      // The board picks its own column count from the width it is given.
+      maxBodyWidth: null,
       body: RefreshIndicator(
         onRefresh: () => ref.read(kdsTicketsProvider.notifier).refresh(),
         child: tickets.when(

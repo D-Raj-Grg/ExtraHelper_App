@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_scaffold.dart';
+import '../../core/layout/breakpoints.dart';
 import '../../core/widgets/notice.dart';
 import '../../data/sync/sync_providers.dart';
 import '../pos/pos_screen.dart';
@@ -70,6 +71,9 @@ class _HomeShellState extends ConsumerState<HomeShell>
 
     return AppScaffold(
       title: 'POS',
+      // The tables board uses the width (its grid adds columns); the list tabs
+      // cap themselves narrower inside PosScreen.
+      maxBodyWidth: Breakpoints.wide,
       // No tabs over a spinner or over a locked-out message — they would
       // promise two surfaces that aren't there.
       bottom: showPos

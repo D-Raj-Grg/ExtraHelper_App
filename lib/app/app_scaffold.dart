@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../core/layout/breakpoints.dart';
+import '../core/layout/max_width_body.dart';
 import '../features/notifications/notifications_screen.dart';
 import '../features/tenant/app_drawer.dart';
 import '../features/tenant/sync_status_bar.dart';
@@ -32,6 +34,7 @@ class AppScaffold extends StatelessWidget {
     this.bottomNavigationBar,
     this.showDrawer = true,
     this.showBell = true,
+    this.maxBodyWidth = Breakpoints.reading,
   });
 
   final String title;
@@ -48,6 +51,14 @@ class AppScaffold extends StatelessWidget {
   final bool showDrawer;
   final bool showBell;
 
+  /// The widest the body gets before it is centred. The default suits lists and
+  /// forms, which read as a stretched phone on an iPad. Pass [Breakpoints.wide]
+  /// for a surface that genuinely uses width, or null for one that lays itself
+  /// out against the full width (the kitchen board, the dashboard). Below this
+  /// width — every phone — it changes nothing. The app bar and sync strip always
+  /// span the full width.
+  final double? maxBodyWidth;
+
   @override
   Widget build(BuildContext context) {
     final scaffold = Scaffold(
@@ -63,7 +74,11 @@ class AppScaffold extends StatelessWidget {
       body: Column(
         children: [
           const SyncStrip(),
-          Expanded(child: body),
+          Expanded(
+            child: maxBodyWidth == null
+                ? body
+                : MaxWidthBody(maxWidth: maxBodyWidth!, child: body),
+          ),
         ],
       ),
       floatingActionButton: floatingActionButton,

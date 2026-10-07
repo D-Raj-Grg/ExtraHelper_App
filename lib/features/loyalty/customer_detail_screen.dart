@@ -154,7 +154,15 @@ class _CustomerDetailScreenState extends ConsumerState<CustomerDetailScreen> {
     final canEdit = ref.watch(hasPermissionProvider('loyalty.edit'));
     final canCollect = ref.watch(hasPermissionProvider('payment.take'));
     final loaded = ref.watch(customerProvider(widget.customerId));
-    final customer = loaded.valueOrNull;
+    // The name sits in the app bar, outside the gates below, so it needs the
+    // same gates: it appears only once access and the plan are both confirmed.
+    // While the plan check is still loading (or failed) the bar says
+    // "Customer" rather than flash a name the body may then lock away.
+    final planHasLoyalty =
+        ref.watch(tenantFeatureProvider('loyalty')).valueOrNull ?? false;
+    final mayShow =
+        status == IdentityStatus.ready && canView && planHasLoyalty;
+    final customer = mayShow ? loaded.valueOrNull : null;
 
     return AppScaffold(
       title: customer?.label ?? 'Customer',

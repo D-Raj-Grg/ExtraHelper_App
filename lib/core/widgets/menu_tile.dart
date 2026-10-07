@@ -29,6 +29,8 @@ class MenuTile extends StatelessWidget {
     this.isVeg,
     this.qtyInOrder = 0,
     this.soldOut = false,
+    this.unavailableNow = false,
+    this.availableAgain,
     this.disabled = false,
     this.optionCount = 0,
   });
@@ -50,6 +52,14 @@ class MenuTile extends StatelessWidget {
 
   final bool soldOut;
 
+  /// Outside its availability window right now (server-judged). Not tappable;
+  /// shown with a clock icon and [availableAgain] so it never reads as colour
+  /// alone.
+  final bool unavailableNow;
+
+  /// "today 18:00" etc. — when it can be ordered again, if the server knows.
+  final String? availableAgain;
+
   /// The order is fired/billed — the menu is visible but no longer addable.
   final bool disabled;
 
@@ -62,7 +72,8 @@ class MenuTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final off = soldOut || disabled;
+    final notNow = unavailableNow && !soldOut;
+    final off = soldOut || notNow || disabled;
     final inCart = qtyInOrder > 0;
     final hasOptions = optionCount > 0;
 
@@ -76,6 +87,7 @@ class MenuTile extends StatelessWidget {
     final semanticLabel =
         '${hasOptions ? 'Choose options for' : 'Add'} $name, $priceText'
         '$vegSuffix${soldOut ? ', sold out' : ''}'
+        '${notNow ? ', not available right now${availableAgain != null ? ', back $availableAgain' : ''}' : ''}'
         '${inCart ? ', $qtyInOrder in order' : ''}';
 
     return Semantics(
@@ -126,7 +138,20 @@ class MenuTile extends StatelessWidget {
                               foreground: scheme.onError,
                             ),
                           ),
-                        if (hasOptions && !soldOut)
+                        if (notNow)
+                          Positioned(
+                            left: 6,
+                            bottom: 6,
+                            child: _Pill(
+                              text: availableAgain != null
+                                  ? 'Back $availableAgain'
+                                  : 'Not now',
+                              background: scheme.surface.withValues(alpha: 0.9),
+                              foreground: scheme.onSurface,
+                              icon: Icons.schedule,
+                            ),
+                          ),
+                        if (hasOptions && !soldOut && !notNow)
                           Positioned(
                             left: 6,
                             bottom: 6,

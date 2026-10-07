@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/layout/max_width_body.dart';
 import '../../core/theme/tokens.dart';
 import 'welcome_providers.dart';
 import 'welcome_slides.dart';
@@ -104,35 +105,39 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
               // Stacking is the fallback rather than shrinking, because
               // answering a request for bigger text with smaller text is not an
               // answer.
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final fits =
-                      _controlsWidth(context, primaryLabel) <=
-                      constraints.maxWidth;
-                  if (!fits) {
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+              child: MaxWidthBody(
+                maxWidth: 420,
+                fillHeight: false,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final fits =
+                        _controlsWidth(context, primaryLabel) <=
+                        constraints.maxWidth;
+                    if (!fits) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _Dots(index: _index),
+                          const SizedBox(height: 12),
+                          primary,
+                          const SizedBox(height: 4),
+                          skip,
+                        ],
+                      );
+                    }
+                    return Row(
                       children: [
-                        _Dots(index: _index),
-                        const SizedBox(height: 12),
-                        primary,
-                        const SizedBox(height: 4),
+                        // Kept on every slide, including the last. It does
+                        // exactly what "Get started" does, and showing it
+                        // throughout means the row never changes width under
+                        // the dots.
                         skip,
+                        Expanded(child: _Dots(index: _index)),
+                        primary,
                       ],
                     );
-                  }
-                  return Row(
-                    children: [
-                      // Kept on every slide, including the last. It does
-                      // exactly what "Get started" does, and showing it
-                      // throughout means the row never changes width under
-                      // the dots.
-                      skip,
-                      Expanded(child: _Dots(index: _index)),
-                      primary,
-                    ],
-                  );
-                },
+                  },
+                ),
               ),
             ),
           ],

@@ -56,6 +56,8 @@ class PosMenuItem {
     this.variants = const [],
     this.modifiers = const [],
     this.isCustom = false,
+    this.unavailableNow = false,
+    this.availableAgain,
   });
 
   /// An off-menu line: a plating charge, a special the kitchen ran today.
@@ -95,9 +97,35 @@ class PosMenuItem {
   /// never stand in for a menu item's price, and it deducts no stock.
   final bool isCustom;
 
+  /// Outside its availability window right now, judged by the **server** on the
+  /// tenant's clock (`unavailable_items`) — never by this phone's clock. Display
+  /// only: `place_staff_order` is what actually refuses the line.
+  final bool unavailableNow;
+
+  /// When it is next orderable, as the server words it ("today 18:00",
+  /// "tomorrow 11:00", "Tue 18:00"). Null when there is no later window.
+  final String? availableAgain;
+
+  /// Flags the items the server reports as out of window. [unavailable] maps
+  /// item id → next-available label (null label = no upcoming window).
+  static List<PosMenuItem> applyAvailability(
+    List<PosMenuItem> items,
+    Map<String, String?> unavailable,
+  ) => [
+    for (final i in items)
+      if (unavailable.containsKey(i.id))
+        i.copyWith(unavailableNow: true, availableAgain: unavailable[i.id])
+      else
+        i,
+  ];
+
   /// Only the stock flag moves at runtime — a Realtime 86 must not rebuild the
   /// dish's price or options from a partial row.
-  PosMenuItem copyWith({bool? is86}) => PosMenuItem(
+  PosMenuItem copyWith({
+    bool? is86,
+    bool? unavailableNow,
+    String? availableAgain,
+  }) => PosMenuItem(
     id: id,
     name: name,
     basePriceCents: basePriceCents,
@@ -108,6 +136,8 @@ class PosMenuItem {
     variants: variants,
     modifiers: modifiers,
     isCustom: isCustom,
+    unavailableNow: unavailableNow ?? this.unavailableNow,
+    availableAgain: availableAgain ?? this.availableAgain,
   );
 
   int get optionCount => variants.length + modifiers.length;

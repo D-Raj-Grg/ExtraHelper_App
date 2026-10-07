@@ -8,6 +8,7 @@ import '../../app/app_scaffold.dart';
 import '../../app/router.dart';
 import '../../core/format/labels.dart';
 import '../../core/format/money.dart';
+import '../../core/layout/two_pane.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/choice_chip.dart';
@@ -476,132 +477,142 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
             ],
           ),
       ],
-      body: Column(
-        children: [
-          // Above the search box, not beside the send button: the waiter has to
-          // know before they start tapping dishes, not after.
-          if (_isBilled)
-            const Padding(
-              padding: EdgeInsets.fromLTRB(12, 10, 12, 2),
-              child: _BilledBand(),
-            ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-            child: TextField(
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search),
-                hintText: 'Search the menu',
-                isDense: true,
+      // The composer lays itself out against the full width: on a phone the cart
+      // is a bar under the menu, on an iPad it is a panel beside it.
+      maxBodyWidth: null,
+      body: TwoPane(
+        secondary: (context, sideBySide) => _CartPanel(
+          cart: _cart,
+          currency: currency,
+          busy: _busy,
+          isAmend: _isAmend,
+          isBilled: _isBilled,
+          sidePanel: sideBySide,
+          onSetQty: _setQty,
+          onRemove: _removeLine,
+          onFire: _commitAndFire,
+        ),
+        primary: Column(
+          children: [
+            // Above the search box, not beside the send button: the waiter has to
+            // know before they start tapping dishes, not after.
+            if (_isBilled)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(12, 10, 12, 2),
+                child: _BilledBand(),
               ),
-              onChanged: (v) =>
-                  setState(() => _search = v.trim().toLowerCase()),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+              child: TextField(
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.search),
+                  hintText: 'Search the menu',
+                  isDense: true,
+                ),
+                onChanged: (v) =>
+                    setState(() => _search = v.trim().toLowerCase()),
+              ),
             ),
-          ),
-          if (categories.isNotEmpty)
-            SizedBox(
-              height: 56,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: AppChoiceChip(
-                      label: 'All',
-                      selected: _categoryId == null,
-                      onSelect: () => setState(() => _categoryId = null),
-                    ),
-                  ),
-                  for (final c in categories)
+            if (categories.isNotEmpty)
+              SizedBox(
+                height: 56,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  children: [
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: AppChoiceChip(
-                        label: c.name,
-                        selected: _categoryId == c.id,
-                        onSelect: () => setState(() => _categoryId = c.id),
+                        label: 'All',
+                        selected: _categoryId == null,
+                        onSelect: () => setState(() => _categoryId = null),
                       ),
                     ),
-                ],
+                    for (final c in categories)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: AppChoiceChip(
+                          label: c.name,
+                          selected: _categoryId == c.id,
+                          onSelect: () => setState(() => _categoryId = c.id),
+                        ),
+                      ),
+                  ],
+                ),
               ),
-            ),
-          Expanded(
-            child: menu.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => _ErrorState(
-                message: "Couldn't load the menu.",
-                detail: '$e',
-                onRetry: () => ref.invalidate(menuProvider),
-              ),
-              data: (items) {
-                final filtered = items.where((i) {
-                  final byCategory =
-                      _categoryId == null || i.categoryId == _categoryId;
-                  final bySearch =
-                      _search.isEmpty || i.name.toLowerCase().contains(_search);
-                  return byCategory && bySearch;
-                }).toList();
+            Expanded(
+              child: menu.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (e, _) => _ErrorState(
+                  message: "Couldn't load the menu.",
+                  detail: '$e',
+                  onRetry: () => ref.invalidate(menuProvider),
+                ),
+                data: (items) {
+                  final filtered = items.where((i) {
+                    final byCategory =
+                        _categoryId == null || i.categoryId == _categoryId;
+                    final bySearch =
+                        _search.isEmpty ||
+                        i.name.toLowerCase().contains(_search);
+                    return byCategory && bySearch;
+                  }).toList();
 
-                if (filtered.isEmpty) {
-                  return _EmptyState(
-                    icon: Icons.restaurant_menu,
-                    title: _search.isEmpty
-                        ? 'Nothing on this menu yet'
-                        : 'No dish matches "$_search"',
-                    body: _search.isEmpty
-                        ? 'Add dishes on the web app under Menu, then pull to refresh here.'
-                        : 'Try a shorter search, or pick a different category.',
-                  );
-                }
-
-                return GridView.builder(
-                  padding: const EdgeInsets.all(12),
-                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: 210,
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                    childAspectRatio: 0.78,
-                  ),
-                  itemCount: filtered.length,
-                  itemBuilder: (context, i) {
-                    final item = filtered[i];
-                    final range = item.priceRange;
-                    return MenuTile(
-                      name: item.name,
-                      minPriceCents: range.min,
-                      maxPriceCents: range.max,
-                      currency: currency,
-                      imageUrl: item.imageUrl,
-                      isVeg: item.isVeg,
-                      soldOut: item.is86,
-                      optionCount: item.optionCount,
-                      qtyInOrder: _qtyInCart(item),
-                      onTap: () => _addDish(item, currency),
-                      // Long-press is the manager's way in — discoverable to
-                      // whoever needs it, invisible to everyone else.
-                      onLongPress: can86
-                          ? () => showItem86Sheet(
-                              context: context,
-                              ref: ref,
-                              item: item,
-                            )
-                          : null,
+                  if (filtered.isEmpty) {
+                    return _EmptyState(
+                      icon: Icons.restaurant_menu,
+                      title: _search.isEmpty
+                          ? 'Nothing on this menu yet'
+                          : 'No dish matches "$_search"',
+                      body: _search.isEmpty
+                          ? 'Add dishes on the web app under Menu, then pull to refresh here.'
+                          : 'Try a shorter search, or pick a different category.',
                     );
-                  },
-                );
-              },
+                  }
+
+                  return GridView.builder(
+                    padding: const EdgeInsets.all(12),
+                    gridDelegate:
+                        const SliverGridDelegateWithMaxCrossAxisExtent(
+                          maxCrossAxisExtent: 210,
+                          mainAxisSpacing: 10,
+                          crossAxisSpacing: 10,
+                          childAspectRatio: 0.78,
+                        ),
+                    itemCount: filtered.length,
+                    itemBuilder: (context, i) {
+                      final item = filtered[i];
+                      final range = item.priceRange;
+                      return MenuTile(
+                        name: item.name,
+                        minPriceCents: range.min,
+                        maxPriceCents: range.max,
+                        currency: currency,
+                        imageUrl: item.imageUrl,
+                        isVeg: item.isVeg,
+                        soldOut: item.is86,
+                        unavailableNow: item.unavailableNow,
+                        availableAgain: item.availableAgain,
+                        optionCount: item.optionCount,
+                        qtyInOrder: _qtyInCart(item),
+                        onTap: () => _addDish(item, currency),
+                        // Long-press is the manager's way in — discoverable to
+                        // whoever needs it, invisible to everyone else.
+                        onLongPress: can86
+                            ? () => showItem86Sheet(
+                                context: context,
+                                ref: ref,
+                                item: item,
+                              )
+                            : null,
+                      );
+                    },
+                  );
+                },
+              ),
             ),
-          ),
-          _CartPanel(
-            cart: _cart,
-            currency: currency,
-            busy: _busy,
-            isAmend: _isAmend,
-            isBilled: _isBilled,
-            onSetQty: _setQty,
-            onRemove: _removeLine,
-            onFire: _commitAndFire,
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -683,6 +694,7 @@ class _CartPanel extends StatefulWidget {
     required this.onSetQty,
     required this.onRemove,
     required this.onFire,
+    this.sidePanel = false,
   });
 
   final CartController cart;
@@ -698,6 +710,10 @@ class _CartPanel extends StatefulWidget {
   final void Function(CartDisplayLine) onRemove;
   final VoidCallback onFire;
 
+  /// True on a wide screen, where the cart is a full-height panel beside the
+  /// menu: always open, no collapse toggle, the list takes the spare height.
+  final bool sidePanel;
+
   @override
   State<_CartPanel> createState() => _CartPanelState();
 }
@@ -712,6 +728,123 @@ class _CartPanelState extends State<_CartPanel> {
     final lines = widget.cart.lines;
     final empty = lines.isEmpty;
 
+    final side = widget.sidePanel;
+    // A side panel is always open: the list takes the spare height instead of
+    // collapsing to a summary bar.
+    final showList = side || (_expanded && !empty);
+
+    final list = ListView.separated(
+      shrinkWrap: !side,
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      itemCount: lines.length,
+      separatorBuilder: (_, _) => Divider(height: 1, color: scheme.outline),
+      itemBuilder: (context, i) => _CartRow(
+        // Keyed by a STABLE id, never by content — a signature key
+        // rebuilds the row on every edit and loses the caret.
+        key: ValueKey(lines[i].id),
+        line: lines[i],
+        currency: widget.currency,
+        onSetQty: (q) => widget.onSetQty(lines[i], q),
+        onRemove: () => widget.onRemove(lines[i]),
+      ),
+    );
+
+    final summary = InkWell(
+      onTap: empty || side
+          ? null
+          : () => setState(() => _expanded = !_expanded),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+        child: Row(
+          children: [
+            // No chevron in a panel that cannot collapse.
+            if (!side) ...[
+              Icon(
+                _expanded ? Icons.expand_more : Icons.expand_less,
+                color: empty ? scheme.onSurfaceVariant : null,
+              ),
+              const SizedBox(width: 8),
+            ],
+            Expanded(
+              child: Text(
+                empty
+                    ? 'Nothing added yet'
+                    : '${widget.cart.itemCount} item'
+                          '${widget.cart.itemCount == 1 ? '' : 's'}',
+                style: theme.textTheme.titleSmall,
+              ),
+            ),
+            Text(
+              money(widget.cart.totalCents, widget.currency),
+              style: (theme.textTheme.titleMedium ?? const TextStyle()).tabular,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    final fire = Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      // One button. Confirming an order is sending it — there is no
+      // save-that-doesn't-cook.
+      child: SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          onPressed: empty || widget.busy ? null : widget.onFire,
+          icon: widget.busy
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.local_fire_department),
+          label: Text(
+            widget.isBilled
+                ? 'Send & update the bill'
+                : widget.isAmend
+                ? 'Send new items'
+                : 'Send to kitchen',
+          ),
+        ),
+      ),
+    );
+
+    // Beside the menu: the same surface and the same pieces, in a full-height
+    // column — total and Send stay pinned at the bottom, within thumb reach.
+    // Flat rather than elevated: the divider between the panes does the
+    // separating, and nothing is floating over content here.
+    if (side) {
+      return Material(
+        color: scheme.surfaceContainerLow,
+        child: SafeArea(
+          top: false,
+          child: Column(
+            children: [
+              Expanded(
+                child: empty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Text(
+                            'Tap a dish to add it to the order.',
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      )
+                    : list,
+              ),
+              Divider(height: 1, color: scheme.outline),
+              summary,
+              fire,
+            ],
+          ),
+        ),
+      );
+    }
+
     return Material(
       color: scheme.surfaceContainerLow,
       elevation: 8,
@@ -721,82 +854,13 @@ class _CartPanelState extends State<_CartPanel> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Divider(height: 1, color: scheme.outline),
-            if (_expanded && !empty)
+            if (showList && !empty)
               ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 260),
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  itemCount: lines.length,
-                  separatorBuilder: (_, _) =>
-                      Divider(height: 1, color: scheme.outline),
-                  itemBuilder: (context, i) => _CartRow(
-                    // Keyed by a STABLE id, never by content — a signature key
-                    // rebuilds the row on every edit and loses the caret.
-                    key: ValueKey(lines[i].id),
-                    line: lines[i],
-                    currency: widget.currency,
-                    onSetQty: (q) => widget.onSetQty(lines[i], q),
-                    onRemove: () => widget.onRemove(lines[i]),
-                  ),
-                ),
+                child: list,
               ),
-            InkWell(
-              onTap: empty
-                  ? null
-                  : () => setState(() => _expanded = !_expanded),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-                child: Row(
-                  children: [
-                    Icon(
-                      _expanded ? Icons.expand_more : Icons.expand_less,
-                      color: empty ? scheme.onSurfaceVariant : null,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        empty
-                            ? 'Nothing added yet'
-                            : '${widget.cart.itemCount} item'
-                                  '${widget.cart.itemCount == 1 ? '' : 's'}',
-                        style: theme.textTheme.titleSmall,
-                      ),
-                    ),
-                    Text(
-                      money(widget.cart.totalCents, widget.currency),
-                      style: (theme.textTheme.titleMedium ?? const TextStyle())
-                          .tabular,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-              // One button. Confirming an order is sending it — there is no
-              // save-that-doesn't-cook.
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: empty || widget.busy ? null : widget.onFire,
-                  icon: widget.busy
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.local_fire_department),
-                  label: Text(
-                    widget.isBilled
-                        ? 'Send & update the bill'
-                        : widget.isAmend
-                        ? 'Send new items'
-                        : 'Send to kitchen',
-                  ),
-                ),
-              ),
-            ),
+            summary,
+            fire,
           ],
         ),
       ),

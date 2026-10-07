@@ -61,6 +61,24 @@ class PosRepository {
         .toList();
   }
 
+  /// Items outside their availability window right now (tenant clock), with
+  /// the server's "back at" wording. Empty on any failure.
+  Future<Map<String, String?>> _unavailableItems() async {
+    try {
+      final rows = await _client.rpc(
+        'unavailable_items',
+        params: {'_tenant': _tenantId},
+      );
+      return {
+        for (final r in (rows as List<dynamic>))
+          (r as Map<String, dynamic>)['item_id'] as String:
+              r['next_label'] as String?,
+      };
+    } catch (_) {
+      return const {};
+    }
+  }
+
   /// Menu with variants and **only the add-ons linked to each item**.
   ///
   /// The link matters: the server rejects a modifier that isn't in
@@ -78,7 +96,11 @@ class PosRepository {
         .eq('is_active', true)
         .order('name');
 
-    return rows.map((r) {
+    // Display hint only; the server re-checks on every order. A failure here
+    // must never blank the menu, so it degrades to "nothing flagged".
+    final unavailable = await _unavailableItems();
+
+    final items = rows.map((r) {
       final variants =
           (r['item_variants'] as List<dynamic>? ?? const [])
               .map((v) => PosVariant.fromRow(v as Map<String, dynamic>))
@@ -108,6 +130,7 @@ class PosRepository {
         modifiers: modifiers,
       );
     }).toList();
+    return PosMenuItem.applyAvailability(items, unavailable);
   }
 
   // --- Floor ---------------------------------------------------------------

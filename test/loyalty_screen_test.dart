@@ -181,7 +181,19 @@ void main() {
       expect(find.text('Not included in your plan'), findsOneWidget);
       expect(find.text('Silver'), findsNothing);
       expect(find.text('Sita Rai'), findsNothing);
+      // The app bar must not name the guest over the locked panel either.
+      expect(find.text('Ramesh Thapa'), findsNothing);
     }
+    // And with the plan on, the same screen does show the name.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(
+      _app(
+        permissions: const {'loyalty.view'},
+        home: const CustomerDetailScreen(customerId: 'c-ramesh'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Ramesh Thapa'), findsWidgets);
   });
 
   testWidgets('a cashier with payment.take can collect an unpaid bill', (
