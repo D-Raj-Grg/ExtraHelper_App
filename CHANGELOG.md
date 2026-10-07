@@ -12,6 +12,8 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 ## [Unreleased]
 
+## [1.0.17] — 2026-10-07 · Availability, iPad layouts and a faster start
+
 ### Changed
 - **Dishes with availability windows can't be ordered outside them.** Server change plus a small app change. Outside its window a dish is greyed out on the menu with a clock and "Back today 18:00", and an order that slips through is refused naming the dish; the QR and online menus hide it. Judged on the restaurant's clock, not the phone's. Web migration `20260930160000_enforce_item_availability`, see `../extrahelper/CHANGELOG.md`. Combos are still not enforced.
 - **iPad layouts.** Lists, forms and the welcome screen sit in a centred column instead of stretching edge to edge, the POS tables board keeps a wider grid, and the order screen shows the cart beside the menu on a wide screen. Phones look exactly as before.
