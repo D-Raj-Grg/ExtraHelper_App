@@ -11,8 +11,10 @@ import '../../data/supabase/pos_repository.dart' show PosFailure;
 import '../tenant/tenant_providers.dart';
 import 'coupon_qr_sheet.dart';
 import 'coupon_sheet.dart';
+import 'coupon_stats_strip.dart';
 import 'coupon_status.dart';
 import 'coupons_providers.dart';
+import 'flyers_tab.dart';
 import 'no_coupon_access.dart';
 
 /// The flyer codes: what each is worth, whether it is running, how often it
@@ -31,9 +33,17 @@ class CouponsScreen extends ConsumerStatefulWidget {
 class _CouponsScreenState extends ConsumerState<CouponsScreen> {
   bool _busy = false;
 
-  void _refresh() => ref.invalidate(couponsProvider);
+  /// Coupons or Flyers — the web's two tabs, as a switch under the title.
+  _Tab _tab = _Tab.coupons;
 
-  Future<void> _reload() => ref.refresh(couponsProvider.future);
+  void _refresh() => ref
+    ..invalidate(couponsProvider)
+    ..invalidate(couponStatsProvider);
+
+  Future<void> _reload() {
+    ref.invalidate(couponStatsProvider);
+    return ref.refresh(couponsProvider.future);
+  }
 
   void _say(String msg) {
     if (!mounted) return;
@@ -183,11 +193,19 @@ class _CouponsScreenState extends ConsumerState<CouponsScreen> {
     return AppScaffold(
       title: 'Coupons',
       floatingActionButton: ready && canManage
-          ? FloatingActionButton.extended(
-              onPressed: _busy ? null : () => _create(currency),
-              icon: const Icon(Icons.add),
-              label: const Text('New coupon'),
-            )
+          ? switch (_tab) {
+              _Tab.coupons => FloatingActionButton.extended(
+                onPressed: _busy ? null : () => _create(currency),
+                icon: const Icon(Icons.add),
+                label: const Text('New coupon'),
+              ),
+              _Tab.flyers => FloatingActionButton.extended(
+                onPressed: () =>
+                    createFlyerRun(context, ref, currency: currency, say: _say),
+                icon: const Icon(Icons.add),
+                label: const Text('New run'),
+              ),
+            }
           : null,
       body: switch (status) {
         IdentityStatus.unavailable => Padding(
@@ -201,18 +219,58 @@ class _CouponsScreenState extends ConsumerState<CouponsScreen> {
           ),
         ),
         IdentityStatus.ready when !canView => const NoCouponAccess(),
-        IdentityStatus.ready => _Body(
-          currency: currency,
-          canManage: canManage,
-          onRetry: _refresh,
-          onRefresh: _reload,
-          onTap: (c) => _actions(c, currency, canManage),
+        IdentityStatus.ready => Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: SegmentedButton<_Tab>(
+                showSelectedIcon: false,
+                style: const ButtonStyle(
+                  minimumSize: WidgetStatePropertyAll(
+                    Size(0, Tokens.tapTarget),
+                  ),
+                ),
+                segments: const [
+                  ButtonSegment(
+                    value: _Tab.coupons,
+                    icon: Icon(Icons.confirmation_number_outlined),
+                    label: Text('Coupons'),
+                  ),
+                  ButtonSegment(
+                    value: _Tab.flyers,
+                    icon: Icon(Icons.local_print_shop_outlined),
+                    label: Text('Flyers'),
+                  ),
+                ],
+                selected: {_tab},
+                onSelectionChanged: (s) => setState(() => _tab = s.first),
+              ),
+            ),
+            Expanded(
+              child: switch (_tab) {
+                _Tab.coupons => _Body(
+                  currency: currency,
+                  canManage: canManage,
+                  onRetry: _refresh,
+                  onRefresh: _reload,
+                  onTap: (c) => _actions(c, currency, canManage),
+                ),
+                _Tab.flyers => FlyersTab(
+                  currency: currency,
+                  canManage: canManage,
+                  say: _say,
+                ),
+              },
+            ),
+          ],
         ),
         _ => const Center(child: CircularProgressIndicator()),
       },
     );
   }
 }
+
+enum _Tab { coupons, flyers }
 
 enum _Action { qr, toggle, edit, delete }
 
@@ -284,37 +342,40 @@ class _Body extends ConsumerWidget {
       onRefresh: onRefresh,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
-        children: coupons.when(
-          loading: () => const [
-            Padding(
-              padding: EdgeInsets.symmetric(vertical: 48),
-              child: Center(child: CircularProgressIndicator()),
-            ),
-          ],
-          error: (e, _) => [
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              child: RetryNotice(
-                message: "Couldn't load coupons.",
-                detail: '$e',
-                icon: Icons.cloud_off_outlined,
-                onRetry: onRetry,
+        children: [
+          const CouponStatsStrip(),
+          ...coupons.when(
+            loading: () => const [
+              Padding(
+                padding: EdgeInsets.symmetric(vertical: 48),
+                child: Center(child: CircularProgressIndicator()),
               ),
-            ),
-          ],
-          data: (list) => [
-            if (list.isEmpty)
-              _Empty(canManage: canManage)
-            else
-              for (final c in list)
-                _CouponTile(
-                  key: ValueKey(c.id),
-                  coupon: c,
-                  currency: currency,
-                  onTap: () => onTap(c),
+            ],
+            error: (e, _) => [
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: RetryNotice(
+                  message: "Couldn't load coupons.",
+                  detail: '$e',
+                  icon: Icons.cloud_off_outlined,
+                  onRetry: onRetry,
                 ),
-          ],
-        ),
+              ),
+            ],
+            data: (list) => [
+              if (list.isEmpty)
+                _Empty(canManage: canManage)
+              else
+                for (final c in list)
+                  _CouponTile(
+                    key: ValueKey(c.id),
+                    coupon: c,
+                    currency: currency,
+                    onTap: () => onTap(c),
+                  ),
+            ],
+          ),
+        ],
       ),
     );
   }

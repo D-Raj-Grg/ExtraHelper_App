@@ -62,6 +62,9 @@ exist.
 - [ ] Dates are device-zone days — no tz db on the phone. Revisit if a tenant's staff phones ever
       sit in another timezone (a `day_bounds(tenant, date)` RPC would settle it).
 - [ ] Printing the flyer stays on the web; the phone shares the PNG.
+- [x] Flyers tab (runs, codes, QR, pause/resume, edit, hand-out marks, CSV) and the coupon stats strip, 2026-10-09. Design step of the wizard and PDFs (all / proof / single) added the same day.
+- [ ] Scan a printed phone-made flyer PDF with a real phone, and open a web-saved design on the phone and a phone-saved one on the web.
+- [ ] A real run of the Flyers tab on device against a test tenant (create a run, pause it, send the CSV).
 
 **Scope decided 2026-07-26:** first build = Milestones 0–2 (shell + waiter ordering create/amend +
 native offline queue). Amend goes through a **new shared RPC** with the web refactored onto it.

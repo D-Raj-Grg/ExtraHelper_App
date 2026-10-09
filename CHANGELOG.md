@@ -12,6 +12,26 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 ## [Unreleased]
 
+## [1.0.18] — 2026-10-09 · Flyers on the phone
+
+### Added
+- **Flyers tab on the phone.** Coupons now has **Coupons | Flyers** switch under the title, like the web. Flyers lists every print run with what it takes off, its dates, and how many codes were made, handed out, used and are still free. Tap a run for its codes (each marked Used, Paused, Handed out or Free), the QR of any code, **Copy all codes** and **Send list as CSV**. With *Manage coupons*: **New run** (name, how many codes up to 1000, prefix, percent or amount off, dates, dine in only), **Pause / Resume run** (stops every code at once, e.g. when flyers go missing), **Edit name & dates**, and **Mark handed out** per code. 
+- **Make the flyers on the phone — the same two steps as the web.** **New run** now carries on to step 2: pick a saved design or upload your flyer picture (JPEG or PNG, up to 5 MB), drag the **code** and the **QR square** where they belong (pull the corner dot to resize), choose the code and QR colours, code size and QR margin, and say what the QR carries — the storefront link or just the code. **Save design and finish** stores it and points the run at it; designs saved on the web show up here and the other way round. **Save as a new copy** and **Delete design** are there too. Any run can also be given or switched to another design from its menu (**Add a design / Change design**).
+- **Flyer PDFs.** From a run: **Download all N flyers (PDF)** (one A4 page per code; the phone's share sheet takes it to Files, AirDrop, a print app or WhatsApp) and **Proof (1 page)** to scan before printing the lot. From a code in the list: a **Flyer PDF** button for that one flyer.
+- **Coupon numbers above the list.** The Coupons tab now opens with Active, Scheduled, Expired, Used up, Paused, Redemptions and Given away, as on the web.
+
+<details><summary>Technical — flyers</summary>
+
+- No new SQL. `CouponBatchesRepository` (`lib/data/supabase/coupon_batches_repository.dart`) calls the web's RPCs: `coupon_stats`, `list_coupon_batches`, `get_batch_codes` under `coupons.view`; `create_coupon_batch`, `update_coupon_batch`, `set_batch_active`, `mark_coupon_shared` under `coupons.manage`. No new permission key. `RunDraft.validate()` mirrors the web's `createCouponBatch` checks (1-1000 codes, prefix `^[A-Z0-9]{2,8}$`, value > 0, percent <= 100, end after start and not in the past); `RunEdit` is name + window only, as the RPC allows.
+- `lib/features/coupons/`: `flyers_tab.dart` (runs list + run action sheet), `run_sheet.dart` (new/edit form, owns its controllers), `run_codes_sheet.dart` (codes, CSV via `fileSharerProvider`, per-code QR through the existing `showCouponQrSheet` with a synthetic `Coupon`), `coupon_stats_strip.dart`. Providers `couponStatsProvider`, `couponBatchesProvider`, `batchCodesProvider(batchId)` are network-only and autoDispose. `CouponDateButton` in `coupon_sheet.dart` is now public so the run form reuses it.
+- Dates are device-zone days, same as the coupon form (open item in TASKS.md). The earlier note that flyer coupons stay out of the Coupons list still holds: runs are managed in the Flyers tab, campaigns in Coupons.
+- **Flyer design + PDF.** New dependency `pdf` (pure Dart). `lib/data/supabase/flyer_designs_repository.dart` calls `list_flyer_designs`, `save_flyer_design`, `delete_flyer_design` and the private `flyer-templates` bucket (upload under `{tenant}/{uuid}.jpg|png`, then the RPC, then remove the replaced picture; a failed RPC removes the new upload — the web's `saveFlyerDesign` order). Placement JSON is the web's `FlyerPlacement` field-for-field (`flyer_placement.dart`: fractions of the picture, `qr.s` is a fraction of the width, same defaults and editor clamps), so a design opens on either side.
+- `flyer_pdf.dart` mirrors `lib/flyer-pdf.ts`: A4 in points, the picture stretched to the page and embedded once, QR as vector rectangles (error-correction M, runs of dark modules), code in Helvetica-Bold centred and shrunk to fit its box. It runs in `Isolate.run`, so a 1000-page run does not freeze the screen. `flyer_export.dart` loads the design and picture, builds, writes the file to the temp dir and hands it to `fileSharerProvider`. The picker downsizes to 2480×3508 (A4 at 300 dpi) to stay under 5 MB. The QR link base is `APP_URL` from `env.json`; a design's own `link_base` wins when set.
+- Tests: `test/flyer_pdf_test.dart` (placement round-trip and clamps, QR runs, payload modes, page count, picture embedded once, isolate path).
+- Tests: `test/coupon_batches_repository_test.dart` (row parsing, validate, RPC params), `test/flyers_tab_test.dart` (viewer vs manager levers, empty state, codes states in words, stats strip, CSV).
+
+</details>
+
 ## [1.0.17] — 2026-10-07 · Availability, iPad layouts and a faster start
 
 ### Changed

@@ -297,7 +297,7 @@ class _CouponSheetState extends State<_CouponSheet> {
             Row(
               children: [
                 Expanded(
-                  child: _DateButton(
+                  child: CouponDateButton(
                     label: 'From',
                     value: _from,
                     onTap: () => _pickDate(start: true),
@@ -308,7 +308,7 @@ class _CouponSheetState extends State<_CouponSheet> {
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: _DateButton(
+                  child: CouponDateButton(
                     label: 'Through',
                     value: _through,
                     onTap: () => _pickDate(start: false),
@@ -432,8 +432,9 @@ class _CouponSheetState extends State<_CouponSheet> {
   }
 }
 
-class _DateButton extends StatelessWidget {
-  const _DateButton({
+class CouponDateButton extends StatelessWidget {
+  const CouponDateButton({
+    super.key,
     required this.label,
     required this.value,
     required this.onTap,

@@ -160,8 +160,7 @@ class _CustomerDetailScreenState extends ConsumerState<CustomerDetailScreen> {
     // "Customer" rather than flash a name the body may then lock away.
     final planHasLoyalty =
         ref.watch(tenantFeatureProvider('loyalty')).valueOrNull ?? false;
-    final mayShow =
-        status == IdentityStatus.ready && canView && planHasLoyalty;
+    final mayShow = status == IdentityStatus.ready && canView && planHasLoyalty;
     final customer = mayShow ? loaded.valueOrNull : null;
 
     return AppScaffold(
