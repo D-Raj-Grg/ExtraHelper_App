@@ -118,7 +118,7 @@ class _MemberRow extends StatelessWidget {
           value: MemberAction.setPassword,
           child: Text('Set password'),
         ),
-      if (canManagePasswords && member.isInvite && !member.isOwner)
+      if (canManagePasswords && member.isInvite)
         const PopupMenuItem(
           value: MemberAction.createLogin,
           child: Text('Create login'),

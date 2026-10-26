@@ -23,6 +23,7 @@ import '../features/pos/bill_view_screen.dart';
 import '../features/pos/checkout_screen.dart';
 import '../features/pos/manager_ops.dart';
 import '../features/reports/day_close_screen.dart';
+import '../features/reservations/reservations_screen.dart';
 import '../features/settings/appearance_screen.dart';
 import '../features/settings/branches_screen.dart';
 import '../features/settings/charges_settings_screen.dart';
@@ -36,6 +37,7 @@ import '../features/settings/printing_screen.dart';
 import '../features/settings/profile_screen.dart';
 import '../features/settings/receipt_settings_screen.dart';
 import '../features/settings/settings_hub_screen.dart';
+import '../features/tables_admin/tables_admin_screen.dart';
 import '../features/team/team_screen.dart';
 import '../features/tenant/account_screen.dart';
 import '../features/tenant/home_shell.dart';
@@ -78,6 +80,8 @@ abstract final class Routes {
   /// The customer book: who owes what, points, and the web's edit / merge /
   /// delete. A destination, like Loyalty & CRM in the web sidebar.
   static const coupons = '/coupons';
+  static const reservations = '/reservations';
+  static const tablesAdmin = '/tables';
   static const customers = '/customers';
   static const customer = '/customers/:id';
   static String customerPath(String id) => '/customers/$id';
@@ -216,6 +220,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: Routes.coupons,
         builder: (context, state) => const CouponsScreen(),
+      ),
+      GoRoute(
+        path: Routes.reservations,
+        builder: (context, state) => const ReservationsScreen(),
+      ),
+      GoRoute(
+        path: Routes.tablesAdmin,
+        builder: (context, state) => const TablesAdminScreen(),
       ),
       GoRoute(
         path: Routes.customer,

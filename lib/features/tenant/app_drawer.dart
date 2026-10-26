@@ -44,6 +44,11 @@ class AppDrawer extends ConsumerWidget {
     // `coupons.view` is Owner/Manager by default; `coupons.manage` gates the
     // levers inside. A waiter who can see the list can still show the QR.
     final canSeeCoupons = ref.watch(hasPermissionProvider('coupons.view'));
+    // Host board and floor admin. `.edit` gates the levers inside each screen.
+    final canSeeReservations = ref.watch(
+      hasPermissionProvider('reservations.view'),
+    );
+    final canSeeTablesAdmin = ref.watch(hasPermissionProvider('tables.view'));
     // Owner and manager by default. False while permissions load, which is the
     // right way round: a door that appears late is better than one that
     // vanishes under a thumb already moving towards it.
@@ -73,6 +78,22 @@ class AppDrawer extends ConsumerWidget {
               route: Routes.home,
               location: location,
             ),
+            if (canSeeReservations)
+              _DrawerItem(
+                icon: Icons.event_seat_outlined,
+                selectedIcon: Icons.event_seat,
+                label: 'Reservations',
+                route: Routes.reservations,
+                location: location,
+              ),
+            if (canSeeTablesAdmin)
+              _DrawerItem(
+                icon: Icons.table_restaurant_outlined,
+                selectedIcon: Icons.table_restaurant,
+                label: 'Floors & tables',
+                route: Routes.tablesAdmin,
+                location: location,
+              ),
             if (canSeeKitchen)
               _DrawerItem(
                 icon: Icons.soup_kitchen_outlined,

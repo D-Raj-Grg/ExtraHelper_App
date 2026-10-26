@@ -155,7 +155,9 @@ class PosRepository {
   Future<List<PosTable>> tables() async {
     final rows = await _client
         .from('restaurant_tables')
-        .select('id, label, capacity, state, floor_id, current_order_id')
+        .select(
+          'id, label, capacity, state, floor_id, current_order_id, qr_token',
+        )
         .eq('tenant_id', _tenantId)
         .order('label');
     return rows.map((r) => PosTable.fromRow(r)).toList();

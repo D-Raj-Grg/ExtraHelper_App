@@ -12,6 +12,33 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 ## [Unreleased]
 
+### Added
+- **Reservations on the phone.** New **Reservations** screen in the menu: upcoming bookings grouped by day with covers per day, **New reservation** (guest, phone, party size, date and time, optional table, notes), and Confirm / Seat / No-show / Cancel (cancel and no-show ask first). Seating a booking marks its table occupied.
+- **Floors & tables admin.** New **Floors & tables** screen: add a floor, add a table (label, seats, floor), delete a table (warns that its printed QR stops working; refused while it has an open order) and show or share a table's QR.
+
+<details><summary>Technical</summary>
+
+Migrations `20261026173923_mobile_tables_reservations_rpcs` and `…_permission_keys` (web repo): `create_floor`, `create_table`, `delete_table`, `create_reservation`, `set_reservation_status`. All `security definer`, execute granted to `authenticated` only, audit row on each. Allowed for owner/manager (floors, tables) or owner/manager/receptionist (reservations), or anyone holding `tables.edit` / `reservations.edit`. Status moves are enforced server-side (pending → confirmed|cancelled; confirmed → seated|no_show|cancelled). Existing keys `reservations.view/edit`, `tables.view/edit`; no new key. Files: `lib/data/supabase/{reservations,tables_admin}_repository.dart`, `lib/features/reservations/*`, `lib/features/tables_admin/*`, `PosTable.qrToken`. Tests: `reservations_*`, `tables_admin_*`, `add_table_sheet`. No availability or overlap checks, as on the web.
+
+</details>
+
+- **Create login for an invited co-owner.** An Owner-role invite's menu now offers **Create login**, as other invites do.
+
+<details><summary>Technical</summary>
+
+`staff_tab.dart` drops the `!member.isOwner` condition for invites; server change is migration `20261017100000_owner_invite_login` (web repo).
+
+</details>
+
+### Changed
+- **A table waiting for its bill opens the order, like any other table.** Tapping a *Bill requested* table used to jump straight to checkout, so a late round couldn't be added. It now opens the same order screen (add items, send them), and the cart has a **Generate bill** / **Finish the bill** button above Send. The button waits while new items are unsent ("Send the new items first"), so they can't slip onto the bill unsent. The Bills and Done tabs still open checkout directly.
+
+<details><summary>Technical</summary>
+
+`pos_screen.dart` `_openTable`: removed the `bill_requested` → `openBillIdForTable` → checkout shortcut; the existing billed-order lookup (`activeOrderIdForTable`) now runs for any non-free table with no active order, so a billed order on an `occupied` table is no longer mistaken for an empty one. `order_composer.dart`: new `CartBillButton` (`cart_bill_button.dart`) in `_CartPanel` (both side and bottom layouts), shown for amend mode + `order.canBill` + `checkout.view`; the app-bar icon uses the same unsent-lines guard; checkout return invalidates active/open/filtered/completed order providers and refreshes tables. No RPC or migration change. Tests: `cart_bill_button_test.dart`.
+
+</details>
+
 ## [1.0.18] — 2026-10-09 · Flyers on the phone
 
 ### Added

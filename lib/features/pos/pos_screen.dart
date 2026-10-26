@@ -138,26 +138,9 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   }
 
   Future<void> _openTable(PosTable table) async {
-    // A table waiting on its bill has an order that is no longer *on* the
-    // orders list — `create_bill_for_order` set it to `billed`. Ask about the
-    // bill first, or the lookup below finds nothing and starts a second order
-    // on a table that is mid-payment.
-    if (table.state == 'bill_requested' &&
-        (ref.read(isOnlineProvider).valueOrNull ?? true)) {
-      final repo = ref.read(billRepoProvider);
-      if (repo != null) {
-        try {
-          final billId = await repo
-              .openBillIdForTable(table.id)
-              .timeout(const Duration(seconds: 6));
-          if (!mounted) return;
-          if (billId != null) return _openBill(billId);
-        } on Object {
-          // Fall through to the order path. A slow lookup must not strand the
-          // tap; the Bills tab is still a way in.
-        }
-      }
-    }
+    // A table waiting on its bill opens the same composer as any other table:
+    // its billed order is found below, and the composer has the bill button.
+    // (Going straight to checkout used to leave no way to add a late round.)
 
     // AWAIT the orders, don't read them.
     //
@@ -219,7 +202,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     // seconds as everything else on this tap: a slow answer must not freeze a
     // waiter mid-service, and if it can't resolve either we are no worse off
     // than before.
-    if (open == null && table.state == 'bill_requested' && online) {
+    if (open == null && !table.isFree && online) {
       final posRepo = ref.read(posRepoProvider);
       if (posRepo != null) {
         try {

@@ -183,11 +183,16 @@ class PosTable {
     required this.state,
     this.floorId,
     this.currentOrderId,
+    this.qrToken,
   });
 
   final String id;
   final String label;
   final int capacity;
+
+  /// The token behind the printed table QR (`/t/{token}`). Not kept in the
+  /// local cache, so it is null until the first live fetch.
+  final String? qrToken;
 
   /// `free | occupied | reserved | bill_requested | cleaning`
   final String state;
@@ -203,6 +208,7 @@ class PosTable {
     state: (r['state'] as String?) ?? 'free',
     floorId: r['floor_id'] as String?,
     currentOrderId: r['current_order_id'] as String?,
+    qrToken: r['qr_token'] as String?,
   );
 
   PosTable copyWith({String? state}) => PosTable(
@@ -212,6 +218,7 @@ class PosTable {
     state: state ?? this.state,
     floorId: floorId,
     currentOrderId: currentOrderId,
+    qrToken: qrToken,
   );
 }
 

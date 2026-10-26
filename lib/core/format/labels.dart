@@ -7,6 +7,9 @@
 /// Mirrors the web's `lib/table-constants.ts` and `lib/order-constants.ts`.
 library;
 
+import '../../data/supabase/reservations_repository.dart'
+    show ReservationStatus;
+
 const _tableStateLabels = {
   'free': 'Free',
   'occupied': 'Occupied',
@@ -109,6 +112,14 @@ const _reservationStatusLabels = {
 
 String reservationStatusLabel(String status) =>
     _reservationStatusLabels[status] ?? _humanize(status);
+
+String reservationStatusLabelFor(ReservationStatus s) => switch (s) {
+  ReservationStatus.pending => 'Pending',
+  ReservationStatus.confirmed => 'Confirmed',
+  ReservationStatus.seated => 'Seated',
+  ReservationStatus.cancelled => 'Cancelled',
+  ReservationStatus.noShow => 'No-show',
+};
 
 /// When the trading day turns over, said the way a person would.
 ///

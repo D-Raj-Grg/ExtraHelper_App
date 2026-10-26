@@ -18,6 +18,7 @@ import '../../data/supabase/pos_repository.dart';
 import '../../data/sync/sync_providers.dart';
 import '../tenant/tenant_providers.dart';
 import 'bill_providers.dart';
+import 'cart_bill_button.dart';
 import 'cart_controller.dart';
 import 'custom_item_sheet.dart';
 import 'guests_dialog.dart';
@@ -62,6 +63,12 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
   /// second order — but it means a tap in here silently reprices a total
   /// somebody has already read. Everything gated on this exists to say so.
   bool get _isBilled => widget.existingOrder?.status == 'billed';
+
+  /// Amending an order with something fired on it, by someone who may check out.
+  bool get _canShowBill =>
+      _isAmend &&
+      widget.existingOrder!.canBill &&
+      ref.watch(hasPermissionProvider('checkout.view'));
 
   @override
   void initState() {
@@ -199,6 +206,15 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
       final billId = await repo.createBillForOrder(widget.existingOrder!.id);
       if (!mounted) return;
       await context.push(Routes.billPath(billId));
+      if (!mounted) return;
+      // Billing moves the order to `billed` and, once paid, off the board:
+      // whoever is behind this screen must not show the old picture.
+      ref
+        ..invalidate(activeOrdersProvider)
+        ..invalidate(openBillsProvider)
+        ..invalidate(filteredBillsProvider)
+        ..invalidate(completedOrdersProvider);
+      unawaited(ref.read(tablesProvider.notifier).refresh());
     } on PosFailure catch (e) {
       if (!mounted) return;
       _toast(e.message, error: true);
@@ -425,11 +441,10 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
                 ? 'How many guests?'
                 : '$_guests guest${_guests == 1 ? '' : 's'}',
           ),
-        if (_isAmend &&
-            widget.existingOrder!.canBill &&
-            ref.watch(hasPermissionProvider('checkout.view')))
+        if (_canShowBill)
           IconButton(
-            onPressed: _busy ? null : _openBill,
+            // Same rule as the cart button: unsent lines would be billed too.
+            onPressed: _busy || _cart.lines.isNotEmpty ? null : _openBill,
             icon: const Icon(Icons.point_of_sale),
             // Once the order has a bill, `create_bill_for_order` is idempotent
             // and hands back the one that exists — so this taps through to a
@@ -491,6 +506,10 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
           onSetQty: _setQty,
           onRemove: _removeLine,
           onFire: _commitAndFire,
+          onBill: _canShowBill ? _openBill : null,
+          billLabel: billButtonLabel(
+            hasBill: widget.existingOrder?.billId != null,
+          ),
         ),
         primary: Column(
           children: [
@@ -694,6 +713,8 @@ class _CartPanel extends StatefulWidget {
     required this.onSetQty,
     required this.onRemove,
     required this.onFire,
+    this.onBill,
+    this.billLabel = 'Generate bill',
     this.sidePanel = false,
   });
 
@@ -709,6 +730,12 @@ class _CartPanel extends StatefulWidget {
   final void Function(CartDisplayLine, int) onSetQty;
   final void Function(CartDisplayLine) onRemove;
   final VoidCallback onFire;
+
+  /// Null hides the bill button (not amending, nothing fired yet, or no
+  /// `checkout.view`). Billing is the same surface as adding a round, with one
+  /// more button — the web's "Generate bill" / "Finish the bill".
+  final VoidCallback? onBill;
+  final String billLabel;
 
   /// True on a wide screen, where the cart is a full-height panel beside the
   /// menu: always open, no collapse toggle, the list takes the spare height.
@@ -783,6 +810,16 @@ class _CartPanelState extends State<_CartPanel> {
       ),
     );
 
+    final onBill = widget.onBill;
+    final bill = onBill == null
+        ? null
+        : CartBillButton(
+            label: widget.billLabel,
+            unsent: !empty,
+            busy: widget.busy,
+            onPressed: onBill,
+          );
+
     final fire = Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
       // One button. Confirming an order is sending it — there is no
@@ -838,6 +875,7 @@ class _CartPanelState extends State<_CartPanel> {
               ),
               Divider(height: 1, color: scheme.outline),
               summary,
+              ?bill,
               fire,
             ],
           ),
@@ -860,6 +898,7 @@ class _CartPanelState extends State<_CartPanel> {
                 child: list,
               ),
             summary,
+            ?bill,
             fire,
           ],
         ),
