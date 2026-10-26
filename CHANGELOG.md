@@ -12,6 +12,8 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 ## [Unreleased]
 
+## [1.0.19] — 2026-10-27 · Reservations, tables and billing from the order screen
+
 ### Added
 - **Reservations on the phone.** New **Reservations** screen in the menu: upcoming bookings grouped by day with covers per day, **New reservation** (guest, phone, party size, date and time, optional table, notes), and Confirm / Seat / No-show / Cancel (cancel and no-show ask first). Seating a booking marks its table occupied.
 - **Floors & tables admin.** New **Floors & tables** screen: add a floor, add a table (label, seats, floor), delete a table (warns that its printed QR stops working; refused while it has an open order) and show or share a table's QR.
