@@ -33,6 +33,7 @@ Migrations `20261026173923_mobile_tables_reservations_rpcs` and `…_permission_
 </details>
 
 ### Changed
+- **Menu order follows how often you reach for it.** POS and Kitchen first, then the day's money (Dashboard, Expenses, Day close), stock and menu, customers and coupons, with Reservations, Floors & tables, Team and Manager log lower down. Nothing was added or removed, and who sees each item is unchanged.
 - **A table waiting for its bill opens the order, like any other table.** Tapping a *Bill requested* table used to jump straight to checkout, so a late round couldn't be added. It now opens the same order screen (add items, send them), and the cart has a **Generate bill** / **Finish the bill** button above Send. The button waits while new items are unsent ("Send the new items first"), so they can't slip onto the bill unsent. The Bills and Done tabs still open checkout directly.
 
 <details><summary>Technical</summary>

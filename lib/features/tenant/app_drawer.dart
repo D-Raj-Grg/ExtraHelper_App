@@ -78,22 +78,6 @@ class AppDrawer extends ConsumerWidget {
               route: Routes.home,
               location: location,
             ),
-            if (canSeeReservations)
-              _DrawerItem(
-                icon: Icons.event_seat_outlined,
-                selectedIcon: Icons.event_seat,
-                label: 'Reservations',
-                route: Routes.reservations,
-                location: location,
-              ),
-            if (canSeeTablesAdmin)
-              _DrawerItem(
-                icon: Icons.table_restaurant_outlined,
-                selectedIcon: Icons.table_restaurant,
-                label: 'Floors & tables',
-                route: Routes.tablesAdmin,
-                location: location,
-              ),
             if (canSeeKitchen)
               _DrawerItem(
                 icon: Icons.soup_kitchen_outlined,
@@ -166,12 +150,20 @@ class AppDrawer extends ConsumerWidget {
                 route: Routes.coupons,
                 location: location,
               ),
-            if (canReview)
+            if (canSeeReservations)
               _DrawerItem(
-                icon: Icons.fact_check_outlined,
-                selectedIcon: Icons.fact_check,
-                label: 'Manager log',
-                route: Routes.managerLog,
+                icon: Icons.event_seat_outlined,
+                selectedIcon: Icons.event_seat,
+                label: 'Reservations',
+                route: Routes.reservations,
+                location: location,
+              ),
+            if (canSeeTablesAdmin)
+              _DrawerItem(
+                icon: Icons.table_restaurant_outlined,
+                selectedIcon: Icons.table_restaurant,
+                label: 'Floors & tables',
+                route: Routes.tablesAdmin,
                 location: location,
               ),
             if (canSeeTeam)
@@ -180,6 +172,14 @@ class AppDrawer extends ConsumerWidget {
                 selectedIcon: Icons.groups,
                 label: 'Team',
                 route: Routes.team,
+                location: location,
+              ),
+            if (canReview)
+              _DrawerItem(
+                icon: Icons.fact_check_outlined,
+                selectedIcon: Icons.fact_check,
+                label: 'Manager log',
+                route: Routes.managerLog,
                 location: location,
               ),
             const Divider(height: 1),
