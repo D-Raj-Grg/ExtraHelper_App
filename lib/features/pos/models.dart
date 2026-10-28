@@ -471,6 +471,13 @@ class PosOrder {
   /// the button before then is offering a guaranteed error.
   bool get canBill => lines.any((l) => !l.isVoid && l.isFired);
 
+  /// Whether to offer opening the bill from the order screen. An order that
+  /// already *has* a bill can always reach it — `create_bill_for_order` hands
+  /// back the existing one — even when every dish was voided and [canBill] is
+  /// false. Without this a part-paid bill with nothing left on it could not be
+  /// reached to refund, and the table stayed occupied.
+  bool get canOpenBill => canBill || billId != null;
+
   /// Past the service stage: billed, settled or abandoned. Destructive and
   /// lifecycle actions (fire, bill, cancel, void-by-lifecycle) are not offered
   /// for these — the order has left the waiter's hands.
@@ -497,6 +504,15 @@ class PosOrder {
       status != 'closed' &&
       status != 'cancelled' &&
       (status != 'billed' || billStatus == 'open');
+
+  /// Whether to offer Cancel order. Mirrors `cancel_order`: not once closed or
+  /// cancelled, and a `billed` order only while its bill is `open` or `void`
+  /// (a `void` bill is one refunded in full). `partial`/`paid` hold money, which
+  /// has to be refunded first.
+  bool get canCancel =>
+      status != 'closed' &&
+      status != 'cancelled' &&
+      (status != 'billed' || billStatus == 'open' || billStatus == 'void');
 
   static PosOrder fromRow(Map<String, dynamic> r) {
     final table = r['restaurant_tables'] as Map<String, dynamic>?;

@@ -192,6 +192,72 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     }
   }
 
+  /// Cancel the order(s) behind a bill that has nothing left on it.
+  ///
+  /// `cancel_order` on a `billed` order voids the bill and frees the table; on
+  /// a merged tab it detaches that order and only the last one voids the bill.
+  /// So each still-billed order is cancelled in turn under the one reason.
+  /// Not queued offline, for the same reason the composer's cancel isn't: the
+  /// server decides, and a replay would fail with nobody left to read why.
+  Future<void> _cancelOrders(BillSnapshot snapshot) async {
+    if (_busy) return;
+    final repo = ref.read(posRepoProvider);
+    if (repo == null) return;
+
+    final reason = await showVoidReasonDialog(
+      context: context,
+      title: 'Cancel this order?',
+      body:
+          'This voids the bill and every dish on it, frees the table, and is '
+          'recorded against your name.',
+      confirmLabel: 'Cancel order',
+      keepLabel: 'Keep order',
+      hint: 'e.g. guests left before ordering',
+    );
+    if (reason == null || !mounted) return;
+
+    if (!(ref.read(isOnlineProvider).valueOrNull ?? true)) {
+      setState(
+        () => _error =
+            "No coverage — an order can't be cancelled yet. Try again when "
+            "you're back.",
+      );
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    var cancelled = 0;
+    try {
+      for (final id in snapshot.billedOrderIds) {
+        await repo.cancelOrder(orderId: id, reason: reason);
+        cancelled++;
+      }
+      if (!mounted) return;
+      ref
+        ..invalidate(activeOrdersProvider)
+        ..invalidate(completedOrdersProvider)
+        ..invalidate(openBillsProvider)
+        ..invalidate(filteredBillsProvider);
+      unawaited(ref.read(tablesProvider.notifier).refresh());
+      Navigator.of(context).pop();
+    } on PosFailure catch (e) {
+      if (!mounted) return;
+      // Some orders may already be gone on a merged tab, so say what is left
+      // rather than leaving a stale screen, and re-read the bill.
+      setState(() => _error = e.message);
+      if (cancelled > 0) {
+        unawaited(
+          ref.read(billSnapshotProvider(widget.billId).notifier).refresh(),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   void _say(String message) {
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
@@ -440,7 +506,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       setState(() {
         _busy = false;
         _error =
-            'This bill has already been paid — start a new order for the table.';
+            'A payment has already been taken on this bill — start a new order for the table.';
       });
       return;
     }
@@ -575,6 +641,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     // so a waiter who can start a round can add to one.
     final canOrder = ref.watch(hasPermissionProvider('order.create'));
     final online = ref.watch(isOnlineProvider).valueOrNull ?? true;
+    final canCancel = ref.watch(canCancelOrderProvider);
 
     return AppScaffold(
       title: 'Checkout',
@@ -582,18 +649,6 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
           ? 'Table ${snapshot.valueOrNull!.bill.tableLabel}'
           : null,
       showDrawer: false,
-      // The document, before any paper is burnt. No permission of its own for
-      // the same reason printing has none: it reads the bill this screen is
-      // already showing.
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.receipt_long_outlined),
-          tooltip: 'View bill',
-          onPressed: snapshot.valueOrNull == null
-              ? null
-              : () => context.push(Routes.billViewPath(widget.billId)),
-        ),
-      ],
       bottomNavigationBar: snapshot.valueOrNull == null
           ? null
           : _DueBar(
@@ -601,6 +656,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
               currency: currency,
               online: online,
               busy: _busy,
+              // The document, before any paper is burnt. No permission of its
+              // own for the same reason printing has none: it reads the bill
+              // this screen is already showing.
+              onView: () => context.push(Routes.billViewPath(widget.billId)),
               onTake: !canPay || !snapshot.value!.canTakePayment
                   ? null
                   : () => _takePayment(snapshot.value!, currency),
@@ -662,8 +721,12 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
               onAddItems: s.canAddItems && online && !_busy && canOrder
                   ? () => _addItems(s)
                   : null,
+              canCancel: canCancel,
+              onCancel: online && !_busy && canCancel
+                  ? () => _cancelOrders(s)
+                  : null,
               onRefund:
-                  s.bill.isPaid &&
+                  s.canRefundMoney &&
                       online &&
                       !_busy &&
                       ref.watch(canRefundProvider)
@@ -691,6 +754,8 @@ class _Body extends StatelessWidget {
     required this.canAddItems,
     required this.onAddItems,
     required this.onRefund,
+    this.canCancel = false,
+    this.onCancel,
   });
 
   final BillSnapshot snapshot;
@@ -721,6 +786,14 @@ class _Body extends StatelessWidget {
   /// so the button disables without the card moving.
   final VoidCallback? onAddItems;
 
+  /// The user may cancel orders (manager). Decides whether the "Nothing left to
+  /// bill" panel offers the button or tells them to ask one.
+  final bool canCancel;
+
+  /// Null while busy or offline, so the button disables without the panel
+  /// moving.
+  final VoidCallback? onCancel;
+
   /// The mirror image: only on a bill that *is* settled, and only with
   /// `payment.refund`.
   final VoidCallback? onRefund;
@@ -732,6 +805,10 @@ class _Body extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
       children: [
         _StatusBand(snapshot: snapshot),
+        if (snapshot.nothingLeftToBill) ...[
+          const SizedBox(height: 12),
+          _NothingLeftPanel(canCancel: canCancel, onCancel: onCancel),
+        ],
         if (error != null) ...[
           const SizedBox(height: 12),
           Container(
@@ -842,7 +919,86 @@ class _Body extends StatelessWidget {
             ),
           ),
         ],
+        // A bill with dishes on it and no money taken can still be dropped —
+        // guests walked out, wrong table. Quiet and last, because it is the
+        // rare exit. The empty bill has its own panel above.
+        if (canCancel &&
+            snapshot.canCancelOrders &&
+            !snapshot.nothingLeftToBill) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton.icon(
+              onPressed: onCancel,
+              icon: const Icon(Icons.cancel_outlined, size: 18),
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, Tokens.tapTarget),
+                foregroundColor: theme.colorScheme.error,
+              ),
+              label: const Text('Cancel order'),
+            ),
+          ),
+        ],
       ],
+    );
+  }
+}
+
+/// An open bill whose dishes were all voided: it totals nothing, so it can
+/// never be paid. Says so and offers the one way out.
+class _NothingLeftPanel extends StatelessWidget {
+  const _NothingLeftPanel({required this.canCancel, required this.onCancel});
+
+  final bool canCancel;
+  final VoidCallback? onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return CheckoutCard(
+      title: 'Nothing left to bill',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.info_outline,
+                size: 18,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  canCancel
+                      ? 'Every dish on this bill was voided, so there is '
+                            'nothing to pay. Cancel the order to close the bill '
+                            'and free the table.'
+                      : 'Every dish on this bill was voided, so there is '
+                            'nothing to pay. Ask a manager to cancel the order '
+                            'and free the table.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (canCancel) ...[
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: onCancel,
+              icon: const Icon(Icons.cancel_outlined, size: 18),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(0, Tokens.tapTarget),
+                foregroundColor: theme.colorScheme.error,
+              ),
+              label: const Text('Cancel order'),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -1327,6 +1483,7 @@ class _DueBar extends StatelessWidget {
     required this.currency,
     required this.online,
     required this.busy,
+    required this.onView,
     required this.onTake,
     required this.onPrint,
   });
@@ -1335,6 +1492,9 @@ class _DueBar extends StatelessWidget {
   final String currency;
   final bool online;
   final bool busy;
+
+  /// Opens the bill as a document. Always available once the bill has loaded.
+  final VoidCallback onView;
 
   /// Null without `payment.take`, or when there is nothing left to take.
   final VoidCallback? onTake;
@@ -1495,6 +1655,20 @@ class _DueBar extends StatelessWidget {
                 ),
               ),
             ],
+            // Under the money button, and quieter than it: reading the bill is
+            // the step before charging for it, not the main event.
+            const SizedBox(height: 4),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton.icon(
+                onPressed: onView,
+                icon: const Icon(Icons.receipt_long_outlined),
+                label: const Text('View bill'),
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(0, Tokens.tapTarget),
+                ),
+              ),
+            ),
           ],
         ),
       ),

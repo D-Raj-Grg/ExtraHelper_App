@@ -98,19 +98,17 @@ class BillRepository {
         _client
             .from('orders')
             .select(
-              'id, created_at, waiter_id, '
+              'id, status, created_at, waiter_id, '
               'customers(id, name, phone, loyalty_accounts(points_balance))',
             )
             .eq('bill_id', billId)
             .eq('tenant_id', _tenantId)
-            .order('created_at')
-            // Two, not one. A bill can span **several** orders —
-            // `add_order_to_bill` points each of them at the same bill, which
-            // is how two tables share a tab — and the oldest one is still the
-            // right row to read the guest off. But "add items" needs to know
-            // whether that row is the *only* one, and one extra row answers
-            // that without a second round trip.
-            .limit(2),
+            // Every order on the bill. `add_order_to_bill` points several at one
+            // bill (two tables sharing a tab); the oldest is still the row the
+            // guest is read off, but "add items" needs to know whether it is
+            // the *only* one and "cancel" needs each `billed` one by id. A bill
+            // holds a handful of orders, so there is no cost in asking for all.
+            .order('created_at'),
         _client
             .from('tenant_settings')
             .select('points_value_cents')
@@ -147,6 +145,11 @@ class BillRepository {
     final soleOrderId = orderRows.length == 1
         ? orderRows.first['id'] as String?
         : null;
+
+    final billedOrderIds = [
+      for (final o in orderRows)
+        if (o['status'] == 'billed') o['id'] as String,
+    ];
 
     final orderItemIds = itemRows
         .map((r) => r['order_item_id'] as String?)
@@ -275,6 +278,7 @@ class BillRepository {
       mergeable: mergeableRows.map(MergeableOrder.fromRow).toList(),
       waiterName: waiterName,
       orderId: soleOrderId,
+      billedOrderIds: billedOrderIds,
     );
   }
 

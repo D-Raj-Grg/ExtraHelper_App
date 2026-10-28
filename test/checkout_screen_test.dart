@@ -41,8 +41,10 @@ BillSnapshot _snapshot({
   // offers nothing rather than putting one table's round on another's order.
   String? orderId,
   List<BillLine>? lines,
+  List<String> billedOrderIds = const [],
 }) => BillSnapshot(
   orderId: orderId,
+  billedOrderIds: billedOrderIds,
   bill: Bill(
     id: _billId,
     status: status,
@@ -160,6 +162,9 @@ void main() {
     // live. It opens on `order.discount` OR `payment.take` — a cashier holds
     // the latter, so the button is there…
     expect(find.text('Discounts, charges, tip'), findsOneWidget);
+    // The bar's View bill row shortens the test screen; scroll the lever clear.
+    await tester.ensureVisible(find.text('Discounts, charges, tip'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Discounts, charges, tip'));
     await tester.pumpAndSettle();
 
@@ -186,6 +191,12 @@ void main() {
         role: 'manager',
       ),
     );
+    await tester.pumpAndSettle();
+
+    // The bar's View bill row shortens the test screen; scroll the lever clear.
+
+    await tester.ensureVisible(find.text('Discounts, charges, tip'));
+
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Discounts, charges, tip'));
@@ -250,6 +261,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    // The bar's View bill row shortens the test screen; scroll the lever clear.
+
+    await tester.ensureVisible(find.text('Discounts, charges, tip'));
+
+    await tester.pumpAndSettle();
+
     await tester.tap(find.text('Discounts, charges, tip'));
     await tester.pumpAndSettle();
 
@@ -292,6 +309,12 @@ void main() {
       await tester.pumpWidget(
         _app(permissions: manager, snapshot: _snapshot(), role: 'cashier'),
       );
+      await tester.pumpAndSettle();
+
+      // The bar's View bill row shortens the test screen; scroll the lever clear.
+
+      await tester.ensureVisible(find.text('Discounts, charges, tip'));
+
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Discounts, charges, tip'));
@@ -568,6 +591,31 @@ void main() {
     expect(print.dy, lessThan(pay.dy));
   });
 
+  testWidgets('View bill sits under Take payment, not in the app bar', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_app(permissions: cashier, snapshot: _snapshot()));
+    await tester.pumpAndSettle();
+
+    expect(find.text('View bill'), findsOneWidget);
+    expect(find.byTooltip('View bill'), findsNothing);
+    final view = tester.getCenter(find.text('View bill'));
+    final pay = tester.getCenter(find.text('Take payment'));
+    expect(view.dy, greaterThan(pay.dy));
+  });
+
+  testWidgets('View bill is there without the key to take payment', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(permissions: const {'checkout.view'}, snapshot: _snapshot()),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Take payment'), findsNothing);
+    expect(find.text('View bill'), findsOneWidget);
+  });
+
   testWidgets('reading the bill needs no key to charge for it', (tester) async {
     // A waiter can hand a table its slip. Taking the money is another matter,
     // and `enqueue_print_job` only wants `checkout.view` for a bill.
@@ -781,5 +829,159 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Owes '), findsNothing);
+  });
+
+  testWidgets('an emptied bill offers a manager Cancel order', (tester) async {
+    await tester.pumpWidget(
+      _app(
+        permissions: manager,
+        role: 'manager',
+        snapshot: _snapshot(
+          totalCents: 0,
+          lines: const [],
+          billedOrderIds: const ['o1'],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Nothing left to bill'), findsOneWidget);
+    expect(find.text('Cancel order'), findsOneWidget);
+  });
+
+  testWidgets('a non-manager is told to ask one, with no button', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        permissions: cashier,
+        snapshot: _snapshot(
+          totalCents: 0,
+          lines: const [],
+          billedOrderIds: const ['o1'],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Nothing left to bill'), findsOneWidget);
+    expect(find.text('Cancel order'), findsNothing);
+  });
+
+  testWidgets('a bill that still has dishes shows no cancel panel', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        permissions: manager,
+        role: 'manager',
+        snapshot: _snapshot(billedOrderIds: const ['o1']),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Nothing left to bill'), findsNothing);
+  });
+
+  testWidgets(
+    'an unpaid bill with dishes still offers a manager Cancel order',
+    (tester) async {
+      await tester.pumpWidget(
+        _app(
+          permissions: manager,
+          role: 'manager',
+          snapshot: _snapshot(billedOrderIds: const ['o1']),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Last in a lazy list, so it is only built once scrolled to.
+      await tester.scrollUntilVisible(
+        find.text('Cancel order'),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(find.text('Cancel order'), findsOneWidget);
+      // The empty-bill panel is its own thing; this is the ordinary exit.
+      expect(find.text('Nothing left to bill'), findsNothing);
+    },
+  );
+
+  testWidgets('a cashier gets no Cancel order on a bill with dishes', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        permissions: cashier,
+        snapshot: _snapshot(billedOrderIds: const ['o1']),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Cancel order'), findsNothing);
+  });
+
+  testWidgets('once money has been taken there is nothing to cancel', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        permissions: manager,
+        role: 'manager',
+        snapshot: _snapshot(
+          status: 'partial',
+          paidCents: 400,
+          billedOrderIds: const ['o1'],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Cancel order'), findsNothing);
+  });
+
+  testWidgets('a part-paid bill can still be refunded', (tester) async {
+    // Found on a live table: a 100 deposit, then every dish voided. Refund was
+    // only offered on a `paid` bill, so the money could never be given back.
+    await tester.pumpWidget(
+      _app(
+        permissions: manager,
+        role: 'manager',
+        snapshot: _snapshot(
+          status: 'partial',
+          paidCents: 400,
+          billedOrderIds: const ['o1'],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Refund'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+
+    expect(find.text('Refund'), findsOneWidget);
+    // Money is still held, so Cancel waits for the refund.
+    expect(find.text('Cancel order'), findsNothing);
+  });
+
+  testWidgets('a bill refunded in full offers Cancel order', (tester) async {
+    await tester.pumpWidget(
+      _app(
+        permissions: manager,
+        role: 'manager',
+        snapshot: _snapshot(
+          status: 'void',
+          totalCents: 0,
+          lines: const [],
+          billedOrderIds: const ['o1'],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Nothing left to bill'), findsOneWidget);
+    expect(find.text('Cancel order'), findsOneWidget);
   });
 }

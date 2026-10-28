@@ -462,6 +462,7 @@ class BillSnapshot {
     this.mergeable = const [],
     this.waiterName,
     this.orderId,
+    this.billedOrderIds = const [],
   });
 
   final Bill bill;
@@ -484,6 +485,13 @@ class BillSnapshot {
   /// bug. With no way to ask *which* order the new round belongs to, the honest
   /// answer is to offer nothing: staff add the round from the floor instead.
   final String? orderId;
+
+  /// Every order on this bill still in `billed`, oldest first.
+  ///
+  /// Unlike [orderId] this lists a merged tab's orders too: cancelling a bill
+  /// that can never be paid means cancelling each of them, the last one voiding
+  /// the bill itself.
+  final List<String> billedOrderIds;
 
   int get paidCents => payments.fold(0, (n, p) => n + p.amountCents);
 
@@ -526,6 +534,35 @@ class BillSnapshot {
 
   /// Money can still be taken. A void bill can't, whatever it is owed.
   bool get canTakePayment => bill.isSettleable && dueCents > 0;
+
+  /// Open, empty and unpayable: every dish was voided, so the bill totals
+  /// nothing and `canTakePayment` can never be true. The only way out is to
+  /// cancel the order (`cancel_order` voids the bill and frees the table).
+  ///
+  /// `open` and payment-free mirror what the server accepts for a `billed`
+  /// order; [billedOrderIds] being non-empty is the part that makes it
+  /// cancellable at all.
+  bool get nothingLeftToBill =>
+      _cancellable && lines.isEmpty && bill.totalCents == 0;
+
+  /// The whole ticket can still be thrown away. Same test the server applies to
+  /// a `billed` order (`cancel_order`): an `open` bill with no payment, or a
+  /// `void` one — `refund_payment` voids a bill once it is refunded in full, so
+  /// a `void` bill that still has a billed order behind it holds no money.
+  /// Anything with money held has to be refunded first.
+  /// [nothingLeftToBill] is the empty subset.
+  bool get canCancelOrders => _cancellable;
+
+  bool get _cancellable =>
+      billedOrderIds.isNotEmpty &&
+      ((bill.status == 'open' && payments.isEmpty) || bill.status == 'void');
+
+  /// Money has been taken and not all of it given back: the Refund button's
+  /// condition. `refund_payment` only asks for money held, so a part-paid bill
+  /// qualifies — the app used to offer Refund on `paid` alone, which left a
+  /// part-paid bill with every dish voided with no way out.
+  bool get canRefundMoney =>
+      (bill.isPaid || bill.status == 'partial') && paidCents > 0;
 
   /// Another round can still go onto this ticket.
   ///

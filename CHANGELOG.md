@@ -12,23 +12,17 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 ## [Unreleased]
 
-### Changed
-- **Order screen is less cluttered on a phone.** The title no longer cuts off ("Add to order"): guests moved to a chip under it, "Something off the menu" sits beside search, and billing lives in the ⋯ menu (the cart already has Generate bill). Category tabs are compact pills with a tick on the selected one, dish tiles are shorter, selected tiles keep their rounded purple border, spacing lines up on one margin, and Generate bill and Send share one row so the menu gets about 64pt more room.
-- **Floors & tables screen is tidier.** Tables sit in an even two-column grid that fills the width, and the whole card opens its QR. QR and delete are now icon buttons (long-press for the name), so "Delete" no longer wraps and the QR icon is readable on dark. **Add floor** is a softer tonal button, floors have more space between them, and the last row clears the **Add table** button.
-
-<details><summary>Technical</summary>
-
-`tables_admin_screen.dart`: `Wrap` of fixed 168px cards replaced by `GridView.builder` (`maxCrossAxisExtent: 190`, `mainAxisExtent` scaled by the OS text scale, clamped 1-1.8). `_TableAdminCard` is now `Material` + `InkWell` (`surfaceContainerLow`, `radiusLg`) with 44px `IconButton`s using `onSurface` / `error` colours and tooltips `QR` / `Delete`; seats line is single-line. Bottom list padding adds `viewPaddingOf.bottom`. Tests: finders moved from `find.text('QR'|'Delete')` to `find.byTooltip`; new narrow (320px) + 1.5x text-scale overflow test in `test/tables_admin_screen_test.dart`.
-
-</details>
-
-<details><summary>Technical (order screen)</summary>
-
-`order_composer.dart`: app bar actions reduced to the overflow menu (bill, cancel) + bell; `_destinationBar` (via `AppScaffold.bottom`) carries the table and the guests chip (tooltips `How many guests?` / `N guests`); off-menu `IconButton` joins the search row; `_gutter = 12` used for every section; grid rows sized by `LayoutBuilder` from `MenuTile.imageAspect` (1.45) + `MenuTile.textBlockHeight` scaled by text size; `_CartPanel` shows the unsent hint in the summary row and puts bill + send in one row, stacking again above 1.2x text. `menu_tile.dart`: border moved onto the `Material` shape (clips and paints over the photo), `Opacity` only dims the content. `choice_chip.dart`: new `dense` mode (36pt pill, 44pt hit area, always a check). `cart_bill_button.dart`: `showHint` and `padding` params. Test: `test/menu_tile_test.dart`.
-
-</details>
+## [1.0.20] — 2026-10-28 · Billing fixes, cleaner order and checkout screens
 
 ### Fixed
+- **A part-paid order with every dish voided can now be cleared.** Refund is offered on part-paid bills (it was paid-only), Cancel order appears once the money has been refunded, and the order screen now has an **Open bill to refund** button (and the menu's Open bill) for any order that has a bill, even when every dish was voided. Before, that screen offered no way to the bill at all.
+
+<details><summary>Technical (stuck part-paid bill)</summary>
+
+Live case: bill `partial` with a 100 cash payment, all dishes voided. `cancel_order` refused any bill with a completed payment, `refund_payment` voids the bill on a full refund, and `cancel_order` then refused it for not being `open`. Migration `20261028171015_cancel_order_after_full_refund` (web repo): the guard reads net money held (completed payments − refunds); `open`/`void` with nothing held can be cancelled, `partial`/`paid` with money held still can't. App: `BillSnapshot.canRefundMoney`, `canCancelOrders`/`nothingLeftToBill` accept a `void` bill that still has a billed order, `PosOrder.canCancel` gates the composer's menu entry, `_BilledBand.needsRefund` + `onOpenBill`; `PosOrder.canOpenBill` (`canBill || billId != null`) now gates the composer's bill button and menu entry, since `canBill` is false once every dish is voided; Checkout's refusal text no longer says "already been paid" for a part-paid bill. Tests: `pos_order_can_cancel_test.dart`, two in `checkout_screen_test.dart`.
+
+</details>
+
 - **A billed order with every dish voided can now be cancelled.** Voiding the last dish of a billed order left a zero bill that couldn't be paid, and the table stayed occupied with no way out. Managers now see **Cancel order** in the order screen's menu for a billed order whose bill is still open. Cancelling voids the bill and frees the table. The order screen's banner says so when every dish is voided, and the bill screen shows a **Nothing left to bill** panel with a Cancel button (non-managers are told to ask a manager). On a bill shared by several orders, every still-billed order is cancelled in turn. Refusals read plainly: a payment is still pending, payments are on the bill and need refunding, or the bill was left on credit. Cancelling a fired order now also returns its ingredient stock, and a coupon on the cancelled bill is released. See `../extrahelper/CHANGELOG.md` [Unreleased] for the server half.
 
 <details><summary>Technical (cancel billed order)</summary>
@@ -42,6 +36,31 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 <details><summary>Technical</summary>
 
 `order_composer.dart` passed `unsent: !empty` (and the toolbar used `lines.isNotEmpty`), but an `AmendCart`'s `lines` includes already-fired lines, so it was never empty. Added `CartController.hasUnsent` (`AmendCart`: a queued pending add, or any non-void, non-held `draft`/`placed` line via new `PosOrderLine.isUnsent`; `CreateCart`: any line). `placed` counts because QR lines sit there until accepted; `is_held` is now selected so held lines don't block, as on the web. Matches the web's `amend-flow.tsx` rule (only draft/placed lines block billing) and `_build_bill_for_order`, which never checks served. Test: `test/amend_cart_unsent_test.dart`.
+
+</details>
+
+### Changed
+- **Checkout has a "View bill" button.** It sits under Take payment instead of the small receipt icon in the top corner, and is there even without permission to take payment.
+- **Order screen: less dead space.** The gap under "Send to kitchen" is smaller, and "Add guests" is now a plain text link on the table line instead of a bordered pill. Guests stay optional.
+
+<details><summary>Technical (view bill, bottom gap)</summary>
+
+`checkout_screen.dart`: app-bar action removed; `_DueBar.onView` renders a 44pt `TextButton.icon` under Take payment. `order_composer.dart`: cart button padding 10→4, `SafeArea` bottom replaced by `_homeIndicatorInset` (`max(viewPadding.bottom - 14, 8)`), `_destinationBar` 44→40 and borderless. Checkout discount tests now `ensureVisible` the lever, since the extra row shortens the 800×600 test screen.
+
+</details>
+
+- **Order screen is less cluttered on a phone.** The title no longer cuts off ("Add to order"): guests moved to a chip under it, "Something off the menu" sits beside search, and billing lives in the ⋯ menu (the cart already has Generate bill). Category tabs are compact pills with a tick on the selected one, dish tiles are shorter, selected tiles keep their rounded purple border, spacing lines up on one margin, and Generate bill and Send share one row so the menu gets about 64pt more room.
+- **Floors & tables screen is tidier.** Tables sit in an even two-column grid that fills the width, and the whole card opens its QR. QR and delete are now icon buttons (long-press for the name), so "Delete" no longer wraps and the QR icon is readable on dark. **Add floor** is a softer tonal button, floors have more space between them, and the last row clears the **Add table** button.
+
+<details><summary>Technical</summary>
+
+`tables_admin_screen.dart`: `Wrap` of fixed 168px cards replaced by `GridView.builder` (`maxCrossAxisExtent: 190`, `mainAxisExtent` scaled by the OS text scale, clamped 1-1.8). `_TableAdminCard` is now `Material` + `InkWell` (`surfaceContainerLow`, `radiusLg`) with 44px `IconButton`s using `onSurface` / `error` colours and tooltips `QR` / `Delete`; seats line is single-line. Bottom list padding adds `viewPaddingOf.bottom`. Tests: finders moved from `find.text('QR'|'Delete')` to `find.byTooltip`; new narrow (320px) + 1.5x text-scale overflow test in `test/tables_admin_screen_test.dart`.
+
+</details>
+
+<details><summary>Technical (order screen)</summary>
+
+`order_composer.dart`: app bar actions reduced to the overflow menu (bill, cancel) + bell; `_destinationBar` (via `AppScaffold.bottom`) carries the table and the guests chip (tooltips `How many guests?` / `N guests`); off-menu `IconButton` joins the search row; `_gutter = 12` used for every section; grid rows sized by `LayoutBuilder` from `MenuTile.imageAspect` (1.45) + `MenuTile.textBlockHeight` scaled by text size; `_CartPanel` shows the unsent hint in the summary row and puts bill + send in one row, stacking again above 1.2x text. `menu_tile.dart`: border moved onto the `Material` shape (clips and paints over the photo), `Opacity` only dims the content. `choice_chip.dart`: new `dense` mode (36pt pill, 44pt hit area, always a check). `cart_bill_button.dart`: `showHint` and `padding` params. Test: `test/menu_tile_test.dart`.
 
 </details>
 

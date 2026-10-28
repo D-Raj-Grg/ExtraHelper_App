@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -67,7 +68,7 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
   /// Amending an order with something fired on it, by someone who may check out.
   bool get _canShowBill =>
       _isAmend &&
-      widget.existingOrder!.canBill &&
+      widget.existingOrder!.canOpenBill &&
       ref.watch(hasPermissionProvider('checkout.view'));
 
   @override
@@ -454,7 +455,7 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
       // this, voiding a billed order's last dish strands the table. A bill
       // with payments on it is refused server-side and surfaced verbatim.
       if (_isAmend &&
-          widget.existingOrder!.isAmendable &&
+          widget.existingOrder!.canCancel &&
           ref.watch(canCancelOrderProvider))
         PopupMenuItem<void>(
           onTap: _busy ? null : _cancelOrder,
@@ -510,6 +511,10 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
                   allVoided:
                       widget.existingOrder!.itemCount == 0 &&
                       ref.watch(canCancelOrderProvider),
+                  // Money is on the bill, so Cancel isn't offered yet: the
+                  // refund comes first, from Checkout.
+                  needsRefund: widget.existingOrder!.billStatus == 'partial',
+                  onOpenBill: _canShowBill && !_busy ? _openBill : null,
                 ),
               ),
             Padding(
@@ -669,8 +674,9 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
     );
   }
 
-  /// "Table A1" plus, on a dine-in order, a guest-count chip. Replaces the
-  /// guests icon that used to sit in the app bar and squeeze the title.
+  /// "Table A1" plus, on a dine-in order, a quiet guest-count link. Covers are
+  /// optional (they print on the ticket and feed the day report), so this is a
+  /// text-weight action on the same line rather than a bordered pill.
   PreferredSizeWidget _destinationBar(
     BuildContext context,
     String destination,
@@ -682,9 +688,9 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
         ? 'Add guests'
         : '$guests guest${guests == 1 ? '' : 's'}';
     return PreferredSize(
-      preferredSize: Size.fromHeight(44 * scale),
+      preferredSize: Size.fromHeight(40 * scale),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(_gutter, 0, _gutter, 4),
+        padding: const EdgeInsets.symmetric(horizontal: _gutter),
         child: Row(
           children: [
             Expanded(
@@ -702,25 +708,28 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
             if (_isDineIn)
               Tooltip(
                 message: guests == null ? 'How many guests?' : guestLabel,
+                // Fills the bar's height, so the tap target stays tall without
+                // the row growing.
                 child: InkWell(
                   onTap: _busy ? null : _editGuests,
-                  borderRadius: BorderRadius.circular(999),
-                  child: Container(
-                    constraints: const BoxConstraints(minHeight: 36),
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                        color: theme.colorScheme.outline,
-                        width: 1.5,
-                      ),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.group_outlined, size: 18),
+                        Icon(
+                          Icons.group_outlined,
+                          size: 18,
+                          color: theme.colorScheme.primary,
+                        ),
                         const SizedBox(width: 6),
-                        Text(guestLabel, style: theme.textTheme.labelLarge),
+                        Text(
+                          guestLabel,
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -746,6 +755,12 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
 /// The one horizontal page gutter for every section of the composer.
 const _gutter = 12.0;
 
+/// Space to keep under the cart's buttons. The full home-indicator inset (~34pt
+/// on a notched iPhone) leaves a fat dead band under Send; the indicator bar
+/// itself only needs ~20pt, so trim the rest but never go under 8.
+double _homeIndicatorInset(BuildContext context) =>
+    math.max(MediaQuery.viewPaddingOf(context).bottom - 14, 8);
+
 /// This order already has a bill, and adding to it moves the total.
 ///
 /// Same shape as the checkout screen's `_StatusBand` — tinted fill, matching
@@ -755,11 +770,23 @@ const _gutter = 12.0;
 /// earlier: there it warns that the guest is holding an old total, here it
 /// warns you are about to create one.
 class _BilledBand extends StatelessWidget {
-  const _BilledBand({this.allVoided = false});
+  const _BilledBand({
+    this.allVoided = false,
+    this.needsRefund = false,
+    this.onOpenBill,
+  });
 
   /// Every dish was voided, so the bill is empty and can't be paid — point the
   /// manager at "Cancel order" in the menu above, the only way to free the table.
   final bool allVoided;
+
+  /// A payment is still held against this bill, so it can't be cancelled until
+  /// it is refunded. Said instead of pointing at a menu entry that isn't there.
+  final bool needsRefund;
+
+  /// One tap to the bill, where the refund is. Null when the user can't open it
+  /// (offline, busy, no `checkout.view`).
+  final VoidCallback? onOpenBill;
 
   @override
   Widget build(BuildContext context) {
@@ -791,7 +818,11 @@ class _BilledBand extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  allVoided
+                  allVoided && needsRefund
+                      ? 'Every dish was voided but a payment is still on this '
+                            'bill. Refund it from Checkout, then cancel the '
+                            'order to free the table.'
+                      : allVoided
                       ? 'Every dish was voided, so the bill is empty. Add '
                             'dishes to keep it, or use the menu above to '
                             'cancel the order and free the table.'
@@ -799,6 +830,19 @@ class _BilledBand extends StatelessWidget {
                             'the total. The bill will need reprinting.',
                   style: theme.textTheme.bodySmall,
                 ),
+                if (allVoided && needsRefund && onOpenBill != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: onOpenBill,
+                      icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                      label: const Text('Open bill to refund'),
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(0, Tokens.tapTarget),
+                        padding: EdgeInsets.zero,
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -940,7 +984,7 @@ class _CartPanelState extends State<_CartPanel> {
       showHint: !inline,
       padding: inline
           ? EdgeInsets.zero
-          : const EdgeInsets.fromLTRB(_gutter, 0, _gutter, 8),
+          : const EdgeInsets.fromLTRB(_gutter, 0, _gutter, 4),
     );
 
     // One button. Confirming an order is sending it — there is no
@@ -969,7 +1013,7 @@ class _CartPanelState extends State<_CartPanel> {
 
     final bill = onBill == null ? null : billButton(inline: false);
     final fire = Padding(
-      padding: const EdgeInsets.fromLTRB(_gutter, 0, _gutter, 10),
+      padding: const EdgeInsets.fromLTRB(_gutter, 0, _gutter, 4),
       child: SizedBox(width: double.infinity, child: fireButton),
     );
 
@@ -979,7 +1023,7 @@ class _CartPanelState extends State<_CartPanel> {
         onBill != null && MediaQuery.textScalerOf(context).scale(1) <= 1.2;
     final phoneButtons = inlineButtons
         ? Padding(
-            padding: const EdgeInsets.fromLTRB(_gutter, 0, _gutter, 10),
+            padding: const EdgeInsets.fromLTRB(_gutter, 0, _gutter, 4),
             child: Row(
               children: [
                 Expanded(flex: 2, child: billButton(inline: true)),
@@ -999,29 +1043,34 @@ class _CartPanelState extends State<_CartPanel> {
         color: scheme.surfaceContainerLow,
         child: SafeArea(
           top: false,
-          child: Column(
-            children: [
-              Expanded(
-                child: empty
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Text(
-                            'Tap a dish to add it to the order.',
-                            textAlign: TextAlign.center,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: scheme.onSurfaceVariant,
+          bottom: false,
+          minimum: EdgeInsets.zero,
+          child: Padding(
+            padding: EdgeInsets.only(bottom: _homeIndicatorInset(context)),
+            child: Column(
+              children: [
+                Expanded(
+                  child: empty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Text(
+                              'Tap a dish to add it to the order.',
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
                             ),
                           ),
-                        ),
-                      )
-                    : list,
-              ),
-              Divider(height: 1, color: scheme.outline),
-              summary,
-              ?bill,
-              fire,
-            ],
+                        )
+                      : list,
+                ),
+                Divider(height: 1, color: scheme.outline),
+                summary,
+                ?bill,
+                fire,
+              ],
+            ),
           ),
         ),
       );
@@ -1032,18 +1081,22 @@ class _CartPanelState extends State<_CartPanel> {
       elevation: 8,
       child: SafeArea(
         top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Divider(height: 1, color: scheme.outline),
-            if (showList && !empty)
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 260),
-                child: list,
-              ),
-            summary,
-            if (phoneButtons != null) phoneButtons else ...[?bill, fire],
-          ],
+        bottom: false,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: _homeIndicatorInset(context)),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Divider(height: 1, color: scheme.outline),
+              if (showList && !empty)
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 260),
+                  child: list,
+                ),
+              summary,
+              if (phoneButtons != null) phoneButtons else ...[?bill, fire],
+            ],
+          ),
         ),
       ),
     );
