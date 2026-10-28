@@ -231,6 +231,7 @@ class PosOrderLine {
     required this.unitPriceCents,
     required this.status,
     required this.isVoid,
+    this.isHeld = false,
     this.notes,
     this.modifierNames = const [],
   });
@@ -248,10 +249,21 @@ class PosOrderLine {
   final String status;
 
   final bool isVoid;
+
+  /// Parked by the waiter: `fire_order` skips it, so it never reaches a ticket
+  /// until released.
+  final bool isHeld;
   final String? notes;
   final List<String> modifierNames;
 
   bool get isFired => status != 'draft';
+
+  /// Still waiting for the kitchen. `fire_order` moves both `draft` and
+  /// `placed` (a QR guest's line, before staff accept it) to `in_kitchen`, so
+  /// both count. Held lines don't — they can't be sent, and the web's billing
+  /// guard ignores them the same way.
+  bool get isUnsent =>
+      !isVoid && !isHeld && (status == 'draft' || status == 'placed');
   int get lineTotalCents => unitPriceCents * qty;
 
   static PosOrderLine fromRow(Map<String, dynamic> r) {
@@ -269,6 +281,7 @@ class PosOrderLine {
       unitPriceCents: (r['unit_price_cents'] as int?) ?? 0,
       status: (r['status'] as String?) ?? 'draft',
       isVoid: (r['is_void'] as bool?) ?? false,
+      isHeld: (r['is_held'] as bool?) ?? false,
       notes: r['notes'] as String?,
       modifierNames: mods,
     );

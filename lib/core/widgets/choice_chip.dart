@@ -27,6 +27,7 @@ class AppChoiceChip extends StatelessWidget {
     this.statusColor,
     this.showCheck = false,
     this.enabled = true,
+    this.dense = false,
   });
 
   final String label;
@@ -48,6 +49,11 @@ class AppChoiceChip extends StatelessWidget {
 
   final bool enabled;
 
+  /// A pill about 36pt tall for a row of filters (menu categories). The hit
+  /// area stays [Tokens.tapTarget] tall; the extra is invisible padding.
+  /// Selection always draws a check in this mode, so it is never colour alone.
+  final bool dense;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -56,6 +62,57 @@ class AppChoiceChip extends StatelessWidget {
     final background = selected ? scheme.primary : scheme.surfaceContainerLow;
     final foreground = selected ? scheme.onPrimary : scheme.onSurface;
     final borderColor = selected ? scheme.primary : scheme.outline;
+
+    if (dense) {
+      return Semantics(
+        button: true,
+        selected: selected,
+        enabled: enabled,
+        label: label,
+        child: ExcludeSemantics(
+          child: Opacity(
+            opacity: enabled ? 1 : 0.5,
+            child: InkWell(
+              onTap: enabled ? onSelect : null,
+              borderRadius: BorderRadius.circular(999),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Container(
+                  constraints: const BoxConstraints(minHeight: 36),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  decoration: BoxDecoration(
+                    color: background,
+                    border: Border.all(color: borderColor, width: 1.5),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (selected) ...[
+                        Icon(Icons.check, size: 16, color: foreground),
+                        const SizedBox(width: 6),
+                      ],
+                      Flexible(
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: foreground,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
     return Semantics(
       button: true,

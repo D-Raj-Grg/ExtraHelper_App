@@ -49,6 +49,11 @@ abstract class CartController {
 
   /// Whether [commit] still has work to do (drives the button's wording).
   bool get hasPendingCommit;
+
+  /// Whether any line has not been sent to the kitchen yet. Billing snapshots
+  /// every non-void line, so these block it — but a line that was sent counts
+  /// whether or not the kitchen ever marked it served.
+  bool get hasUnsent;
 }
 
 /// The result of committing: which order, and whether the server has it yet.
@@ -184,6 +189,9 @@ class CreateCart implements CartController {
 
   @override
   bool get hasPendingCommit => _lines.isNotEmpty;
+
+  @override
+  bool get hasUnsent => _lines.isNotEmpty;
 
   @override
   Future<CartCommit> commit({required bool fire}) async {
@@ -333,6 +341,10 @@ class AmendCart implements CartController {
   /// means firing what was added.
   @override
   bool get hasPendingCommit => false;
+
+  @override
+  bool get hasUnsent =>
+      _pending.isNotEmpty || _order.lines.any((l) => l.isUnsent);
 
   @override
   Future<CartCommit> commit({required bool fire}) async {

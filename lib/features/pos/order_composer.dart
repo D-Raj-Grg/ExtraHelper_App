@@ -139,6 +139,9 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
   /// Manager-gated on role by `cancel_order`, reason required, audited. Not
   /// queued offline — the RPC refuses an order that has since been billed, so a
   /// replay would fail with the composer long gone.
+  ///
+  /// Also the way out of a billed order whose dishes were all voided: the bill
+  /// sits open at zero, can't be paid, and would otherwise hold the table.
   Future<void> _cancelOrder() async {
     final order = widget.existingOrder!;
     final repo = ref.read(posRepoProvider);
@@ -148,11 +151,14 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
     final reason = await showVoidReasonDialog(
       context: context,
       title: 'Cancel this order?',
-      body:
-          '${dishes == 1 ? 'The one dish' : 'All $dishes dishes'} on this order '
-          'will be voided and the order cancelled. Any stock it deducted is '
-          'returned, the table is freed, and this is recorded against your '
-          'name.',
+      body: order.status == 'billed'
+          ? 'This order is already billed. Cancelling voids the bill and '
+                'every dish on it, frees the table, and is recorded against '
+                'your name.'
+          : '${dishes == 1 ? 'The one dish' : 'All $dishes dishes'} on this '
+                'order will be voided and the order cancelled. Any stock it '
+                'deducted is returned, the table is freed, and this is '
+                'recorded against your name.',
       confirmLabel: 'Cancel order',
       keepLabel: 'Keep order',
       hint: 'e.g. guests left before ordering',
@@ -416,80 +422,62 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
               ? 'Table ${widget.seedTable!.label}'
               : 'Takeaway');
 
-    return AppScaffold(
-      title: _isAmend ? 'Add to order' : 'New order',
-      // Which table this lands on is the one fact worth carrying in the frame.
-      // It used to be a second line inside the title, which clips as soon as
-      // someone raises their text size.
-      subtitle: destination,
-      showDrawer: false,
+    final scheme = Theme.of(context).colorScheme;
+    final overflowItems = <PopupMenuEntry<void>>[
       // Only in amend mode, and only once something has been fired: this is the
       // waiter who has just been asked for the bill, and `create_bill_for_order`
-      // refuses an order the kitchen never saw.
-      actions: [
-        // Covers are a dine-in fact: a takeaway bag has no guests, and asking
-        // would be a field nobody can answer.
-        if (_isDineIn)
-          IconButton(
-            onPressed: _busy ? null : _editGuests,
-            icon: Badge(
-              isLabelVisible: _guests != null,
-              label: Text('$_guests'),
-              child: const Icon(Icons.group_outlined),
-            ),
-            tooltip: _guests == null
-                ? 'How many guests?'
-                : '$_guests guest${_guests == 1 ? '' : 's'}',
-          ),
-        if (_canShowBill)
-          IconButton(
-            // Same rule as the cart button: unsent lines would be billed too.
-            onPressed: _busy || _cart.lines.isNotEmpty ? null : _openBill,
-            icon: const Icon(Icons.point_of_sale),
+      // refuses an order the kitchen never saw. The cart bar carries the same
+      // button; this is the quiet second route.
+      if (_canShowBill)
+        PopupMenuItem<void>(
+          // Same rule as the cart button: unsent lines would be billed too.
+          // Sent lines never block it, served or not.
+          enabled: !_busy && !_cart.hasUnsent,
+          onTap: _openBill,
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.point_of_sale),
             // Once the order has a bill, `create_bill_for_order` is idempotent
-            // and hands back the one that exists — so this taps through to a
-            // bill rather than making one. Saying "Bill this order" there would
-            // promise a second bill that nothing will ever create.
-            tooltip: widget.existingOrder!.billId != null
-                ? 'Open bill'
-                : 'Bill this order',
+            // and hands back the one that exists, so this taps through to a
+            // bill rather than making one.
+            title: Text(
+              widget.existingOrder!.billId != null
+                  ? 'Open bill'
+                  : 'Bill this order',
+            ),
           ),
-        // Beside the search box, because "it isn't on the menu" is what a
-        // waiter concludes after searching for it and not finding it.
-        IconButton(
-          onPressed: _busy ? null : () => _addCustom(currency),
-          icon: const Icon(Icons.post_add),
-          tooltip: 'Something off the menu',
         ),
-        // Only in amend mode: a create-mode order has nothing on the server to
-        // cancel — backing out is what discards it.
-        // Deliberately `isSettled`, not `isAmendable`: adding to a billed order
-        // is now allowed, but `cancel_order` still refuses one outright. Widen
-        // this to `isAmendable` and a billed order grows a Cancel entry that
-        // can only ever end in a server error.
-        if (_isAmend &&
-            !widget.existingOrder!.isSettled &&
-            ref.watch(canCancelOrderProvider))
+      // Only in amend mode: a create-mode order has nothing on the server to
+      // cancel — backing out is what discards it.
+      // `isAmendable`, not `isSettled`: `cancel_order` accepts a billed order
+      // while its bill is still open and unpaid (it voids the bill). Without
+      // this, voiding a billed order's last dish strands the table. A bill
+      // with payments on it is refused server-side and surfaced verbatim.
+      if (_isAmend &&
+          widget.existingOrder!.isAmendable &&
+          ref.watch(canCancelOrderProvider))
+        PopupMenuItem<void>(
+          onTap: _busy ? null : _cancelOrder,
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.cancel_outlined, color: scheme.error),
+            title: Text('Cancel order', style: TextStyle(color: scheme.error)),
+          ),
+        ),
+    ];
+
+    return AppScaffold(
+      title: _isAmend ? 'Add to order' : 'New order',
+      // Which table this lands on, and (dine-in) how many are sat there. A
+      // row of its own rather than a second line in the title, which clips as
+      // soon as someone raises their text size.
+      bottom: _destinationBar(context, destination),
+      showDrawer: false,
+      actions: [
+        if (overflowItems.isNotEmpty)
           PopupMenuButton<void>(
             tooltip: 'Order actions',
-            itemBuilder: (_) => [
-              PopupMenuItem<void>(
-                onTap: _busy ? null : _cancelOrder,
-                child: ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    Icons.cancel_outlined,
-                    color: Theme.of(context).colorScheme.error,
-                  ),
-                  title: Text(
-                    'Cancel order',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                ),
-              ),
-            ],
+            itemBuilder: (_) => overflowItems,
           ),
       ],
       // The composer lays itself out against the full width: on a phone the cart
@@ -516,32 +504,58 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
             // Above the search box, not beside the send button: the waiter has to
             // know before they start tapping dishes, not after.
             if (_isBilled)
-              const Padding(
-                padding: EdgeInsets.fromLTRB(12, 10, 12, 2),
-                child: _BilledBand(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(_gutter, 10, _gutter, 2),
+                child: _BilledBand(
+                  allVoided:
+                      widget.existingOrder!.itemCount == 0 &&
+                      ref.watch(canCancelOrderProvider),
+                ),
               ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-              child: TextField(
-                decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.search),
-                  hintText: 'Search the menu',
-                  isDense: true,
-                ),
-                onChanged: (v) =>
-                    setState(() => _search = v.trim().toLowerCase()),
+              padding: const EdgeInsets.fromLTRB(_gutter, 8, 4, 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.search),
+                        hintText: 'Search the menu',
+                        isDense: true,
+                      ),
+                      onChanged: (v) =>
+                          setState(() => _search = v.trim().toLowerCase()),
+                    ),
+                  ),
+                  // Beside the search box, because "it isn't on the menu" is
+                  // what a waiter concludes after searching for it and not
+                  // finding it.
+                  IconButton(
+                    onPressed: _busy ? null : () => _addCustom(currency),
+                    icon: const Icon(Icons.post_add),
+                    tooltip: 'Something off the menu',
+                  ),
+                ],
               ),
             ),
             if (categories.isNotEmpty)
               SizedBox(
-                height: 56,
+                // 44pt hit area plus room for a larger text size.
+                height:
+                    44 +
+                    16 *
+                        (MediaQuery.textScalerOf(context).scale(1) - 1).clamp(
+                          0.0,
+                          1.0,
+                        ),
                 child: ListView(
                   scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: _gutter),
                   children: [
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: AppChoiceChip(
+                        dense: true,
                         label: 'All',
                         selected: _categoryId == null,
                         onSelect: () => setState(() => _categoryId = null),
@@ -551,6 +565,7 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
                       Padding(
                         padding: const EdgeInsets.only(right: 8),
                         child: AppChoiceChip(
+                          dense: true,
                           label: c.name,
                           selected: _categoryId == c.id,
                           onSelect: () => setState(() => _categoryId = c.id),
@@ -589,47 +604,128 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
                     );
                   }
 
-                  return GridView.builder(
-                    padding: const EdgeInsets.all(12),
-                    gridDelegate:
-                        const SliverGridDelegateWithMaxCrossAxisExtent(
+                  return LayoutBuilder(
+                    builder: (context, box) {
+                      // Rows are sized from the photo ratio plus the text block
+                      // (grown with the OS text size), not a fixed aspect, so
+                      // there is no dead space under the price.
+                      const spacing = 10.0;
+                      final inner = box.maxWidth - _gutter * 2;
+                      final cols = (inner / (210 + spacing)).ceil().clamp(
+                        1,
+                        12,
+                      );
+                      final tileW = (inner - spacing * (cols - 1)) / cols;
+                      final textScale = MediaQuery.textScalerOf(
+                        context,
+                      ).scale(1).clamp(1.0, 1.8);
+                      return GridView.builder(
+                        padding: const EdgeInsets.all(_gutter),
+                        gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
                           maxCrossAxisExtent: 210,
-                          mainAxisSpacing: 10,
-                          crossAxisSpacing: 10,
-                          childAspectRatio: 0.78,
+                          mainAxisSpacing: spacing,
+                          crossAxisSpacing: spacing,
+                          mainAxisExtent:
+                              tileW / MenuTile.imageAspect +
+                              MenuTile.textBlockHeight * textScale,
                         ),
-                    itemCount: filtered.length,
-                    itemBuilder: (context, i) {
-                      final item = filtered[i];
-                      final range = item.priceRange;
-                      return MenuTile(
-                        name: item.name,
-                        minPriceCents: range.min,
-                        maxPriceCents: range.max,
-                        currency: currency,
-                        imageUrl: item.imageUrl,
-                        isVeg: item.isVeg,
-                        soldOut: item.is86,
-                        unavailableNow: item.unavailableNow,
-                        availableAgain: item.availableAgain,
-                        optionCount: item.optionCount,
-                        qtyInOrder: _qtyInCart(item),
-                        onTap: () => _addDish(item, currency),
-                        // Long-press is the manager's way in — discoverable to
-                        // whoever needs it, invisible to everyone else.
-                        onLongPress: can86
-                            ? () => showItem86Sheet(
-                                context: context,
-                                ref: ref,
-                                item: item,
-                              )
-                            : null,
+                        itemCount: filtered.length,
+                        itemBuilder: (context, i) {
+                          final item = filtered[i];
+                          final range = item.priceRange;
+                          return MenuTile(
+                            name: item.name,
+                            minPriceCents: range.min,
+                            maxPriceCents: range.max,
+                            currency: currency,
+                            imageUrl: item.imageUrl,
+                            isVeg: item.isVeg,
+                            soldOut: item.is86,
+                            unavailableNow: item.unavailableNow,
+                            availableAgain: item.availableAgain,
+                            optionCount: item.optionCount,
+                            qtyInOrder: _qtyInCart(item),
+                            onTap: () => _addDish(item, currency),
+                            // Long-press is the manager's way in — discoverable to
+                            // whoever needs it, invisible to everyone else.
+                            onLongPress: can86
+                                ? () => showItem86Sheet(
+                                    context: context,
+                                    ref: ref,
+                                    item: item,
+                                  )
+                                : null,
+                          );
+                        },
                       );
                     },
                   );
                 },
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// "Table A1" plus, on a dine-in order, a guest-count chip. Replaces the
+  /// guests icon that used to sit in the app bar and squeeze the title.
+  PreferredSizeWidget _destinationBar(
+    BuildContext context,
+    String destination,
+  ) {
+    final theme = Theme.of(context);
+    final scale = MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 1.6);
+    final guests = _guests;
+    final guestLabel = guests == null
+        ? 'Add guests'
+        : '$guests guest${guests == 1 ? '' : 's'}';
+    return PreferredSize(
+      preferredSize: Size.fromHeight(44 * scale),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(_gutter, 0, _gutter, 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                destination,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            // Covers are a dine-in fact: a takeaway bag has no guests, and
+            // asking would be a field nobody can answer.
+            if (_isDineIn)
+              Tooltip(
+                message: guests == null ? 'How many guests?' : guestLabel,
+                child: InkWell(
+                  onTap: _busy ? null : _editGuests,
+                  borderRadius: BorderRadius.circular(999),
+                  child: Container(
+                    constraints: const BoxConstraints(minHeight: 36),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: theme.colorScheme.outline,
+                        width: 1.5,
+                      ),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.group_outlined, size: 18),
+                        const SizedBox(width: 6),
+                        Text(guestLabel, style: theme.textTheme.labelLarge),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -647,6 +743,9 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
   }
 }
 
+/// The one horizontal page gutter for every section of the composer.
+const _gutter = 12.0;
+
 /// This order already has a bill, and adding to it moves the total.
 ///
 /// Same shape as the checkout screen's `_StatusBand` — tinted fill, matching
@@ -656,7 +755,11 @@ class _OrderComposerState extends ConsumerState<OrderComposer> {
 /// earlier: there it warns that the guest is holding an old total, here it
 /// warns you are about to create one.
 class _BilledBand extends StatelessWidget {
-  const _BilledBand();
+  const _BilledBand({this.allVoided = false});
+
+  /// Every dish was voided, so the bill is empty and can't be paid — point the
+  /// manager at "Cancel order" in the menu above, the only way to free the table.
+  final bool allVoided;
 
   @override
   Widget build(BuildContext context) {
@@ -688,8 +791,12 @@ class _BilledBand extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Anything you add goes on the same bill and changes the '
-                  'total. The bill will need reprinting.',
+                  allVoided
+                      ? 'Every dish was voided, so the bill is empty. Add '
+                            'dishes to keep it, or use the menu above to '
+                            'cancel the order and free the table.'
+                      : 'Anything you add goes on the same bill and changes '
+                            'the total. The bill will need reprinting.',
                   style: theme.textTheme.bodySmall,
                 ),
               ],
@@ -781,7 +888,7 @@ class _CartPanelState extends State<_CartPanel> {
           ? null
           : () => setState(() => _expanded = !_expanded),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+        padding: const EdgeInsets.fromLTRB(_gutter, 10, _gutter, 6),
         child: Row(
           children: [
             // No chevron in a panel that cannot collapse.
@@ -793,12 +900,26 @@ class _CartPanelState extends State<_CartPanel> {
               const SizedBox(width: 8),
             ],
             Expanded(
-              child: Text(
-                empty
-                    ? 'Nothing added yet'
-                    : '${widget.cart.itemCount} item'
-                          '${widget.cart.itemCount == 1 ? '' : 's'}',
-                style: theme.textTheme.titleSmall,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    empty
+                        ? 'Nothing added yet'
+                        : '${widget.cart.itemCount} item'
+                              '${widget.cart.itemCount == 1 ? '' : 's'}',
+                    style: theme.textTheme.titleSmall,
+                  ),
+                  // Why Generate bill is greyed, said where the eye already is
+                  // instead of on a row of its own.
+                  if (!side && widget.onBill != null && widget.cart.hasUnsent)
+                    Text(
+                      'Send the new items first.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
               ),
             ),
             Text(
@@ -811,40 +932,63 @@ class _CartPanelState extends State<_CartPanel> {
     );
 
     final onBill = widget.onBill;
-    final bill = onBill == null
-        ? null
-        : CartBillButton(
-            label: widget.billLabel,
-            unsent: !empty,
-            busy: widget.busy,
-            onPressed: onBill,
-          );
+    CartBillButton billButton({required bool inline}) => CartBillButton(
+      label: widget.billLabel,
+      unsent: widget.cart.hasUnsent,
+      busy: widget.busy,
+      onPressed: onBill!,
+      showHint: !inline,
+      padding: inline
+          ? EdgeInsets.zero
+          : const EdgeInsets.fromLTRB(_gutter, 0, _gutter, 8),
+    );
 
-    final fire = Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-      // One button. Confirming an order is sending it — there is no
-      // save-that-doesn't-cook.
-      child: SizedBox(
-        width: double.infinity,
-        child: FilledButton.icon(
-          onPressed: empty || widget.busy ? null : widget.onFire,
-          icon: widget.busy
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.local_fire_department),
-          label: Text(
-            widget.isBilled
-                ? 'Send & update the bill'
-                : widget.isAmend
-                ? 'Send new items'
-                : 'Send to kitchen',
-          ),
+    // One button. Confirming an order is sending it — there is no
+    // save-that-doesn't-cook.
+    final fireButton = FilledButton.icon(
+      onPressed: empty || widget.busy ? null : widget.onFire,
+      icon: widget.busy
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.local_fire_department),
+      label: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          widget.isBilled
+              ? 'Send & update the bill'
+              : widget.isAmend
+              ? 'Send new items'
+              : 'Send to kitchen',
+          maxLines: 1,
         ),
       ),
     );
+
+    final bill = onBill == null ? null : billButton(inline: false);
+    final fire = Padding(
+      padding: const EdgeInsets.fromLTRB(_gutter, 0, _gutter, 10),
+      child: SizedBox(width: double.infinity, child: fireButton),
+    );
+
+    // On a phone the two buttons share one row, which takes ~64pt back for the
+    // dish grid. Big text stacks them again rather than truncate the words.
+    final inlineButtons =
+        onBill != null && MediaQuery.textScalerOf(context).scale(1) <= 1.2;
+    final phoneButtons = inlineButtons
+        ? Padding(
+            padding: const EdgeInsets.fromLTRB(_gutter, 0, _gutter, 10),
+            child: Row(
+              children: [
+                Expanded(flex: 2, child: billButton(inline: true)),
+                const SizedBox(width: 8),
+                Expanded(flex: 3, child: fireButton),
+              ],
+            ),
+          )
+        : null;
 
     // Beside the menu: the same surface and the same pieces, in a full-height
     // column — total and Send stay pinned at the bottom, within thumb reach.
@@ -898,8 +1042,7 @@ class _CartPanelState extends State<_CartPanel> {
                 child: list,
               ),
             summary,
-            ?bill,
-            fire,
+            if (phoneButtons != null) phoneButtons else ...[?bill, fire],
           ],
         ),
       ),

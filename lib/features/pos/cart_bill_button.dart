@@ -21,6 +21,8 @@ class CartBillButton extends StatelessWidget {
     required this.unsent,
     required this.busy,
     required this.onPressed,
+    this.showHint = true,
+    this.padding = const EdgeInsets.fromLTRB(12, 0, 12, 8),
   });
 
   final String label;
@@ -28,15 +30,21 @@ class CartBillButton extends StatelessWidget {
   final bool busy;
   final VoidCallback onPressed;
 
+  /// Show "Send the new items first." above the button. The composer turns
+  /// this off and renders the hint in its summary row instead.
+  final bool showHint;
+
+  final EdgeInsetsGeometry padding;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      padding: padding,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (unsent)
+          if (unsent && showHint)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(
@@ -52,7 +60,7 @@ class CartBillButton extends StatelessWidget {
             ),
             onPressed: unsent || busy ? null : onPressed,
             icon: const Icon(Icons.point_of_sale),
-            label: Text(label),
+            label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
           ),
         ],
       ),

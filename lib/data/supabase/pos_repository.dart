@@ -176,7 +176,7 @@ class PosRepository {
       'pinned_at, '
       'restaurant_tables!orders_table_id_fkey(label), '
       'bills!orders_bill_id_fkey(id, status), '
-      'order_items(id, name_snapshot, qty, unit_price_cents, status, is_void, notes, '
+      'order_items(id, name_snapshot, qty, unit_price_cents, status, is_void, is_held, notes, '
       'order_item_modifiers(name_snapshot))';
 
   /// Orders still on the floor. Closed and cancelled ones are history.
@@ -750,6 +750,16 @@ class PosRepository {
     }
     if (m.contains('already taken a payment')) {
       return 'This bill has already been paid — start a new order for the table.';
+    }
+    if (m.contains('payment on this bill is still pending')) {
+      return 'A payment on this bill is still pending — wait for it to clear '
+          'before cancelling.';
+    }
+    if (m.contains('payments on it')) {
+      return 'This bill has payments on it — refund them before cancelling.';
+    }
+    if (m.contains('left on credit')) {
+      return 'This bill was left on credit — settle it before cancelling.';
     }
     if (m.contains('table implies')) {
       return 'Pick a table or takeaway, not both.';

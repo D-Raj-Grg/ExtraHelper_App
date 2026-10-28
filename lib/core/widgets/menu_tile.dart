@@ -68,6 +68,13 @@ class MenuTile extends StatelessWidget {
   /// it's worth the tap; a bare "options" doesn't.
   final int optionCount;
 
+  /// Photo width / height. The grid sizes its rows from this, so the tile has
+  /// no dead space under the price.
+  static const imageAspect = 1.45;
+
+  /// Height of the name + price block at 1x text (two-line name allowed).
+  static const textBlockHeight = 74.0;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -95,112 +102,111 @@ class MenuTile extends StatelessWidget {
       enabled: !off,
       label: semanticLabel,
       child: ExcludeSemantics(
-        child: Opacity(
-          opacity: off ? 0.6 : 1,
-          child: Material(
-            color: scheme.surfaceContainerLow,
+        // The border lives on the Material's shape: Material clips to it and
+        // paints it over the children, so the photo can never cover the ring
+        // at the corners.
+        child: Material(
+          color: scheme.surfaceContainerLow,
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(Tokens.radiusLg),
-            child: InkWell(
-              onTap: off ? null : onTap,
-              onLongPress: onLongPress,
-              borderRadius: BorderRadius.circular(Tokens.radiusLg),
-              child: Container(
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: inCart ? scheme.primary : scheme.outline,
-                    width: 2,
-                  ),
-                  borderRadius: BorderRadius.circular(Tokens.radiusLg),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Stack(
-                      children: [
-                        AspectRatio(
-                          aspectRatio: 4 / 3,
-                          child: DishThumb(name: name, imageUrl: imageUrl),
+            side: BorderSide(
+              color: inCart ? scheme.primary : scheme.outline,
+              width: 2,
+            ),
+          ),
+          child: InkWell(
+            onTap: off ? null : onTap,
+            onLongPress: onLongPress,
+            // Dim the content, not the border, so a tile stays crisp.
+            child: Opacity(
+              opacity: off ? 0.6 : 1,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Stack(
+                    children: [
+                      AspectRatio(
+                        aspectRatio: imageAspect,
+                        child: DishThumb(name: name, imageUrl: imageUrl),
+                      ),
+                      if (inCart)
+                        Positioned(
+                          top: 6,
+                          right: 6,
+                          child: _CountBadge(count: qtyInOrder),
                         ),
-                        if (inCart)
-                          Positioned(
-                            top: 6,
-                            right: 6,
-                            child: _CountBadge(count: qtyInOrder),
+                      if (soldOut)
+                        Positioned(
+                          left: 6,
+                          bottom: 6,
+                          child: _Pill(
+                            text: 'Sold out',
+                            background: scheme.error,
+                            foreground: scheme.onError,
                           ),
-                        if (soldOut)
-                          Positioned(
-                            left: 6,
-                            bottom: 6,
-                            child: _Pill(
-                              text: 'Sold out',
-                              background: scheme.error,
-                              foreground: scheme.onError,
+                        ),
+                      if (notNow)
+                        Positioned(
+                          left: 6,
+                          bottom: 6,
+                          child: _Pill(
+                            text: availableAgain != null
+                                ? 'Back $availableAgain'
+                                : 'Not now',
+                            background: scheme.surface.withValues(alpha: 0.9),
+                            foreground: scheme.onSurface,
+                            icon: Icons.schedule,
+                          ),
+                        ),
+                      if (hasOptions && !soldOut && !notNow)
+                        Positioned(
+                          left: 6,
+                          bottom: 6,
+                          child: _Pill(
+                            text: '$optionCount options',
+                            background: scheme.surface.withValues(alpha: 0.9),
+                            foreground: scheme.onSurface,
+                            icon: Icons.tune,
+                          ),
+                        ),
+                    ],
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            if (isVeg != null) ...[
+                              VegMark(isVeg: isVeg),
+                              const SizedBox(width: 6),
+                            ],
+                            Expanded(
+                              child: Text(
+                                name,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.titleSmall,
+                              ),
                             ),
-                          ),
-                        if (notNow)
-                          Positioned(
-                            left: 6,
-                            bottom: 6,
-                            child: _Pill(
-                              text: availableAgain != null
-                                  ? 'Back $availableAgain'
-                                  : 'Not now',
-                              background: scheme.surface.withValues(alpha: 0.9),
-                              foreground: scheme.onSurface,
-                              icon: Icons.schedule,
-                            ),
-                          ),
-                        if (hasOptions && !soldOut && !notNow)
-                          Positioned(
-                            left: 6,
-                            bottom: 6,
-                            child: _Pill(
-                              text: '$optionCount options',
-                              background: scheme.surface.withValues(alpha: 0.9),
-                              foreground: scheme.onSurface,
-                              icon: Icons.tune,
-                            ),
-                          ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          priceText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style:
+                              (theme.textTheme.bodyMedium ?? const TextStyle())
+                                  .tabular
+                                  .copyWith(fontWeight: FontWeight.w600),
+                        ),
                       ],
                     ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              if (isVeg != null) ...[
-                                VegMark(isVeg: isVeg),
-                                const SizedBox(width: 6),
-                              ],
-                              Expanded(
-                                child: Text(
-                                  name,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.titleSmall,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            priceText,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style:
-                                (theme.textTheme.bodyMedium ??
-                                        const TextStyle())
-                                    .tabular
-                                    .copyWith(fontWeight: FontWeight.w600),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
