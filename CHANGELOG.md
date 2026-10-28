@@ -12,7 +12,7 @@ The app is not on the public App Store or Play Store. 1.0.7 is the first build t
 
 ## [Unreleased]
 
-## [1.0.20] — 2026-10-28 · Billing fixes, cleaner order and checkout screens
+## [2.0.0] — 2026-10-28 · Billing fixes, cleaner order and checkout screens
 
 ### Fixed
 - **A part-paid order with every dish voided can now be cleared.** Refund is offered on part-paid bills (it was paid-only), Cancel order appears once the money has been refunded, and the order screen now has an **Open bill to refund** button (and the menu's Open bill) for any order that has a bill, even when every dish was voided. Before, that screen offered no way to the bill at all.
