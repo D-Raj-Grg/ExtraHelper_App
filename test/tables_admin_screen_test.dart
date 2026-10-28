@@ -85,7 +85,7 @@ void main() {
     expect(find.text('T1'), findsOneWidget);
     expect(find.text('Free'), findsOneWidget);
     expect(find.text('Occupied'), findsOneWidget);
-    expect(find.text('QR'), findsNWidgets(2));
+    expect(find.byTooltip('QR'), findsNWidgets(2));
   });
 
   testWidgets('edit controls are hidden without tables.edit', (tester) async {
@@ -93,7 +93,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Add table'), findsNothing);
     expect(find.text('Add floor'), findsNothing);
-    expect(find.text('Delete'), findsNothing);
+    expect(find.byTooltip('Delete'), findsNothing);
   });
 
   testWidgets('tables.edit shows add and delete', (tester) async {
@@ -103,7 +103,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Add table'), findsOneWidget);
     expect(find.text('Add floor'), findsOneWidget);
-    expect(find.text('Delete'), findsNWidgets(2));
+    expect(find.byTooltip('Delete'), findsNWidgets(2));
   });
 
   testWidgets('delete warns the printed QR will stop working', (tester) async {
@@ -111,9 +111,32 @@ void main() {
       _app(permissions: const {'tables.view', 'tables.edit'}),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Delete').first);
+    await tester.tap(find.byTooltip('Delete').first);
     await tester.pumpAndSettle();
     expect(find.textContaining('will stop working'), findsOneWidget);
+  });
+
+  testWidgets('narrow screen with large text does not overflow', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final prev = FlutterError.onError;
+    FlutterError.onError = (d) => debugPrint(d.toString());
+    addTearDown(() => FlutterError.onError = prev);
+    await tester.pumpWidget(
+      MediaQuery(
+        data: const MediaQueryData(
+          size: Size(320, 640),
+          textScaler: TextScaler.linear(1.5),
+        ),
+        child: _app(permissions: const {'tables.view', 'tables.edit'}),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.byTooltip('Delete'), findsNWidgets(2));
   });
 
   testWidgets('without tables.view it shows the locked door', (tester) async {

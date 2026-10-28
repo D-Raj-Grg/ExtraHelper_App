@@ -252,9 +252,9 @@ class _Body extends ConsumerWidget {
                 if (onAddFloor != null) ...[
                   const SizedBox(height: 16),
                   Center(
-                    child: OutlinedButton.icon(
+                    child: FilledButton.tonalIcon(
                       onPressed: onAddFloor,
-                      style: OutlinedButton.styleFrom(
+                      style: FilledButton.styleFrom(
                         minimumSize: const Size(0, Tokens.tapTarget),
                       ),
                       icon: const Icon(Icons.layers_outlined),
@@ -282,14 +282,19 @@ class _Body extends ConsumerWidget {
           onRefresh: onRefresh,
           child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
+            padding: EdgeInsets.fromLTRB(
+              12,
+              8,
+              12,
+              96 + MediaQuery.viewPaddingOf(context).bottom,
+            ),
             children: [
               if (onAddFloor != null)
                 Align(
                   alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
+                  child: FilledButton.tonalIcon(
                     onPressed: onAddFloor,
-                    style: OutlinedButton.styleFrom(
+                    style: FilledButton.styleFrom(
                       minimumSize: const Size(0, Tokens.tapTarget),
                     ),
                     icon: const Icon(Icons.layers_outlined),
@@ -298,7 +303,7 @@ class _Body extends ConsumerWidget {
                 ),
               for (final g in groups) ...[
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 12, 4, 8),
+                  padding: const EdgeInsets.fromLTRB(4, 20, 4, 8),
                   child: Text(
                     g.name,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -314,19 +319,31 @@ class _Body extends ConsumerWidget {
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: [
-                    for (final t in g.tables)
-                      _TableAdminCard(
-                        key: ValueKey(t.id),
-                        table: t,
-                        canEdit: canEdit,
-                        onQr: () => onQr(t),
-                        onDelete: () => onDelete(t),
-                      ),
-                  ],
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: 190,
+                    mainAxisSpacing: 10,
+                    crossAxisSpacing: 10,
+                    // Grows with the OS text size so the card never clips.
+                    mainAxisExtent:
+                        140 *
+                        MediaQuery.textScalerOf(
+                          context,
+                        ).scale(1).clamp(1.0, 1.8),
+                  ),
+                  itemCount: g.tables.length,
+                  itemBuilder: (_, i) {
+                    final t = g.tables[i];
+                    return _TableAdminCard(
+                      key: ValueKey(t.id),
+                      table: t,
+                      canEdit: canEdit,
+                      onQr: () => onQr(t),
+                      onDelete: () => onDelete(t),
+                    );
+                  },
                 ),
               ],
             ],
@@ -356,94 +373,106 @@ class _TableAdminCard extends StatelessWidget {
     final theme = Theme.of(context);
     final color = tableStateColor(context, table.state);
     final stateLabel = tableStateLabel(table.state);
-    return Container(
-      width: 168,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-        borderRadius: BorderRadius.circular(Tokens.radiusMd),
+    return Material(
+      color: theme.colorScheme.surfaceContainerLow,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Tokens.radiusLg),
+        side: BorderSide(color: theme.colorScheme.outlineVariant),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onQr,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 4, 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              TableGlyph(
-                seats: table.capacity,
-                filled: !table.isFree,
-                size: 44,
-                color: color,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Row(
                   children: [
-                    Text(
-                      table.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                    TableGlyph(
+                      seats: table.capacity,
+                      filled: !table.isFree,
+                      size: 44,
+                      color: color,
                     ),
-                    Text(
-                      '${table.capacity} seats',
-                      style: theme.textTheme.bodySmall,
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            table.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          Text(
+                            '${table.capacity} seats',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Semantics(
-            label: 'Status: $stateLabel',
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                stateLabel,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: color,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: TextButton.icon(
-                  onPressed: onQr,
-                  style: TextButton.styleFrom(
-                    minimumSize: const Size(0, Tokens.tapTarget),
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
+              const SizedBox(height: 8),
+              Semantics(
+                label: 'Status: $stateLabel',
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
                   ),
-                  icon: const Icon(Icons.qr_code_2, size: 20),
-                  label: const Text('QR'),
-                ),
-              ),
-              if (canEdit)
-                Expanded(
-                  child: TextButton.icon(
-                    onPressed: onDelete,
-                    style: TextButton.styleFrom(
-                      minimumSize: const Size(0, Tokens.tapTarget),
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      foregroundColor: theme.colorScheme.error,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    stateLabel,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: color,
+                      fontWeight: FontWeight.w700,
                     ),
-                    icon: const Icon(Icons.delete_outline, size: 20),
-                    label: const Text('Delete'),
                   ),
                 ),
+              ),
+              const Spacer(),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  IconButton(
+                    onPressed: onQr,
+                    tooltip: 'QR',
+                    constraints: const BoxConstraints.tightFor(
+                      width: Tokens.tapTarget,
+                      height: Tokens.tapTarget,
+                    ),
+                    color: theme.colorScheme.onSurface,
+                    icon: const Icon(Icons.qr_code_2),
+                  ),
+                  if (canEdit)
+                    IconButton(
+                      onPressed: onDelete,
+                      tooltip: 'Delete',
+                      constraints: const BoxConstraints.tightFor(
+                        width: Tokens.tapTarget,
+                        height: Tokens.tapTarget,
+                      ),
+                      color: theme.colorScheme.error,
+                      icon: const Icon(Icons.delete_outline),
+                    ),
+                ],
+              ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }
