@@ -142,6 +142,7 @@ void main() {
       String status = 'open',
       List<DiscountRow> discounts = const [],
       String? orderId = 'o1',
+      bool empty = false,
     }) => BillSnapshot(
       orderId: orderId,
       bill: Bill(
@@ -156,15 +157,17 @@ void main() {
         roundingCents: 0,
         totalCents: totalCents,
       ),
-      lines: const [
-        BillLine(
-          id: 'l1',
-          description: 'Dal bhat',
-          qty: 1,
-          unitPriceCents: 500,
-          totalCents: 500,
-        ),
-      ],
+      lines: empty
+          ? const []
+          : const [
+              BillLine(
+                id: 'l1',
+                description: 'Dal bhat',
+                qty: 1,
+                unitPriceCents: 500,
+                totalCents: 500,
+              ),
+            ],
       payments: payments,
       charges: const [],
       discounts: discounts,
@@ -222,6 +225,50 @@ void main() {
     test('a settled bill takes no more money, whatever it shows', () {
       final s = snapshotWith(totalCents: 1000, status: 'paid');
       expect(s.canTakePayment, isFalse);
+    });
+
+    test('coveredByPayments: nothing to bill, money held covers the total', () {
+      // The stranded C2 shape: every dish voided after a part payment.
+      final stranded = snapshotWith(
+        totalCents: 0,
+        status: 'partial',
+        payments: [paid(10000)],
+        empty: true,
+      );
+      expect(stranded.coveredByPayments, isTrue);
+      expect(stranded.canTakePayment, isFalse);
+
+      // Still has dishes, or isn't covered, or is already settled: not this case.
+      expect(
+        snapshotWith(
+          totalCents: 0,
+          status: 'partial',
+          payments: [paid(100)],
+        ).coveredByPayments,
+        isFalse,
+      );
+      expect(
+        snapshotWith(
+          totalCents: 500,
+          status: 'partial',
+          payments: [paid(100)],
+          empty: true,
+        ).coveredByPayments,
+        isFalse,
+      );
+      expect(
+        snapshotWith(
+          totalCents: 0,
+          status: 'paid',
+          payments: [paid(100)],
+          empty: true,
+        ).coveredByPayments,
+        isFalse,
+      );
+      expect(
+        snapshotWith(totalCents: 0, empty: true).coveredByPayments,
+        isFalse,
+      );
     });
 
     test('item total is the lines, before any bill-level arithmetic', () {

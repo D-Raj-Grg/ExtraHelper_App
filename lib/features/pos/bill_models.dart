@@ -557,6 +557,19 @@ class BillSnapshot {
       billedOrderIds.isNotEmpty &&
       ((bill.status == 'open' && payments.isEmpty) || bill.status == 'void');
 
+  /// Nothing left to bill, and the money already taken covers the total — every
+  /// dish voided after a part payment. `record_payment` refuses a payment of 0,
+  /// so the bill can never reach `paid` on its own; `close_covered_bill` keeps
+  /// the money (the overage becomes tip) and frees the table. The other way
+  /// out is Refund, then Cancel order. Gross payments are enough here: a
+  /// refund on an open or part-paid bill only ever lowers the money held, and
+  /// the server re-checks the net.
+  bool get coveredByPayments =>
+      (bill.status == 'open' || bill.status == 'partial') &&
+      lines.isEmpty &&
+      paidCents > 0 &&
+      paidCents >= bill.totalCents;
+
   /// Money has been taken and not all of it given back: the Refund button's
   /// condition. `refund_payment` only asks for money held, so a part-paid bill
   /// qualifies — the app used to offer Refund on `paid` alone, which left a

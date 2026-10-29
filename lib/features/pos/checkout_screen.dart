@@ -563,6 +563,28 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     }
   }
 
+  /// Keep the money on a bill that owes nothing and close it. The server books
+  /// any overage as tip and frees the table; we only leave the screen.
+  Future<void> _keepAndClose(BillSnapshot snapshot, String currency) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await ref
+          .read(billSnapshotProvider(widget.billId).notifier)
+          .mutate((repo) => repo.closeCoveredBill(billId: widget.billId));
+      if (!mounted) return;
+      _say('Bill closed — ${money(snapshot.paidCents, currency)} kept as tip.');
+      unawaited(Navigator.of(context).maybePop());
+    } on PosFailure catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _refund(BillSnapshot snapshot, String currency) async {
     final result = await showRefundSheet(
       context: context,
@@ -732,6 +754,9 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                       ref.watch(canRefundProvider)
                   ? () => _refund(s, currency)
                   : null,
+              onKeepAndClose: s.coveredByPayments && online && !_busy
+                  ? () => _keepAndClose(s, currency)
+                  : null,
             );
           },
         ),
@@ -754,6 +779,7 @@ class _Body extends StatelessWidget {
     required this.canAddItems,
     required this.onAddItems,
     required this.onRefund,
+    this.onKeepAndClose,
     this.canCancel = false,
     this.onCancel,
   });
@@ -797,6 +823,10 @@ class _Body extends StatelessWidget {
   /// The mirror image: only on a bill that *is* settled, and only with
   /// `payment.refund`.
   final VoidCallback? onRefund;
+
+  /// The bill holds its whole total and has nothing left to bill; keep the
+  /// money and close it. Null while busy, offline or when it doesn't apply.
+  final VoidCallback? onKeepAndClose;
 
   @override
   Widget build(BuildContext context) {
@@ -902,6 +932,22 @@ class _Body extends StatelessWidget {
           CheckoutCard(
             title: 'Add another order',
             child: MergeCard(orders: snapshot.mergeable, onMerge: onMerge),
+          ),
+        ],
+        if (onKeepAndClose != null) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: onKeepAndClose,
+              icon: const Icon(Icons.check, size: 18),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(0, Tokens.tapTarget),
+              ),
+              label: Text(
+                'Keep ${money(snapshot.paidCents, currency)} as tip & close',
+              ),
+            ),
           ),
         ],
         if (onRefund != null) ...[

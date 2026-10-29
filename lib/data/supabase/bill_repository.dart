@@ -665,6 +665,14 @@ class BillRepository {
     }, "Couldn't leave this bill unpaid.");
   }
 
+  /// Close a bill that already holds at least its total and has nothing left to
+  /// bill: the money stays, any overage is booked as tip, the table frees.
+  Future<void> closeCoveredBill({required String billId}) {
+    return _write('close_covered_bill', {
+      '_bill_id': billId,
+    }, "Couldn't close this bill.");
+  }
+
   /// The tenant's guests, for the picker. Newest first when nothing is typed.
   ///
   /// Capped, like the web's till load: an unbounded select would ship the whole
