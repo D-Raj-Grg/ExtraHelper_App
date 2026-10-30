@@ -31,7 +31,7 @@ void main() {
 
   group('receiptFileName', () {
     test('carries the same eight characters the slip quotes', () {
-      expect(receiptFileName(_bill()), 'receipt-BILL-111-20260813-1942.png');
+      expect(receiptFileName(_bill()), 'receipt-BILL-111-20260813-1942.pdf');
     });
 
     test('a short id is not cut into', () {

@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:ui' as ui;
 
 import 'package:extrahelper/core/widgets/earlier_day_chip.dart';
 import 'package:extrahelper/data/supabase/tenant_repository.dart';
@@ -227,22 +226,16 @@ void main() {
       await _tapShare(tester, requests);
       expect(requests, hasLength(1), reason: 'one tap, one share');
 
-      late ui.Image decoded;
-      await tester.runAsync(() async {
-        decoded = await decodeImageFromList(
-          await File(requests.single.file.path).readAsBytes(),
-        );
-      });
+      final (width, height) = _embeddedImageSize(requests.single.file);
 
       // The test window is 800×600. A picture several times taller than it is
       // wide can only have come from a document that was never on screen.
-      expect(decoded.height, greaterThan(decoded.width * 4));
+      expect(height, greaterThan(width * 4));
       expect(
-        decoded.height,
+        height,
         lessThanOrEqualTo(kBillExportMaxPx.round()),
         reason: 'a long bill loses sharpness rather than a texture allocation',
       );
-      decoded.dispose();
     });
 
     testWidgets('a bill that fits goes out at full sharpness', (tester) async {
@@ -259,17 +252,12 @@ void main() {
       await tester.pumpAndSettle();
       await _tapShare(tester, requests);
 
-      late ui.Image decoded;
-      await tester.runAsync(() async {
-        decoded = await decodeImageFromList(
-          await File(requests.single.file.path).readAsBytes(),
-        );
-      });
-
       // 380 logical × 3 — sharp enough that a payment QR photographed off the
       // picture still scans.
-      expect(decoded.width, kBillExportTargetPx.round());
-      decoded.dispose();
+      expect(
+        _embeddedImageSize(requests.single.file).$1,
+        kBillExportTargetPx.round(),
+      );
     });
 
     testWidgets('the picture is named for the invoice a guest would quote', (
@@ -292,6 +280,9 @@ void main() {
       expect(requests, hasLength(1));
       final req = requests.single;
       expect(req.file.path, contains('receipt-BILL-111-'));
+      expect(req.file.path, endsWith('.pdf'));
+      expect(req.mimeType, 'application/pdf');
+      expect(String.fromCharCodes(req.file.readAsBytesSync().take(5)), '%PDF-');
       expect(req.text, contains('#BILL-111'));
       // Null here is what leaves the iPad share sheet pointing at nothing.
       expect(req.origin.width, greaterThan(0));
@@ -314,7 +305,7 @@ void main() {
       await tester.pumpAndSettle();
 
       final button = tester.widget<IconButton>(
-        find.widgetWithIcon(IconButton, Icons.ios_share),
+        find.widgetWithIcon(IconButton, Icons.download_outlined),
       );
       expect(
         button.onPressed,
@@ -327,18 +318,27 @@ void main() {
       await tester.pumpWidget(_app(_snapshot(status: 'void')));
       await tester.pumpAndSettle();
 
-      expect(find.byIcon(Icons.ios_share), findsOneWidget);
+      expect(find.byIcon(Icons.download_outlined), findsOneWidget);
     });
   });
 }
 
-/// Tap Share and let it finish.
+/// Pixel size of the picture embedded in a receipt PDF, read from the image
+/// dictionary (`/Width n` / `/Height n`), which the pdf package writes as text.
+(int, int) _embeddedImageSize(File pdf) {
+  final text = String.fromCharCodes(pdf.readAsBytesSync());
+  int read(String key) =>
+      int.parse(RegExp('/$key (\\d+)').firstMatch(text)!.group(1)!);
+  return (read('Width'), read('Height'));
+}
+
+/// Tap Download and let it finish.
 ///
 /// Alternating `pump` and `runAsync` is the whole trick: the frames the capture
 /// waits on only happen under `pump`, and `toImage` plus writing the file only
 /// happen under `runAsync`, which is where real async is allowed.
 Future<void> _tapShare(WidgetTester tester, List<ShareRequest> requests) async {
-  await tester.tap(find.byIcon(Icons.ios_share));
+  await tester.tap(find.byIcon(Icons.download_outlined));
   // Generous: rasterising and PNG-encoding a long document takes real time, and
   // more of it when the whole suite is running at once.
   for (var i = 0; i < 300 && requests.isEmpty; i++) {

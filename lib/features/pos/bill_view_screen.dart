@@ -111,13 +111,18 @@ class _BillViewScreenState extends ConsumerState<BillViewScreen> {
     }
   }
 
-  /// Send the receipt as a picture of itself.
+  /// Hand the receipt over as a PDF of itself: the phone's save / send sheet
+  /// opens with one file (Save to Files, AirDrop, WhatsApp, a printer app).
   ///
   /// Deliberately not gated on connectivity, unlike printing: the bill is
   /// already in hand and the picture is made on the device, so a cashier with
   /// no signal can still hand a guest their receipt over whatever messenger
   /// has a cached connection.
-  Future<void> _share(BillSnapshot s, String currency, String shopName) async {
+  Future<void> _download(
+    BillSnapshot s,
+    String currency,
+    String shopName,
+  ) async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
@@ -155,7 +160,18 @@ class _BillViewScreenState extends ConsumerState<BillViewScreen> {
       if (boundary == null) {
         throw const BillExportFailure("Couldn't draw the receipt to send.");
       }
-      final file = await writeReceiptPng(await capturePng(boundary), s.bill);
+      // Bounded: a capture that never finishes would leave the button disabled
+      // and silent, which is the failure this replaced.
+      final file =
+          await (() async => writeReceiptPdf(
+            await capturePng(boundary),
+            s.bill,
+          ))().timeout(
+            const Duration(seconds: 30),
+            onTimeout: () => throw const BillExportFailure(
+              'Drawing the receipt took too long.',
+            ),
+          );
       if (!mounted) return;
 
       await ref.read(fileSharerProvider)(
@@ -166,6 +182,7 @@ class _BillViewScreenState extends ConsumerState<BillViewScreen> {
               '#${s.bill.id.substring(0, 8).toUpperCase()}'
               '${shopName.isEmpty ? '' : ' · $shopName'}',
           origin: shareOriginOf(_shareKey),
+          mimeType: 'application/pdf',
         ),
       );
 
@@ -178,7 +195,9 @@ class _BillViewScreenState extends ConsumerState<BillViewScreen> {
     } on BillExportFailure catch (e) {
       _say(e.message);
     } catch (e) {
-      _say("Couldn't send the receipt.");
+      // The reason goes on screen: a silent failure here is what "the button
+      // does nothing" looked like, and nobody could say why.
+      _say("Couldn't download the receipt: $e");
     } finally {
       if (mounted) {
         setState(() {
@@ -224,9 +243,9 @@ class _BillViewScreenState extends ConsumerState<BillViewScreen> {
             // evidence, and the header stamps the status on it.
             onPressed: _busy
                 ? null
-                : () => _share(s, currency, tenant?.name ?? ''),
-            icon: const Icon(Icons.ios_share),
-            tooltip: 'Share receipt',
+                : () => _download(s, currency, tenant?.name ?? ''),
+            icon: const Icon(Icons.download_outlined),
+            tooltip: 'Download receipt',
           ),
       ],
       bottomNavigationBar: switch (snapshot.valueOrNull) {

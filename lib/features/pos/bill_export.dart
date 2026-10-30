@@ -4,11 +4,14 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/tokens.dart';
@@ -154,7 +157,12 @@ double exportPixelRatio(Size logical) {
 /// last recorded, so a boundary a viewport never painted throws. See the
 /// off-screen host in `bill_view_screen.dart` for why it is not in the list.
 Future<Uint8List> capturePng(RenderRepaintBoundary boundary) async {
-  if (boundary.debugNeedsPaint) {
+  // `debugNeedsPaint` is debug-only: in a release build the getter throws
+  // LateInitializationError ("Local 'result' has not been initialized"), which
+  // is what made Share silently fail on every TestFlight build while every
+  // test, which runs with asserts on, passed. Release gets the `toImage`
+  // failure path below instead.
+  if (kDebugMode && boundary.debugNeedsPaint) {
     throw const BillExportFailure("Couldn't draw the receipt to send.");
   }
   ui.Image image;
@@ -183,12 +191,12 @@ Future<Uint8List> capturePng(RenderRepaintBoundary boundary) async {
   }
 }
 
-/// `receipt-1A2B3C4D-20260813-1942.png`.
+/// `receipt-1A2B3C4D-20260813-1942.pdf`.
 ///
 /// The name lands in the recipient's chat and in their downloads, so it carries
 /// the same eight invoice characters the slip, checkout and this screen show —
 /// a guest querying a charge quotes those.
-String receiptFileName(Bill bill) {
+String receiptFileName(Bill bill, {String ext = 'pdf'}) {
   final at = bill.createdAt.toLocal();
   String two(int n) => n.toString().padLeft(2, '0');
   final stamp =
@@ -196,22 +204,52 @@ String receiptFileName(Bill bill) {
   final invoice = bill.id.length >= 8
       ? bill.id.substring(0, 8).toUpperCase()
       : bill.id.toUpperCase();
-  return 'receipt-$invoice-$stamp.png';
+  return 'receipt-$invoice-$stamp.$ext';
 }
 
-/// Write the picture somewhere a share sheet can reach it.
+/// Page width of the downloaded receipt, in millimetres.
 ///
-/// The cache directory, not documents: documents is the drift database's home
-/// and is backed up to iCloud, and a receipt is a thing in flight, not a thing
-/// kept.
-Future<File> writeReceiptPng(Uint8List png, Bill bill) async {
+/// Narrow on purpose: it is a slip, not an A4 letter, so it reads at full width
+/// on a phone and prints as a slip. The height follows the picture, so a long
+/// bill is still one page.
+const double kReceiptPdfWidthMm = 100;
+
+/// Wrap the photographed document in a single-page PDF.
+///
+/// The picture is embedded as-is rather than redrawing the receipt in PDF
+/// primitives: `BillPaper` is the one renderer of what a bill says, and a
+/// second one would drift. Full resolution is kept, so the payment QR scans off
+/// the PDF as well as off the screen.
+Future<Uint8List> buildReceiptPdf(Uint8List png, Bill bill) async {
+  final image = pw.MemoryImage(png);
+  final width = kReceiptPdfWidthMm * PdfPageFormat.mm;
+  final ratio = (image.height ?? 1) / (image.width ?? 1);
+  final doc = pw.Document(
+    title:
+        '${bill.isPaid ? 'Receipt' : 'Bill'} '
+        '#${bill.id.substring(0, 8).toUpperCase()}',
+    creator: 'ExtraHelper',
+  );
+  doc.addPage(
+    pw.Page(
+      pageFormat: PdfPageFormat(width, width * ratio),
+      margin: pw.EdgeInsets.zero,
+      build: (_) => pw.Image(image, fit: pw.BoxFit.fill),
+    ),
+  );
+  return doc.save();
+}
+
+/// Write the receipt PDF somewhere a share sheet can reach it.
+Future<File> writeReceiptPdf(Uint8List png, Bill bill) async {
+  final pdf = await buildReceiptPdf(png, bill);
   final dir = Directory(
     p.join((await getTemporaryDirectory()).path, 'receipts'),
   );
   await dir.create(recursive: true);
   await sweepOldReceipts(dir);
   final file = File(p.join(dir.path, receiptFileName(bill)));
-  await file.writeAsBytes(png, flush: true);
+  await file.writeAsBytes(pdf, flush: true);
   return file;
 }
 
@@ -281,7 +319,11 @@ class ShareRequest {
     required this.file,
     required this.text,
     required this.origin,
+    this.mimeType,
   });
+
+  /// Null means "from the file's extension" — see `sharePlusSharer`.
+  final String? mimeType;
 
   final File file;
   final String text;

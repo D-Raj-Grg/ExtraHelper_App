@@ -11,7 +11,7 @@ import '../../features/pos/bill_export.dart';
 Future<bool> sharePlusSharer(ShareRequest request) async {
   final result = await SharePlus.instance.share(
     ShareParams(
-      files: [XFile(request.file.path, mimeType: 'image/png')],
+      files: [XFile(request.file.path, mimeType: _mimeOf(request))],
       text: request.text,
       // iPad presents the sheet as a popover; without an anchor it lands in the
       // middle of the screen pointing at nothing.
@@ -22,3 +22,11 @@ Future<bool> sharePlusSharer(ShareRequest request) async {
   // someone changes their mind.
   return result.status == ShareResultStatus.success;
 }
+
+/// A PDF labelled as a PNG is offered to the wrong apps on Android, so the type
+/// follows the file unless the caller said otherwise.
+String _mimeOf(ShareRequest request) =>
+    request.mimeType ??
+    (request.file.path.toLowerCase().endsWith('.pdf')
+        ? 'application/pdf'
+        : 'image/png');
